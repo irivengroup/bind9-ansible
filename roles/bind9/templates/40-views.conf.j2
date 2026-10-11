@@ -1,0 +1,25 @@
+// Peer view first: authoritative zone owner and TSIG transfer endpoint.
+view "peer" IN {
+    match-clients { {{ bind_primary_back_ip }}; {{ bind_secondary_back_ip }}; key "{{ bind_tsig_name }}"; };
+    match-destinations { {{ bind_back_ip }}; };
+    recursion no;
+    allow-query { {{ bind_primary_back_ip }}; {{ bind_secondary_back_ip }}; key "{{ bind_tsig_name }}"; };
+    allow-query-cache { none; };
+    include "/etc/named/zones/10-authoritative-zones.conf";
+};
+// External clients share the peer view's authoritative zones via in-view.
+view "external" IN {
+    match-clients { external_clients; };
+    match-destinations { {{ bind_front_ip }}; };
+    recursion yes;
+    allow-recursion { external_clients; };
+    allow-query-cache { external_clients; };
+    allow-query { external_clients; };
+    include "/etc/named/zones/20-forward-zones.conf";
+};
+view "deny" IN {
+    match-clients { any; };
+    recursion no;
+    allow-query { none; };
+    allow-query-cache { none; };
+};

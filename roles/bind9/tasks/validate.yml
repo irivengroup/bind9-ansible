@@ -1,0 +1,121 @@
+---
+- name: Validate supported platform and mandatory inputs
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == 'RedHat'
+      - ansible_distribution_major_version == '8'
+      - bind_role in ['primary', 'secondary']
+      - bind_front_ip is defined
+      - bind_back_ip is defined
+      - bind_front_ip != bind_back_ip
+      - bind_front_interface is defined
+      - bind_back_interface is defined
+      - bind_front_interface != bind_back_interface
+      - bind_tsig_secret | length >= 32
+      - bind_external_clients | length > 0
+      - bind_forward_zones | length > 0
+      - bind_primary_back_ip != bind_secondary_back_ip
+      - bind_authoritative_zones | length > 0
+      - (bind_authoritative_zones | map(attribute='domain') | list | unique | length) == (bind_authoritative_zones | length)
+      - (bind_authoritative_zones | map(attribute='domain') | list | intersect(bind_forward_zones | map(attribute='domain') | list) | length) == 0
+      - bind_primary_front_ip is defined
+      - bind_secondary_front_ip is defined
+      - (bind_forward_zones | map(attribute='domain') | list | unique | length) == (bind_forward_zones | length)
+    fail_msg: 'Invalid RHEL 8 BIND settings, zone overlap or TSIG secret.'
+  no_log: true
+- name: Validate configured peer identity
+  ansible.builtin.assert:
+    that:
+      - (bind_role == 'primary' and bind_back_ip == bind_primary_back_ip) or (bind_role == 'secondary' and bind_back_ip == bind_secondary_back_ip)
+    fail_msg: 'Local back address does not match declared DNS role.'
+
+- name: Validate each conditional forwarding zone
+  ansible.builtin.assert:
+    that:
+      - item.domain is defined
+      - item.domain | length > 0
+      - item.domain != '.'
+      - "'*' not in item.domain"
+      - item.policy | default('only') == 'only'
+      - item.forwarders is defined
+      - item.forwarders | length > 0
+    fail_msg: 'Invalid forwarding zone; use domain, forwarders and policy only.'
+  loop: "{{ bind_forward_zones }}"
+  loop_control:
+    label: "{{ item.domain | default('undefined') }}"
+
+- name: Validate each forwarding destination
+  ansible.builtin.assert:
+    that:
+      - item.1.address is defined
+      - item.1.address | length > 0
+      - item.1.port | default(53) | int >= 1
+      - item.1.port | default(53) | int <= 65535
+    fail_msg: 'Invalid forwarding server address or port.'
+  loop: "{{ bind_forward_zones | subelements('forwarders') }}"
+  loop_control:
+    label: "{{ item.0.domain }}"
+
+- name: Reject overlapping conditional DNS suffixes
+  ansible.builtin.assert:
+    that:
+      - >-
+        (bind_forward_zones | selectattr('domain', 'equalto', item.domain) | list | length) == 1
+      - >-
+        (bind_forward_zones | rejectattr('domain', 'equalto', item.domain)
+        | selectattr('domain', 'match', '.*') | map(attribute='domain')
+        | select('search', '\.' ~ (item.domain | regex_escape) ~ '$') | list | length) == 0
+    fail_msg: 'Nested conditional zones require explicit review; avoid ambiguous DNS routing.'
+  loop: "{{ bind_forward_zones }}"
+  loop_control:
+    label: "{{ item.domain }}"
+
+- name: Reject malformed DNS suffixes
+  ansible.builtin.assert:
+    that:
+      - item.domain is match('(?i)^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$')
+    fail_msg: 'Forward zone must be a syntactically valid DNS suffix.'
+  loop: "{{ bind_forward_zones }}"
+  loop_control:
+    label: "{{ item.domain }}"
+
+- name: Validate authoritative zone definitions
+  ansible.builtin.assert:
+    that:
+      - item.domain is match('(?i)^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$')
+      - item.serial is defined
+      - item.serial | string is match('^[0-9]{1,10}$')
+      - item.serial | int > 0
+      - item.serial | int <= 4294967295
+      - item.ttl | default(300) | int >= 0
+      - item.records | default([]) is sequence
+      - "'*' not in item.domain"
+    fail_msg: 'Invalid authoritative zone definition.'
+  loop: "{{ bind_authoritative_zones }}"
+  loop_control:
+    label: "{{ item.domain }}"
+
+- name: Reject overlapping authoritative and forwarded suffixes
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (item.0.domain == item.1.domain or
+        item.0.domain.endswith('.' ~ item.1.domain) or
+        item.1.domain.endswith('.' ~ item.0.domain))
+    fail_msg: 'Authoritative and forwarded zones cannot overlap.'
+  loop: "{{ bind_authoritative_zones | product(bind_forward_zones) | list }}"
+  loop_control:
+    label: "{{ item.0.domain }} / {{ item.1.domain }}"
+
+- name: Validate authoritative resource records
+  ansible.builtin.assert:
+    that:
+      - item.1.name is match('(?i)^(?:@|\*|[a-z0-9_-]+(?:\.[a-z0-9_-]+)*)$')
+      - item.1.type in ['A', 'AAAA', 'CNAME', 'TXT', 'MX', 'PTR', 'SRV', 'CAA']
+      - item.1.value is defined
+      - item.1.value | string | length > 0
+      - "'\n' not in item.1.value | string"
+    fail_msg: 'Invalid DNS resource record.'
+  loop: "{{ bind_authoritative_zones | subelements('records', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.0.domain }} / {{ item.1.name }}"

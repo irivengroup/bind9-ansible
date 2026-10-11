@@ -1,0 +1,16 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install ansible-core==2.16.14 pytest pyyaml
+      - run: ansible-playbook -i inventory/hosts.ini playbooks/site.yml --syntax-check
+      - run: python -m pytest -q tests
+      - run: python -m compileall -q tests
+      - run: bash -n roles/bind9/files/bind-migrate.sh roles/bind9/files/Bind9Project-healthcheck
+      - run: python -m py_compile roles/bind9/files/Bind9Project-transaction

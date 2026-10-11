@@ -1,0 +1,25 @@
+---
+- name: Install local root refusal zone
+  ansible.builtin.template:
+    src: empty-root.zone.j2
+    dest: /var/named/empty-root.zone
+    owner: root
+    group: named
+    mode: '0640'
+    backup: true
+  notify: Reload named configuration
+
+- name: Install primary authoritative zones
+  ansible.builtin.template:
+    src: authoritative.zone.j2
+    dest: "/var/named/zones/{{ auth_zone.domain }}.zone"
+    owner: root
+    group: named
+    mode: '0640'
+    backup: true
+  loop: "{{ bind_authoritative_zones }}"
+  loop_control:
+    loop_var: auth_zone
+    label: "{{ auth_zone.domain }}"
+  when: bind_role == 'primary'
+  notify: Reload named configuration

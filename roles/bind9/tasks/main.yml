@@ -1,0 +1,75 @@
+---
+- name: Validate named inputs
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Reject unsafe filesystem paths
+  ansible.builtin.import_tasks: path_safety.yml
+
+- name: Verify local primary before secondary deployment
+  ansible.builtin.import_tasks: primary_readiness.yml
+  when: bind_role == 'secondary'
+
+- name: Install dependencies
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Back up the existing BIND configuration
+  ansible.builtin.import_tasks: migration.yml
+
+- name: Prepare managed directories
+  ansible.builtin.import_tasks: directories.yml
+
+- name: Prepare transaction controller
+  ansible.builtin.import_tasks: transaction.yml
+
+- name: Apply DNS changes with rollback on failure
+  block:
+    - name: Install modular configuration
+      ansible.builtin.import_tasks: configuration.yml
+
+    - name: Install authoritative zone files
+      ansible.builtin.import_tasks: zones.yml
+
+    - name: Configure SELinux and resource limits
+      ansible.builtin.import_tasks: security.yml
+
+    - name: Validate BIND and zones
+      ansible.builtin.import_tasks: verify.yml
+
+    - name: Start or reload BIND
+      ansible.builtin.import_tasks: service.yml
+
+    - name: Verify DNS queries and SOA consistency
+      ansible.builtin.import_tasks: health.yml
+
+    - name: Commit the successful deployment
+      ansible.builtin.command:
+        argv: [/usr/local/sbin/named-transaction, commit]
+      changed_when: true
+
+  rescue:
+    - name: Restore files from the deployment snapshot
+      ansible.builtin.command:
+        argv: >-
+          {{ ['/usr/local/sbin/named-transaction', 'restore'] +
+          (bind_authoritative_zones | map(attribute='domain') | map('regex_replace', '^', '--zone=') | list) }}
+      register: bind_rollback
+      changed_when: true
+
+    - name: Restart restored BIND configuration
+      ansible.builtin.systemd:
+        name: named
+        state: restarted
+        daemon_reload: true
+      when: bind_rollback is succeeded
+
+    - name: Stop deployment after rollback
+      ansible.builtin.fail:
+        msg: 'named deployment failed; managed files restored. Inspect service and logs.'
+
+- name: Apply restrictive firewall rules after healthy DNS deployment
+  ansible.builtin.import_tasks: firewalld.yml
+  when: bind_firewalld_enabled | bool
+
+- name: Configure periodic DNS health monitoring
+  ansible.builtin.import_tasks: monitoring.yml
+  when: bind_monitoring_enabled | bool

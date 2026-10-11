@@ -1,0 +1,15 @@
+{% for auth_zone in bind_authoritative_zones %}
+zone "{{ auth_zone.domain }}" IN { in-view "peer"; };
+{% endfor %}
+{% for zone in bind_forward_zones %}
+zone "{{ zone.domain }}" IN {
+    type forward;
+    forward only;
+    forwarders {
+{% for server in zone.forwarders %}
+        {{ server.address }} port {{ server.port | default(53) }};
+{% endfor %}
+    };
+};
+{% endfor %}
+zone "." IN { in-view "peer"; };

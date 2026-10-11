@@ -1,0 +1,46 @@
+---
+- name: Deploy BIND include files before entrypoint
+  ansible.builtin.template:
+    src: '{{ item }}.j2'
+    dest: '/etc/named/{{ item }}'
+    owner: root
+    group: named
+    mode: '0640'
+    backup: true
+  loop:
+    - 20-acl.conf
+    - 30-options.conf
+    - 40-views.conf
+
+  notify: Reload named configuration
+- name: Deploy zone configuration modules
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/etc/named/zones/{{ item.dest }}"
+    owner: root
+    group: named
+    mode: "0640"
+    backup: true
+  loop:
+    - {src: 10-authoritative-zones.conf.j2, dest: 10-authoritative-zones.conf}
+    - {src: 20-forward-zones.conf.j2, dest: 20-forward-zones.conf}
+  notify: Reload named configuration
+- name: Install shared TSIG key
+  ansible.builtin.template:
+    src: 10-tsig.conf.j2
+    dest: /etc/named/10-tsig.conf
+    owner: root
+    group: named
+    mode: '0640'
+    backup: true
+  no_log: true
+  notify: Reload named configuration
+- name: Deploy main named.conf last
+  ansible.builtin.template:
+    src: named.conf.j2
+    dest: /etc/named.conf
+    owner: root
+    group: named
+    mode: '0640'
+    backup: true
+  notify: Reload named configuration

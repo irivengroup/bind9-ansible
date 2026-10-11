@@ -1,0 +1,3 @@
+acl "external_clients" {
+{% for cidr in bind_external_clients %}    {{ cidr }};
+{% endfor %}};

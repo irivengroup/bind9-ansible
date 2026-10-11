@@ -1,0 +1,14 @@
+---
+- name: Reload named configuration
+  ansible.builtin.systemd:
+    name: named
+    state: reloaded
+- name: Restart named
+  ansible.builtin.systemd:
+    name: named
+    daemon_reload: true
+    state: restarted
+- name: Reload firewalld
+  ansible.builtin.command:
+    argv: [firewall-cmd, --reload]
+  changed_when: true

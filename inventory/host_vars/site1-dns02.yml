@@ -1,0 +1,5 @@
+---
+ansible_host: 10.20.1.12
+bind_front_ip: 192.0.2.12
+bind_back_ip: 10.20.1.12
+bind_role: secondary
