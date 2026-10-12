@@ -16,6 +16,7 @@ bind_forward_zones:
   - address: 10.20.0.99
     port: 53
   policy: only
+  
 bind_authoritative_zones:
 - domain: cloud.example.test
   ttl: 300

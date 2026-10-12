@@ -3,6 +3,6 @@ bind_enable_cgroups: false
 bind_memory_max: 512M
 bind_tasks_max: 256
 bind_cpu_quota: 100%
-bind_backup_root: /var/backups/named/bind
-bind_migration_state_dir: /var/lib/named/bind-migration
+bind_backup_root: /var/backups/dns/bind
+bind_migration_state_dir: /var/lib/dns/bind-migration
 bind_monitoring_enabled: true
