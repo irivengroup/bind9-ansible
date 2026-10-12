@@ -1,0 +1,51 @@
+---
+- name: Ensure administrative commands directory is available in login PATH
+  ansible.builtin.copy:
+    dest: /etc/profile.d/bind9-sbin-path.sh
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      # DNSZIBO: append only when /usr/local/sbin is absent from PATH.
+      case ":${PATH:-}:" in
+        *:/usr/local/sbin:*) ;;
+        *) PATH="${PATH:+${PATH}:}/usr/local/sbin"; export PATH ;;
+      esac
+
+- name: Create systemd override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/named.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: bind_enable_cgroups | bool
+- name: Set optional resource limits
+  ansible.builtin.template:
+    src: limits.conf.j2
+    dest: /etc/systemd/system/named.service.d/limits.conf
+    owner: root
+    group: root
+    mode: '0644'
+  when: bind_enable_cgroups | bool
+  notify: Restart named
+- name: Remove disabled resource limits
+  ansible.builtin.file:
+    path: /etc/systemd/system/named.service.d/limits.conf
+    state: absent
+  when: not bind_enable_cgroups | bool
+  notify: Restart named
+- name: Restore SELinux contexts
+  ansible.builtin.command:
+    argv: [restorecon, -RF, /etc/named.conf, /etc/named, /var/named]
+  changed_when: false
+- name: Verify SELinux file labels are not unlabelled
+  ansible.builtin.command:
+    argv: [ls, -Z, /etc/named/10-tsig.conf]
+  register: bind_selinux_context
+  changed_when: false
+- name: Reject unlabelled TSIG file
+  ansible.builtin.assert:
+    that:
+      - "'unlabeled_t' not in bind_selinux_context.stdout"
+  when: ansible_selinux is defined and ansible_selinux.status == 'enabled'

@@ -1,0 +1,10 @@
+---
+- name: Deploy Bind9-Ansible BIND9 on both sites
+  hosts: dns_deployment_order
+  become: true
+  gather_facts: true
+  order: inventory
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - bind9

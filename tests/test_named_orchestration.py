@@ -6,7 +6,7 @@ TEMPLATES = ROOT / 'roles' / 'bind9' / 'templates'
 
 def test_named_conf_only_includes_modules():
     content = (TEMPLATES / 'named.conf.j2').read_text(encoding='utf-8')
-    statements = [line.strip() for line in content.splitlines() if line.strip() and not line.lstrip().startswith('//')]
+    statements = [line.strip() for line in content.splitlines() if line.strip() and not line.lstrip().startswith('//') and not line.lstrip().startswith('{%')]
     assert statements == [
         f'include "/etc/named/{name}";'
         for name in ('10-tsig.conf', '20-acl.conf', '30-options.conf', '40-views.conf')

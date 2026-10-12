@@ -4,6 +4,6 @@ $TTL {{ auth_zone.ttl | default(300) }}
 @ IN NS ns2.{{ auth_zone.domain }}.
 ns1 IN A {{ hostvars[bind_primary_host].bind_front_ip }}
 ns2 IN A {{ hostvars[bind_secondary_host].bind_front_ip }}
-{% for record in auth_zone.records | default([]) %}
+{% for record in auth_zone.records | default([], true) %}
 {{ record.name }} IN {{ record.type }} {{ record.value }}
 {% endfor %}

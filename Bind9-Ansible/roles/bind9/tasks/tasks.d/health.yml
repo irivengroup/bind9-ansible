@@ -1,0 +1,34 @@
+---
+- name: Check authoritative SOA on the back interface
+  ansible.builtin.command:
+    argv:
+      - dig
+      - +time=3
+      - +tries=2
+      - +norecurse
+      - +noall
+      - +comments
+      - +answer
+      - -b
+      - "{{ bind_back_ip }}"
+      - "@{{ bind_back_ip }}"
+      - "{{ item.domain }}"
+      - SOA
+  loop: "{{ bind_managed_zones }}"
+  loop_control:
+    label: "{{ item.domain }}"
+  register: bind_soa_checks
+  changed_when: false
+  retries: 12
+  delay: 5
+  until: >-
+    bind_soa_checks.rc == 0 and
+    'status: NOERROR' in bind_soa_checks.stdout and
+    bind_soa_checks.stdout is search('flags:.*\baa\b') and
+    (item.serial | string) in bind_soa_checks.stdout
+  failed_when: >-
+    bind_soa_checks.rc != 0 or
+    'status: NOERROR' not in bind_soa_checks.stdout or
+    bind_soa_checks.stdout is not search('flags:.*\baa\b') or
+    (item.serial | string) not in bind_soa_checks.stdout
+

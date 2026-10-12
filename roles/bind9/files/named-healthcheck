@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-[[ $# -ge 2 ]] || { echo 'usage: named-healthcheck LOCAL_BACK_IP ZONE [ZONE...]' >&2; exit 2; }
+[[ $# -ge 1 ]] || { echo 'usage: named-healthcheck LOCAL_BACK_IP [ZONE...]' >&2; exit 2; }
 ip=$1; shift
 systemctl is-active --quiet named || { echo 'CRITICAL named inactive'; exit 2; }
 for zone in "$@"; do

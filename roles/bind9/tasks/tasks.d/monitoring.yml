@@ -1,7 +1,7 @@
 ---
 - name: Install local DNS healthcheck
   ansible.builtin.copy:
-    src: healthcheck
+    src: named-healthcheck
     dest: /usr/local/sbin/named-healthcheck
     owner: root
     group: root

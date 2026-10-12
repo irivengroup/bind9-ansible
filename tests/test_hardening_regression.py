@@ -14,7 +14,7 @@ def test_front_and_peer_views_separated():
 
 
 def test_backup_without_stop_or_delete():
-    text = (ROLE / "files/bind-migrate.sh").read_text()
+    text = (ROLE / "files/bind-backup.sh").read_text()
     assert 'sha256sum --check' in text
     assert 'systemctl stop named' not in text
     assert 'rm -rf' not in text

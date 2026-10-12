@@ -2,7 +2,7 @@
 
 `inventory/hosts.ini` contient uniquement les groupes et les noms d’hôtes.
 
-`inventory/host_vars/<host>.yml` définit `ansible_host`, `bind_front_ip`, `bind_back_ip`, `bind_role`, `bind_front_interface`, `bind_back_interface`.
+`inventory/host_vars/<host>.yml` définit `ansible_host`, `bind_front_ip`, `bind_back_ip`, `bind_front_interface`, `bind_back_interface`.
 
 `inventory/group_vars/site1.yml` et `site3.yml` définissent les politiques et les paramètres TSIG communs au site. **Aucune IP de serveur DNS n’y est déclarée.**
 

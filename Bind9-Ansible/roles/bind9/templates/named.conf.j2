@@ -1,0 +1,6 @@
+include "/etc/named/10-tsig.conf";
+{% if (bind_frontend_clients | default([], true) | length > 0) or (bind_backend_clients | default([], true) | length > 0) %}
+include "/etc/named/20-acl.conf";
+{% endif %}
+include "/etc/named/30-options.conf";
+include "/etc/named/40-views.conf";

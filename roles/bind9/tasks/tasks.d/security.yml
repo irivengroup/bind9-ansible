@@ -1,4 +1,17 @@
 ---
+- name: Ensure administrative commands directory is available in login PATH
+  ansible.builtin.copy:
+    dest: /etc/profile.d/bind9-sbin-path.sh
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      # DNSZIBO: append only when /usr/local/sbin is absent from PATH.
+      case ":${PATH:-}:" in
+        *:/usr/local/sbin:*) ;;
+        *) PATH="${PATH:+${PATH}:}/usr/local/sbin"; export PATH ;;
+      esac
+
 - name: Create systemd override directory
   ansible.builtin.file:
     path: /etc/systemd/system/named.service.d

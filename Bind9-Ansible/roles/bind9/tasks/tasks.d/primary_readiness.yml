@@ -1,0 +1,34 @@
+---
+- name: Wait for local primary DNS TCP listener on back interface
+  ansible.builtin.wait_for:
+    host: "{{ hostvars[bind_primary_host].bind_back_ip }}"
+    port: 53
+    connect_timeout: 3
+    timeout: 30
+    state: started
+  changed_when: false
+
+- name: Verify primary SOA from secondary over back network
+  ansible.builtin.command:
+    argv:
+      - dig
+      - +tcp
+      - +time=3
+      - +tries=1
+      - +norecurse
+      - +noall
+      - +comments
+      - +answer
+      - "@{{ hostvars[bind_primary_host].bind_back_ip }}"
+      - "{{ item.domain }}"
+      - SOA
+  loop: "{{ bind_managed_zones }}"
+  loop_control:
+    label: "{{ item.domain }}"
+  register: bind_primary_soa
+  changed_when: false
+  failed_when: >-
+    bind_primary_soa.rc != 0 or
+    ('status: NOERROR' not in bind_primary_soa.stdout) or
+    (bind_primary_soa.stdout is not search('flags:.*\baa\b')) or
+    (bind_primary_soa.stdout is not search('(?m)^' ~ (item.domain | regex_escape) ~ '\.?\s+\d+\s+IN\s+SOA\s+'))

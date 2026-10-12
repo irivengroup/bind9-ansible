@@ -1,0 +1,45 @@
+---
+- name: Validate declared DNS site group
+  ansible.builtin.assert:
+    that:
+      - bind_site_name is defined
+      - bind_site_name is string
+      - bind_site_name | length > 0
+      - bind_primary_group is defined
+      - bind_secondary_group is defined
+      - bind_primary_group is string
+      - bind_secondary_group is string
+      - bind_primary_group | length > 0
+      - bind_secondary_group | length > 0
+      - bind_primary_group != bind_secondary_group
+      - bind_site_name in group_names
+      - bind_site_name in groups
+      - "bind_primary_group in groups"
+      - "bind_secondary_group in groups"
+    fail_msg: >-
+      Each DNS host must declare bind_site_name through its site group_vars;
+      the group must exist and contain the host. Define the inventory groups specified by bind_primary_group and
+      bind_secondary_group.
+
+- name: Validate DNS site membership
+  ansible.builtin.assert:
+    that:
+      - bind_site_name is defined
+      - (groups[bind_site_name] | intersect(groups[bind_primary_group]) | length) == 1
+      - (groups[bind_site_name] | intersect(groups[bind_secondary_group]) | length) == 1
+    fail_msg: 'Each site requires exactly one primary and one secondary.'
+
+- name: Resolve peer hostnames from inventory membership
+  ansible.builtin.set_fact:
+    bind_primary_host: "{{ (groups[bind_site_name] | intersect(groups[bind_primary_group])) | first }}"
+    bind_secondary_host: "{{ (groups[bind_site_name] | intersect(groups[bind_secondary_group])) | first }}"
+
+- name: Validate required peer host variables
+  ansible.builtin.assert:
+    that:
+      - hostvars[bind_primary_host].bind_back_ip is defined
+      - hostvars[bind_secondary_host].bind_back_ip is defined
+      - hostvars[bind_primary_host].bind_front_ip is defined
+      - hostvars[bind_secondary_host].bind_front_ip is defined
+    fail_msg: 'Missing peer address or inconsistent host_vars role.'
+

@@ -21,7 +21,7 @@ def test_all_bind_paths_use_named_d():
 
 
 def test_single_internal_forwarder_and_fake_dns():
-    defaults = (ROOT / "roles/bind9/defaults/main.yml").read_text()
+    defaults = (ROOT / "inventory/group_vars/all.yml").read_text()
     assert "domain: corp.example.test" in defaults
     assert "domain: fake.example.test" in defaults
 

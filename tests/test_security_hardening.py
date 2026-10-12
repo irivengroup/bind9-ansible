@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ROLE = ROOT / 'roles/bind9'
 
 def test_migration_script_valid():
-    subprocess.run(['bash','-n',str(ROLE/'files/bind-migrate.sh')], check=True)
+    subprocess.run(['bash','-n',str(ROLE/'files/bind-backup.sh')], check=True)
 
 def test_non_destructive_migration():
     tasks = yaml.safe_load((ROLE/'tasks/main.yml').read_text())

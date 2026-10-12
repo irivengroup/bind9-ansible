@@ -22,10 +22,10 @@ def test_no_shadow_variables():
 def test_roles_and_peers_are_inventory_driven():
     for path in (ROOT / 'inventory/host_vars').glob('*.yml'):
         data = yaml.safe_load(path.read_text())
-        assert set(data) == {'bind_front_ip','bind_back_ip','bind_front_interface','bind_back_interface'}
+        assert set(data) == {'ansible_host','bind_front_ip','bind_back_ip','bind_front_interface','bind_back_interface'}
     peers = (ROLE / 'tasks/tasks.d/site_peers.yml').read_text()
-    assert "groups['dns_primary']" in peers
-    assert "groups['dns_secondary']" in peers
+    assert "groups[bind_primary_group]" in peers
+    assert "groups[bind_secondary_group]" in peers
     assert 'bind_primary_host:' in peers and 'bind_secondary_host:' in peers
 
 

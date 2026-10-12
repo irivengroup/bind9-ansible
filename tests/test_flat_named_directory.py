@@ -13,7 +13,7 @@ def test_no_nested_named_d_in_deployment():
 
 
 def test_named_entrypoint_is_includes_only():
-    lines = [s.strip() for s in (TEMPLATES / 'named.conf.j2').read_text().splitlines() if s.strip()]
+    lines = [s.strip() for s in (TEMPLATES / 'named.conf.j2').read_text().splitlines() if s.strip() and not s.lstrip().startswith('{%')]
     assert len(lines) == 4
     assert all(s.startswith('include "/etc/named/') and s.endswith('";') for s in lines)
 

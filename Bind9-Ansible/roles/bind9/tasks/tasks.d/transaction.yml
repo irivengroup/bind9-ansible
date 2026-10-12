@@ -1,0 +1,22 @@
+---
+- name: Install transaction controller
+  ansible.builtin.copy:
+    src: named-transaction
+    dest: /usr/local/sbin/named-transaction
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Refuse to overwrite an interrupted deployment
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/named-transaction, status]
+  register: bind_transaction_status
+  changed_when: false
+  failed_when: bind_transaction_status.stdout | trim != 'CLEAN'
+
+- name: Start a managed-file transaction
+  ansible.builtin.command:
+    argv: >-
+      {{ ['/usr/local/sbin/named-transaction', 'begin'] +
+      ((bind_transaction_zones) | map('regex_replace', '^', '--zone=') | list) }}
+  changed_when: true

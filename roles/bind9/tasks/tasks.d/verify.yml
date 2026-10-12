@@ -23,8 +23,8 @@
       - /usr/sbin/named-checkzone
       - "{{ item.domain }}"
       - "/var/named/zones/{{ item.domain }}.zone"
-  loop: "{{ bind_authoritative_zones }}"
+  loop: "{{ bind_managed_zones }}"
   loop_control:
     label: "{{ item.domain }}"
-  when: "'dns_primary' in group_names"
+  when: "bind_primary_group in group_names"
   changed_when: false

@@ -1,7 +1,7 @@
 ---
 - name: Install transaction controller
   ansible.builtin.copy:
-    src: transaction
+    src: named-transaction
     dest: /usr/local/sbin/named-transaction
     owner: root
     group: root
@@ -18,5 +18,5 @@
   ansible.builtin.command:
     argv: >-
       {{ ['/usr/local/sbin/named-transaction', 'begin'] +
-      (bind_authoritative_zones | map(attribute='domain') | map('regex_replace', '^', '--zone=') | list) }}
+      ((bind_transaction_zones) | map('regex_replace', '^', '--zone=') | list) }}
   changed_when: true

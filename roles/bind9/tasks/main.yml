@@ -1,64 +1,112 @@
 ---
 - name: Derive local DNS peer addresses from inventory
   ansible.builtin.import_tasks: tasks.d/site_peers.yml
+  tags: [always]
 
 - name: Provision shared site TSIG on the controller
   ansible.builtin.import_tasks: tasks.d/tsig.yml
+  tags: [deploy, configure]
+
+- name: Generate reverse zones and PTR records from authoritative addresses
+  ansible.builtin.set_fact:
+    bind_generated_reverse_zones: "{{ bind_authoritative_zones | automatic_reverse_zones }}"
+  tags: [always]
+
+- name: Combine direct and automatically generated reverse zones
+  ansible.builtin.set_fact:
+    bind_managed_zones: "{{ bind_authoritative_zones + bind_generated_reverse_zones }}"
+  tags: [always]
 
 - name: Validate named inputs
   ansible.builtin.import_tasks: tasks.d/validate.yml
+  tags: [deploy, preflight]
 
 - name: Reject unsafe filesystem paths
   ansible.builtin.import_tasks: tasks.d/path_safety.yml
+  tags: [deploy, preflight]
 
 - name: Verify local primary before secondary deployment
   ansible.builtin.import_tasks: tasks.d/primary_readiness.yml
-  when: "'dns_secondary' in group_names"
+  tags: [deploy, preflight]
+  when: "bind_secondary_group in group_names and ((bind_managed_zones) | length > 0)"
 
 - name: Install dependencies
   ansible.builtin.import_tasks: tasks.d/packages.yml
+  tags: [deploy, install]
 
-- name: Back up the existing BIND configuration
+- name: Back up full BIND configuration before changes
   ansible.builtin.import_tasks: tasks.d/migration.yml
+  tags: [deploy, backup]
 
 - name: Prepare managed directories
   ansible.builtin.import_tasks: tasks.d/directories.yml
+  tags: [deploy, configure]
+
+- name: Find existing reverse zone files before transaction
+  ansible.builtin.find:
+    paths: /var/named/zones
+    patterns:
+      - '*.in-addr.arpa.zone'
+      - '*.ip6.arpa.zone'
+    contains: '^; DNSZIBO-MANAGED-REVERSE$'
+    read_whole_file: false
+  register: bind_existing_reverse_files
+  when: "bind_primary_group in group_names"
+  tags: [deploy]
+
+- name: Include previously managed reverse zones in transaction snapshot
+  tags: [deploy]
+  ansible.builtin.set_fact:
+    bind_transaction_zones: "{{ (bind_managed_zones | map(attribute='domain') | list) + (bind_existing_reverse_files.files | default([]) | map(attribute='path') | map('basename') | map('regex_replace', '[.]zone$', '') | list) | unique | list }}"
 
 - name: Prepare transaction controller
   ansible.builtin.import_tasks: tasks.d/transaction.yml
+  tags: [deploy, configure]
 
 - name: Apply DNS changes with rollback on failure
   block:
+    - name: Remove obsolete client ACL configuration
+      ansible.builtin.import_tasks: tasks.d/acl_cleanup.yml
+      tags: [deploy, configure]
+
     - name: Install modular configuration
       ansible.builtin.import_tasks: tasks.d/configuration.yml
+      tags: [deploy, configure]
 
     - name: Install authoritative zone files
       ansible.builtin.import_tasks: tasks.d/zones.yml
+      tags: [deploy, configure, zones, records]
 
     - name: Configure SELinux and resource limits
       ansible.builtin.import_tasks: tasks.d/security.yml
+      tags: [deploy, configure]
 
     - name: Validate BIND and zones
       ansible.builtin.import_tasks: tasks.d/verify.yml
+      tags: [deploy, validate]
 
     - name: Start or reload BIND
       ansible.builtin.import_tasks: tasks.d/service.yml
+      tags: [deploy, services]
 
     - name: Verify DNS queries and SOA consistency
       ansible.builtin.import_tasks: tasks.d/health.yml
+      tags: [deploy, health]
 
     - name: Commit the successful deployment
       ansible.builtin.command:
         argv: [/usr/local/sbin/named-transaction, commit]
       changed_when: true
+      tags: [deploy]
 
   rescue:
     - name: Restore files from the deployment snapshot
       ansible.builtin.command:
         argv: >-
           {{ ['/usr/local/sbin/named-transaction', 'restore'] +
-          (bind_authoritative_zones | map(attribute='domain') | map('regex_replace', '^', '--zone=') | list) }}
+          ((bind_transaction_zones)  | map('regex_replace', '^', '--zone=') | list) }}
       register: bind_rollback
+      tags: [deploy]
       changed_when: true
 
     - name: Restart restored BIND configuration
@@ -67,12 +115,15 @@
         state: restarted
         daemon_reload: true
       when: bind_rollback is succeeded
+      tags: [deploy]
 
     - name: Stop deployment after rollback
       ansible.builtin.fail:
         msg: 'named deployment failed; managed files restored. Inspect service and logs.'
+      tags: [deploy]
 
 
 - name: Configure periodic DNS health monitoring
   ansible.builtin.import_tasks: tasks.d/monitoring.yml
+  tags: [monitor]
   when: bind_monitoring_enabled | bool

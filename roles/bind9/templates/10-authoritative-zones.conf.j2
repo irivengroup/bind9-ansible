@@ -1,6 +1,6 @@
-{% for auth_zone in bind_authoritative_zones %}
+{% for auth_zone in (bind_managed_zones | default(bind_authoritative_zones | default([], true), true)) %}
 zone "{{ auth_zone.domain }}" IN {
-{% if 'dns_primary' in group_names %}
+{% if (bind_primary_group | default("dns_primary")) in group_names %}
     type primary;
     file "/var/named/zones/{{ auth_zone.domain }}.zone";
     allow-update { none; };

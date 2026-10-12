@@ -1,8 +1,7 @@
 ---
-# SSH management uses the existing back address unless overridden externally.
-ansible_host: "{{ bind_back_ip }}"
-
-bind_external_clients:
+# Shared DNS data for all sites; host-specific IPs remain in host_vars.
+bind_backend_clients: []
+bind_frontend_clients:
 - 198.51.100.0/24
 - 203.0.113.0/24
 bind_forward_zones:
@@ -16,7 +15,6 @@ bind_forward_zones:
   - address: 10.20.0.99
     port: 53
   policy: only
-  
 bind_authoritative_zones:
 - domain: cloud.example.test
   ttl: 300

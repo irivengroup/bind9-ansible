@@ -1,0 +1,10 @@
+---
+- name: Reload named configuration
+  ansible.builtin.systemd:
+    name: named
+    state: reloaded
+- name: Restart named
+  ansible.builtin.systemd:
+    name: named
+    daemon_reload: true
+    state: restarted

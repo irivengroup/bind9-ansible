@@ -1,0 +1,10 @@
+---
+- name: Remove obsolete client ACL module when both client lists are empty
+  ansible.builtin.file:
+    path: /etc/named/20-acl.conf
+    state: absent
+  when:
+    - (bind_frontend_clients | default([], true) | length) == 0
+    - (bind_backend_clients | default([], true) | length) == 0
+  notify: Reload named configuration
+

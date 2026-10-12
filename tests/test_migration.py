@@ -7,7 +7,7 @@ ROLE = ROOT / 'roles/bind9'
 
 
 def test_snapshot_script_syntax():
-    subprocess.run(['bash', '-n', str(ROLE / 'files/bind-migrate.sh')], check=True)
+    subprocess.run(['bash', '-n', str(ROLE / 'files/bind-backup.sh')], check=True)
 
 
 def test_snapshot_before_configuration():
@@ -19,7 +19,7 @@ def test_snapshot_before_configuration():
 
 
 def test_no_destructive_operations():
-    script = (ROLE / 'files/bind-migrate.sh').read_text()
+    script = (ROLE / 'files/bind-backup.sh').read_text()
     assert 'rm -rf' not in script
     assert 'systemctl stop' not in script
     assert 'tar --create --gzip --acls --xattrs --selinux' in script

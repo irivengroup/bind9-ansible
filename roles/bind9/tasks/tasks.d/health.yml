@@ -14,7 +14,7 @@
       - "@{{ bind_back_ip }}"
       - "{{ item.domain }}"
       - SOA
-  loop: "{{ bind_authoritative_zones }}"
+  loop: "{{ bind_managed_zones }}"
   loop_control:
     label: "{{ item.domain }}"
   register: bind_soa_checks

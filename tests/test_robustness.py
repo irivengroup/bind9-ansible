@@ -19,7 +19,7 @@ def test_per_file_backups_and_zone_validation():
     assert '/usr/sbin/named-checkzone' in read('tasks/tasks.d/verify.yml')
 
 def test_baseline_rechecked():
-    assert 'Baseline checksum verification failed' in read('files/bind-migrate.sh')
+    assert 'Baseline checksum verification failed' in read('files/bind-backup.sh')
 
 def test_authoritative_primary_readiness():
     assert 'flags:' in read('tasks/tasks.d/primary_readiness.yml')

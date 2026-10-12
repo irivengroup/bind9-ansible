@@ -1,29 +1,26 @@
 ---
-- name: Create protected backup and state directories
+- name: Create protected BIND backup directory
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: "{{ bind_backup_root }}"
     state: directory
     owner: root
     group: root
     mode: '0700'
-  loop:
-    - "{{ bind_backup_root }}"
-    - "{{ bind_migration_state_dir }}"
 
-- name: Install non-destructive backup helper
+- name: Install BIND backup and snapshot utility
   ansible.builtin.copy:
-    src: bind-migrate.sh
-    dest: /usr/local/sbin/named-migrate
+    src: bind-backup.sh
+    dest: /usr/local/sbin/bind-backup.sh
     owner: root
     group: root
     mode: '0700'
 
-- name: Snapshot existing BIND files before managing them
+- name: Back up full BIND configuration before any changes
   ansible.builtin.command:
     argv:
-      - /usr/local/sbin/named-migrate
-      - snapshot
+      - /usr/local/sbin/bind-backup.sh
+      - backup
+      - --root
       - "{{ bind_backup_root }}"
-      - "{{ bind_migration_state_dir }}"
   register: bind_snapshot_result
-  changed_when: "'SNAPSHOT_CREATED' in bind_snapshot_result.stdout"
+  changed_when: "'BACKUP_CREATED' in bind_snapshot_result.stdout"

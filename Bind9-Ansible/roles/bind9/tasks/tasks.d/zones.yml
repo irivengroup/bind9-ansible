@@ -1,0 +1,69 @@
+---
+- name: Install local root refusal zone
+  ansible.builtin.template:
+    src: empty-root.zone.j2
+    dest: /var/named/empty-root.zone
+    owner: root
+    group: named
+    mode: '0640'
+    backup: true
+  notify: Reload named configuration
+
+- name: Install primary authoritative zones
+  ansible.builtin.template:
+    src: authoritative.zone.j2
+    dest: "/var/named/zones/{{ auth_zone.domain }}.zone"
+    owner: root
+    group: named
+    mode: '0640'
+    backup: true
+  loop: "{{ bind_authoritative_zones }}"
+  loop_control:
+    loop_var: auth_zone
+    label: "{{ auth_zone.domain }}"
+  when: "bind_primary_group in group_names"
+  notify: Reload named configuration
+
+- name: Install automatically generated reverse zones
+  ansible.builtin.template:
+    src: reverse.zone.j2
+    dest: "/var/named/zones/{{ auth_zone.domain }}.zone"
+    owner: root
+    group: named
+    mode: '0640'
+    backup: true
+  loop: "{{ bind_generated_reverse_zones }}"
+  loop_control:
+    loop_var: auth_zone
+    label: "{{ auth_zone.domain }}"
+  when: "bind_primary_group in group_names"
+  notify: Reload named configuration
+
+- name: Remove obsolete DNSZIBO-managed reverse zone files
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ bind_existing_reverse_files.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when:
+    - "bind_primary_group in group_names"
+    - (item.path | basename | regex_replace('[.]zone$', '')) not in (bind_generated_reverse_zones | map(attribute='domain') | list)
+  notify: Reload named configuration
+
+- name: Install reverse SOA serial reconciler
+  ansible.builtin.copy:
+    src: reverse-serial.py
+    dest: /usr/local/sbin/reverse-serial
+    owner: root
+    group: root
+    mode: '0700'
+  when: "bind_primary_group in group_names"
+
+- name: Preserve or advance reverse SOA serial based on actual PTR changes
+  ansible.builtin.command:
+    argv: >-
+      {{ ['/usr/local/sbin/reverse-serial', '--snapshot', '/var/lib/Bind9Project/deployment/pending.tar.gz'] +
+      (bind_generated_reverse_zones | map(attribute='domain') | list) }}
+  changed_when: false
+  when: "bind_primary_group in group_names and (bind_generated_reverse_zones | length > 0)"
