@@ -15,8 +15,8 @@
     item != '20-acl.conf' or
     (bind_frontend_clients | default([], true) | length > 0) or
     (bind_backend_clients | default([], true) | length > 0)
-
   notify: Reload named configuration
+
 - name: Deploy zone configuration modules
   ansible.builtin.template:
     src: "{{ item.src }}"
@@ -29,6 +29,7 @@
     - {src: 10-authoritative-zones.conf.j2, dest: 10-authoritative-zones.conf}
     - {src: 20-forward-zones.conf.j2, dest: 20-forward-zones.conf}
   notify: Reload named configuration
+
 - name: Install shared TSIG key
   ansible.builtin.template:
     src: 10-tsig.conf.j2
@@ -39,6 +40,7 @@
     backup: true
   no_log: true
   notify: Reload named configuration
+  
 - name: Deploy main named.conf last
   ansible.builtin.template:
     src: named.conf.j2
