@@ -12,5 +12,5 @@ jobs:
       - run: ansible-playbook -i inventory/hosts.ini playbooks/site.yml --syntax-check
       - run: python -m pytest -q tests
       - run: python -m compileall -q tests
-      - run: bash -n roles/bind9/files/bind-migrate.sh roles/bind9/files/Bind9Project-healthcheck
-      - run: python -m py_compile roles/bind9/files/Bind9Project-transaction
+      - run: bash -n roles/bind9/files/bind-migrate.sh roles/bind9/files/named-healthcheck
+      - run: python -m py_compile roles/bind9/files/named-transaction

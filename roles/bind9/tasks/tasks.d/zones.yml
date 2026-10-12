@@ -21,5 +21,5 @@
   loop_control:
     loop_var: auth_zone
     label: "{{ auth_zone.domain }}"
-  when: bind_role == 'primary'
+  when: "'dns_primary' in group_names"
   notify: Reload named configuration

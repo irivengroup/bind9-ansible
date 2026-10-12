@@ -1,54 +1,37 @@
 ---
-bind_primary_back_ip: 10.20.0.11
-bind_secondary_back_ip: 10.20.0.12
 bind_external_clients:
-  - 198.51.100.0/24
-  - 203.0.113.0/24
-# Conditional forwarding only. Each DNS suffix has independent upstreams.
-# A forwarding zone covers its apex and all descendants (no wildcard prefix).
+- 198.51.100.0/24
+- 203.0.113.0/24
 bind_forward_zones:
-  - domain: corp.example.test
-    forwarders:
-      - address: 10.20.0.53
-        port: 53
-    policy: only
-  - domain: fake.example.test
-    forwarders:
-      - address: 10.20.0.99
-        port: 53
-    policy: only
-# Authoritative zones are shared by both site pairs; each site's primary owns
-# its local zone files, and its secondary receives them by TSIG AXFR/IXFR.
+- domain: corp.example.test
+  forwarders:
+  - address: 10.20.0.53
+    port: 53
+  policy: only
+- domain: fake.example.test
+  forwarders:
+  - address: 10.20.0.99
+    port: 53
+  policy: only
 bind_authoritative_zones:
-  - domain: cloud.example.test
-    ttl: 300
-    serial: 2026101101
-    records:
-      - {name: app, type: A, value: 192.0.2.100}
-  - domain: services.example.test
-    ttl: 300
-    serial: 2026101101
-    records:
-      - {name: api, type: A, value: 192.0.2.101}
-bind_tsig_name: dns-transfer
-bind_tsig_secret: ''
+- domain: cloud.example.test
+  ttl: 300
+  serial: 2026101101
+  records:
+  - name: app
+    type: A
+    value: 192.0.2.100
+- domain: services.example.test
+  ttl: 300
+  serial: 2026101101
+  records:
+  - name: api
+    type: A
+    value: 192.0.2.101
 bind_enable_cgroups: false
 bind_memory_max: 512M
 bind_tasks_max: 256
-bind_cpu_quota: '100%'
-
-# firewalld: interface zones must already exist and be assigned by network policy.
-bind_firewalld_enabled: true
-bind_firewalld_front_zone: public
-bind_firewalld_back_zone: internal
-bind_firewalld_front_clients: "{{ bind_external_clients }}"
-bind_firewalld_primary_back_ip: "{{ bind_primary_back_ip }}"
-bind_firewalld_secondary_back_ip: "{{ bind_secondary_back_ip }}"
-bind_firewalld_manage_zones: false
-
-# Backup archives and migration state must remain outside BIND-managed trees.
-bind_backup_root: /var/backups/Bind9Project/bind
-bind_migration_state_dir: /var/lib/Bind9Project/bind-migration
-
-# Periodic local authoritative DNS checks (systemd timer).
+bind_cpu_quota: 100%
+bind_backup_root: /var/backups/named/bind
+bind_migration_state_dir: /var/lib/named/bind-migration
 bind_monitoring_enabled: true

@@ -9,19 +9,17 @@ def test_migration_script_valid():
 
 def test_non_destructive_migration():
     tasks = yaml.safe_load((ROLE/'tasks/main.yml').read_text())
-    assert any(t.get('ansible.builtin.import_tasks') == 'migration.yml' for t in tasks)
+    assert any(t.get('ansible.builtin.import_tasks') == 'tasks.d/migration.yml' for t in tasks)
     assert any('rescue' in t for t in tasks)
 
 
 def test_no_secret_logged_in_config_task():
-    tasks = yaml.safe_load((ROLE/'tasks/configuration.yml').read_text())
+    tasks = yaml.safe_load((ROLE/'tasks/tasks.d/configuration.yml').read_text())
     assert any(t.get('no_log') is True for t in tasks if 'TSIG' in t['name'])
 
-def test_back_interface_restrictions():
-    t = (ROLE/'tasks/firewalld.yml').read_text()
-    assert 'bind_firewalld_secondary_back_ip' in t
-    assert 'bind_firewalld_primary_back_ip' in t
-    assert 'Deny all other incoming DNS traffic on back' in t
+def test_network_policy_external():
+    assert not (ROLE/'tasks/tasks.d/firewalld.yml').exists()
+    assert (ROOT/'docs/NETWORK_POLICY.md').exists()
 
 def test_numbered_includes():
     text = (ROLE/'templates/named.conf.j2').read_text()

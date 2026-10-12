@@ -1,0 +1,3 @@
+---
+# SSH management uses the existing back address unless overridden externally.
+ansible_host: "{{ bind_back_ip }}"

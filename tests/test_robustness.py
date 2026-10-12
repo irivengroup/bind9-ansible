@@ -7,20 +7,20 @@ def read(path):
 
 def test_filesystem_preflight():
     assert 'path_safety.yml' in read('tasks/main.yml')
-    assert 'follow: false' in read('tasks/path_safety.yml')
-    assert 'not item.stat.islnk' in read('tasks/path_safety.yml')
+    assert 'follow: false' in read('tasks/tasks.d/path_safety.yml')
+    assert 'not item.stat.islnk' in read('tasks/tasks.d/path_safety.yml')
 
 def test_do_not_change_vendor_parent_permissions():
-    assert 'path: /var/named, owner:' not in read('tasks/directories.yml')
+    assert 'path: /var/named, owner:' not in read('tasks/tasks.d/directories.yml')
 
 def test_per_file_backups_and_zone_validation():
-    for f in ('tasks/configuration.yml', 'tasks/zones.yml'):
+    for f in ('tasks/tasks.d/configuration.yml', 'tasks/tasks.d/zones.yml'):
         assert 'backup: true' in read(f)
-    assert '/usr/sbin/named-checkzone' in read('tasks/verify.yml')
+    assert '/usr/sbin/named-checkzone' in read('tasks/tasks.d/verify.yml')
 
 def test_baseline_rechecked():
     assert 'Baseline checksum verification failed' in read('files/bind-migrate.sh')
 
 def test_authoritative_primary_readiness():
-    assert 'flags:' in read('tasks/primary_readiness.yml')
-    assert 'SOA' in read('tasks/primary_readiness.yml')
+    assert 'flags:' in read('tasks/tasks.d/primary_readiness.yml')
+    assert 'SOA' in read('tasks/tasks.d/primary_readiness.yml')

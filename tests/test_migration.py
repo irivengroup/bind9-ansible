@@ -13,8 +13,8 @@ def test_snapshot_script_syntax():
 def test_snapshot_before_configuration():
     data = yaml.safe_load((ROLE / 'tasks/main.yml').read_text())
     imports = [task.get('ansible.builtin.import_tasks') for task in data]
-    assert imports.index('migration.yml') < imports.index('directories.yml')
-    assert imports.index('migration.yml') < imports.index('transaction.yml')
+    assert imports.index('tasks.d/migration.yml') < imports.index('tasks.d/directories.yml')
+    assert imports.index('tasks.d/migration.yml') < imports.index('tasks.d/transaction.yml')
     assert 'configuration.yml' in str(data)
 
 
@@ -36,7 +36,7 @@ def test_no_legacy_modular_path():
 
 
 def test_existing_files_updated_without_removal():
-    config = (ROLE / 'tasks/configuration.yml').read_text()
+    config = (ROLE / 'tasks/tasks.d/configuration.yml').read_text()
     assert 'ansible.builtin.template' in config
     assert 'state: absent' not in config
     assert 'force: false' not in config

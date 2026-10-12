@@ -1,7 +1,7 @@
 ---
 - name: Wait for local primary DNS TCP listener on back interface
   ansible.builtin.wait_for:
-    host: "{{ bind_primary_back_ip }}"
+    host: "{{ hostvars[bind_primary_host].bind_back_ip }}"
     port: 53
     connect_timeout: 3
     timeout: 30
@@ -19,7 +19,7 @@
       - +noall
       - +comments
       - +answer
-      - "@{{ bind_primary_back_ip }}"
+      - "@{{ hostvars[bind_primary_host].bind_back_ip }}"
       - "{{ item.domain }}"
       - SOA
   loop: "{{ bind_authoritative_zones }}"

@@ -1,9 +1,4 @@
 ---
-bind_primary_back_ip: 10.30.1.11
-bind_secondary_back_ip: 10.30.1.12
-bind_firewalld_primary_back_ip: 10.30.1.11
-bind_firewalld_secondary_back_ip: 10.30.1.12
-bind_front_interface: ens192
-bind_back_interface: ens224
-bind_primary_front_ip: 192.0.2.21
-bind_secondary_front_ip: 192.0.2.22
+bind_tsig_key_name: site3-transfer
+bind_tsig_algorithm: hmac-sha256
+bind_tsig_secret_file: '{{ lookup("env", "HOME") }}/.local/share/dns/tsig/site3.key'

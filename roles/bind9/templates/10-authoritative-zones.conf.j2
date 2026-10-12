@@ -1,19 +1,19 @@
 {% for auth_zone in bind_authoritative_zones %}
 zone "{{ auth_zone.domain }}" IN {
-{% if bind_role == 'primary' %}
+{% if 'dns_primary' in group_names %}
     type primary;
     file "/var/named/zones/{{ auth_zone.domain }}.zone";
     allow-update { none; };
-    allow-transfer { key "{{ bind_tsig_name }}"; };
+    allow-transfer { key "{{ bind_tsig_key_name }}"; };
     notify explicit;
-    also-notify { {{ bind_secondary_back_ip }} key "{{ bind_tsig_name }}"; };
+    also-notify { {{ hostvars[bind_secondary_host].bind_back_ip }} key "{{ bind_tsig_key_name }}"; };
 {% else %}
     type secondary;
     file "slaves/{{ auth_zone.domain }}.zone";
-    primaries { {{ bind_primary_back_ip }} key "{{ bind_tsig_name }}"; };
+    primaries { {{ hostvars[bind_primary_host].bind_back_ip }} key "{{ bind_tsig_key_name }}"; };
     transfer-source {{ bind_back_ip }};
     allow-transfer { none; };
-    allow-notify { {{ bind_primary_back_ip }}; };
+    allow-notify { {{ hostvars[bind_primary_host].bind_back_ip }}; };
 {% endif %}
 };
 {% endfor %}

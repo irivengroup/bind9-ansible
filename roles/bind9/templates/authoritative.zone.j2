@@ -2,8 +2,8 @@ $TTL {{ auth_zone.ttl | default(300) }}
 @ IN SOA ns1.{{ auth_zone.domain }}. hostmaster.{{ auth_zone.domain }}. ( {{ auth_zone.serial }} 3600 900 1209600 300 )
 @ IN NS ns1.{{ auth_zone.domain }}.
 @ IN NS ns2.{{ auth_zone.domain }}.
-ns1 IN A {{ bind_primary_front_ip }}
-ns2 IN A {{ bind_secondary_front_ip }}
+ns1 IN A {{ hostvars[bind_primary_host].bind_front_ip }}
+ns2 IN A {{ hostvars[bind_secondary_host].bind_front_ip }}
 {% for record in auth_zone.records | default([]) %}
 {{ record.name }} IN {{ record.type }} {{ record.value }}
 {% endfor %}

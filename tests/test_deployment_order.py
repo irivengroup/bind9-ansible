@@ -8,7 +8,7 @@ def test_ordered_inventory():
     config = configparser.ConfigParser(allow_no_value=True, delimiters=('=',))
     config.read(ROOT / 'inventory/hosts.ini')
     hosts = list(config['dns_deployment_order'])
-    assert hosts == ['zibo-x1-dns01', 'zibo-x3-dns01', 'zibo-x1-dns02', 'zibo-x3-dns02']
+    assert hosts == ['site1-dns01', 'site3-dns01', 'site1-dns02', 'site3-dns02']
 
 def test_one_play_one_role():
     data = yaml.safe_load((ROOT / 'playbooks/site.yml').read_text())

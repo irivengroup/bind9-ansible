@@ -13,8 +13,8 @@ def test_zone_config_modules():
     assert '/etc/named/zones/' not in entry
 
 def test_non_destructive_creation():
-    tasks = (ROOT / 'roles/bind9/tasks/configuration.yml').read_text()
-    dirs = (ROOT / 'roles/bind9/tasks/directories.yml').read_text()
+    tasks = (ROOT / 'roles/bind9/tasks/tasks.d/configuration.yml').read_text()
+    dirs = (ROOT / 'roles/bind9/tasks/tasks.d/directories.yml').read_text()
     assert '/etc/named/zones/{{ item.dest }}' in tasks
     assert '/etc/named/zones' in dirs
     assert 'state: absent' not in tasks

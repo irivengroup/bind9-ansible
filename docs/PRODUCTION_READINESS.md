@@ -14,11 +14,9 @@
 1. **RHEL 8 lab validation:** install BIND and run Ansible syntax, check-mode and full playbook twice; ensure zero unintended changes and functional idempotence. The deployment snapshot controller currently reports changes on each run; optimize change detection before production.
 2. **Full pre-activation staging:** current V4 validates after installing managed files but before reloading; the on-disk BIND config can temporarily be invalid. For stronger guarantees, implement a shadow configuration tree with all includes and zones rewritten and validate before promotion.
 3. **Full metadata recovery:** V4 managed-file rollback preserves POSIX ownership and modes, but not extended ACLs/xattrs; `restorecon` reapplies standard SELinux labels. Verify custom ACLs and labels, or extend metadata-preserving rollback.
-4. **Firewall rollback:** firewalld is applied after DNS commit; firewall failures do not automatically restore earlier firewall state. Test existing zone policies and preserve SSH.
 5. **TSIG and network:** run AXFR/IXFR/NOTIFY positive and negative tests from each site; reject unauthorized transfers, recursion and DNS traffic from unapproved sources.
 6. **Multisite serial consistency:** enforce matching zone contents and SOA serials across both primaries; compare remote DNS responses during acceptance.
 7. **Failure injection:** test malformed zone, missing TSIG, unavailable forwarder, interrupted Ansible, DNS process failure, loss of each NIC and entire site.
-8. **Security:** validate SELinux enforcing, least-privilege TSIG access, firewalld and systemd settings, secret rotation and patch policy.
 9. **Monitoring:** connect timer failures and stale SOA serials to central monitoring and alerting; add transfer/forwarding latency metrics and retention.
 10. **Recovery:** restore pending transaction with the same `--zone` list; verify restored service and file checksums. The script is installed at `/usr/local/sbin/Bind9Project-transaction`.
 

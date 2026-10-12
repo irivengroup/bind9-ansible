@@ -4,7 +4,7 @@
     that:
       - ansible_distribution == 'RedHat'
       - ansible_distribution_major_version == '8'
-      - bind_role in ['primary', 'secondary']
+      - (('dns_primary' in group_names) | int) + (('dns_secondary' in group_names) | int) == 1
       - bind_front_ip is defined
       - bind_back_ip is defined
       - bind_front_ip != bind_back_ip
@@ -14,19 +14,19 @@
       - bind_tsig_secret | length >= 32
       - bind_external_clients | length > 0
       - bind_forward_zones | length > 0
-      - bind_primary_back_ip != bind_secondary_back_ip
+      - hostvars[bind_primary_host].bind_back_ip != hostvars[bind_secondary_host].bind_back_ip
       - bind_authoritative_zones | length > 0
       - (bind_authoritative_zones | map(attribute='domain') | list | unique | length) == (bind_authoritative_zones | length)
       - (bind_authoritative_zones | map(attribute='domain') | list | intersect(bind_forward_zones | map(attribute='domain') | list) | length) == 0
-      - bind_primary_front_ip is defined
-      - bind_secondary_front_ip is defined
+      - hostvars[bind_primary_host].bind_front_ip is defined
+      - hostvars[bind_secondary_host].bind_front_ip is defined
       - (bind_forward_zones | map(attribute='domain') | list | unique | length) == (bind_forward_zones | length)
     fail_msg: 'Invalid RHEL 8 BIND settings, zone overlap or TSIG secret.'
   no_log: true
 - name: Validate configured peer identity
   ansible.builtin.assert:
     that:
-      - (bind_role == 'primary' and bind_back_ip == bind_primary_back_ip) or (bind_role == 'secondary' and bind_back_ip == bind_secondary_back_ip)
+      - (('dns_primary' in group_names) and bind_back_ip == hostvars[bind_primary_host].bind_back_ip) or (('dns_secondary' in group_names) and bind_back_ip == hostvars[bind_secondary_host].bind_back_ip)
     fail_msg: 'Local back address does not match declared DNS role.'
 
 - name: Validate each conditional forwarding zone

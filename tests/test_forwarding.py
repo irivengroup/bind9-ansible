@@ -29,6 +29,6 @@ def test_zone_template_forwarding_render():
 
 
 def test_validation_per_zone():
-    text = (ROLE / 'tasks/validate.yml').read_text()
+    text = (ROLE / 'tasks/tasks.d/validate.yml').read_text()
     assert "subelements('forwarders')" in text
     assert "map(attribute='domain')" in text

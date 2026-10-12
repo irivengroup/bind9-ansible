@@ -13,7 +13,7 @@ def test_zones_in_view():
     assert "/etc/named/zones/10-authoritative-zones.conf" in (ROOT / "templates/40-views.conf.j2").read_text()
 
 def test_templates_and_tasks():
-    task = (ROOT / "tasks/configuration.yml").read_text()
+    task = (ROOT / "tasks/tasks.d/configuration.yml").read_text()
     for name in ("10-tsig.conf", "20-acl.conf", "30-options.conf", "40-views.conf", "10-authoritative-zones.conf"):
         assert (ROOT / "templates" / (name + ".j2")).exists()
         assert name in task

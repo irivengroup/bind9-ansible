@@ -1,9 +1,9 @@
 [Unit]
-Description=Bind9Project authoritative DNS healthcheck
+Description=named authoritative DNS healthcheck
 After=named.service
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/Bind9Project-healthcheck {{ bind_back_ip }}{% for zone in bind_authoritative_zones %} {{ zone.domain }}{% endfor %}
+ExecStart=/usr/local/sbin/named-healthcheck {{ bind_back_ip }}{% for zone in bind_authoritative_zones %} {{ zone.domain }}{% endfor %}
 User=root
 NoNewPrivileges=yes
 PrivateTmp=yes

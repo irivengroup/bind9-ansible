@@ -1,0 +1,28 @@
+---
+- name: Identify exactly one DNS site for this host
+  ansible.builtin.set_fact:
+    bind_site_group: "{{ (group_names | intersect(['site1', 'site3'])) | first }}"
+  when: (group_names | intersect(['site1', 'site3']) | length) == 1
+
+- name: Validate DNS site membership
+  ansible.builtin.assert:
+    that:
+      - bind_site_group is defined
+      - (groups[bind_site_group] | intersect(groups['dns_primary']) | length) == 1
+      - (groups[bind_site_group] | intersect(groups['dns_secondary']) | length) == 1
+    fail_msg: 'Each site requires exactly one primary and one secondary.'
+
+- name: Resolve peer hostnames from inventory membership
+  ansible.builtin.set_fact:
+    bind_primary_host: "{{ (groups[bind_site_group] | intersect(groups['dns_primary'])) | first }}"
+    bind_secondary_host: "{{ (groups[bind_site_group] | intersect(groups['dns_secondary'])) | first }}"
+
+- name: Validate required peer host variables
+  ansible.builtin.assert:
+    that:
+      - hostvars[bind_primary_host].bind_back_ip is defined
+      - hostvars[bind_secondary_host].bind_back_ip is defined
+      - hostvars[bind_primary_host].bind_front_ip is defined
+      - hostvars[bind_secondary_host].bind_front_ip is defined
+    fail_msg: 'Missing peer address or inconsistent host_vars role.'
+

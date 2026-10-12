@@ -11,8 +11,8 @@ Ansible Core 2.12+ on controller; RHEL 8 managed nodes; SSH sudo; RHEL repositor
 ## Security and configuration
 
 1. Replace the example IPs, subnets, domain names and zone records in `inventory/hosts.ini` and `roles/bind9/defaults/main.yml`.
-2. Generate one shared secret with `tsig-keygen -a hmac-sha256 dns-transfer` and extract the `secret` value. Store it as `bind_tsig_secret` in **Ansible Vault**. Never commit it in cleartext.
-3. Run `ansible-playbook playbooks/site.yml --ask-vault-pass -e @vault.yml` (where `vault.yml` is encrypted).
+2. The role automatically creates one 256-bit HMAC-SHA256 TSIG secret per site on the Ansible controller, using the `bind_tsig_secret_file` in `inventory/group_vars/site*.yml`. Back up these private controller files securely and never commit them.
+3. Run `ansible-playbook -i inventory/hosts.ini playbooks/site.yml`. If you use additional vaulted credentials, add `--ask-vault-pass`.
 4. Restrict network flows with infrastructure firewalls: front UDP/TCP 53 from approved clients only; back UDP/TCP 53 between DNS peers and to the two resolvers; deny other ingress. A BIND ACL alone does not enforce interface-specific client access; enforce with firewall.
 5. When updating zone records, increment `bind_zone_serial` to trigger secondary refresh.
 
@@ -32,35 +32,16 @@ On RHEL 8: `named-checkconf -z /etc/named.conf`, `systemctl status named`, `jour
 
 ## Important operational caveats
 
-- The role manages firewalld when enabled; interface-to-zone assignments must be provisioned beforehand.
 - Zone transfer/NOTIFY success depends on BIND view matching and peer network reachability. Validate end-to-end on both RHEL 8 hosts before production.
 - The templates and example data are provided as an implementation baseline, not a claim of runtime validation.
 
 
-## firewalld (DNS front/back)
+## Network filtering responsibility
 
-Install the required collection: `ansible-galaxy collection install -r requirements.yml`.
-Before running the role, assign each network interface to its appropriate existing
-firewalld zone via NetworkManager, without moving the SSH management interface.
-The role checks this association and aborts rather than silently changing it.
+External network policy must independently restrict front DNS (UDP/TCP 53) to
+approved clients and back DNS transfers (TCP 53), NOTIFY and conditional
+forwarding (UDP/TCP 53) to the intended peers and resolvers. Preserve SSH.
 
-Configure per host: `bind_front_interface`, `bind_back_interface`,
-`bind_firewalld_front_zone`, `bind_firewalld_back_zone`, and optionally
-`bind_firewalld_front_clients`, `bind_firewalld_primary_back_ip`,
-`bind_firewalld_secondary_back_ip`. Defaults use `bind_external_clients`
-and the primary/secondary back IPs. Set `bind_firewalld_enabled: false`
-to opt out. `bind_firewalld_manage_zones: true` creates zones but does not
-assign interfaces. Do not use zones with target ACCEPT or broad direct/nftables
-rules bypassing this policy. Existing rules are not removed.
-
-The firewall rules apply to incoming DNS traffic only. Forwarding queries
-leave through back; replies are accepted by connection tracking. Front
-allows UDP/TCP 53 only from listed client CIDRs; back allows TCP/53 from
-secondary to primary and UDP/53 from primary to secondary, denying all other
-inbound DNS requests. TSIG still authenticates DNS transfers.
-
-Validate on both hosts with `firewall-cmd --list-all --zone=public` and
-`firewall-cmd --list-all --zone=internal`, and test DNS/AXFR/NOTIFY.
 
 ## Unified conditional forwarding
 
@@ -85,7 +66,6 @@ A second forwarder in the same zone is **not** guaranteed to be a standby. The l
 ## Task orchestration
 
 `roles/bind9/tasks/main.yml` imports `validate`, `packages`, `directories`,
-`configuration`, `zones`, `security`, `verify`, `firewalld`, and `service`.
 The configuration directory is `/etc/named`. Back up and remove any
 previous `/etc/named/modular` deployment only after validating the new service.
 The old directory is not automatically deleted to avoid destroying unrelated files.

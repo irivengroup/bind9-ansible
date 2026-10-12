@@ -26,5 +26,5 @@
   loop: "{{ bind_authoritative_zones }}"
   loop_control:
     label: "{{ item.domain }}"
-  when: bind_role == 'primary'
+  when: "'dns_primary' in group_names"
   changed_when: false

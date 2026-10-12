@@ -27,7 +27,7 @@ MANAGED = [
     '/var/named/empty-root.zone',
     '/etc/systemd/system/named.service.d/limits.conf',
 ]
-STATE = Path('/var/lib/Bind9Project/deployment')
+STATE = Path('/var/lib/named/deployment')
 
 
 def sha256(path):

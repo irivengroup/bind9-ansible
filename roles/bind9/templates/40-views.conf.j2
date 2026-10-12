@@ -1,9 +1,9 @@
 // Peer view first: authoritative zone owner and TSIG transfer endpoint.
 view "peer" IN {
-    match-clients { {{ bind_primary_back_ip }}; {{ bind_secondary_back_ip }}; key "{{ bind_tsig_name }}"; };
+    match-clients { {{ hostvars[bind_primary_host].bind_back_ip }}; {{ hostvars[bind_secondary_host].bind_back_ip }}; key "{{ bind_tsig_key_name }}"; };
     match-destinations { {{ bind_back_ip }}; };
     recursion no;
-    allow-query { {{ bind_primary_back_ip }}; {{ bind_secondary_back_ip }}; key "{{ bind_tsig_name }}"; };
+    allow-query { {{ hostvars[bind_primary_host].bind_back_ip }}; {{ hostvars[bind_secondary_host].bind_back_ip }}; key "{{ bind_tsig_key_name }}"; };
     allow-query-cache { none; };
     include "/etc/named/zones/10-authoritative-zones.conf";
 };
