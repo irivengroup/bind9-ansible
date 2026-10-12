@@ -1,33 +1,4 @@
 ---
-bind_external_clients:
-- 198.51.100.0/24
-- 203.0.113.0/24
-bind_forward_zones:
-- domain: corp.example.test
-  forwarders:
-  - address: 10.20.0.53
-    port: 53
-  policy: only
-- domain: fake.example.test
-  forwarders:
-  - address: 10.20.0.99
-    port: 53
-  policy: only
-bind_authoritative_zones:
-- domain: cloud.example.test
-  ttl: 300
-  serial: 2026101101
-  records:
-  - name: app
-    type: A
-    value: 192.0.2.100
-- domain: services.example.test
-  ttl: 300
-  serial: 2026101101
-  records:
-  - name: api
-    type: A
-    value: 192.0.2.101
 bind_enable_cgroups: false
 bind_memory_max: 512M
 bind_tasks_max: 256
