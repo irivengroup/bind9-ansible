@@ -57,7 +57,7 @@ fi
 usage() { echo 'usage: bind-backup.sh {backup|list|restore --archive FILE} [--root ABSOLUTE_DIR] | snapshot BACKUP_ROOT STATE_DIR' >&2; exit 2; }
 [[ $# -ge 1 ]] || usage
 action=$1; shift
-root=/var/backups/Bind9Project/bind
+root=/var/backups/Bind9-Ansible/bind
 archive_name=
 while (($#)); do
   case "$1" in

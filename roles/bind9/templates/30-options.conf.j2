@@ -3,9 +3,11 @@ options {
     listen-on port 53 { {{ bind_front_ip }}; {{ bind_back_ip }}; };
     listen-on-v6 { none; };
     recursion no;
+    allow-recursion { none; };
+    allow-query-cache { none; };
     allow-query { none; };
     allow-transfer { none; };
-    dnssec-validation no;
+    dnssec-validation auto;
     empty-zones-enable no;
     minimal-responses yes;
     version "not disclosed";

@@ -9,3 +9,4 @@ Les fichiers de zones sont inclus dans leurs vues respectives depuis `40-views.c
 Ne pas inclure ces deux fichiers directement depuis `named.conf` : les déclarations de zones dépendent du contexte de vue.
 
 Les mises à jour sont non destructives : les templates gérés sont mis à jour si nécessaire, les fichiers absents sont créés, les autres fichiers sont préservés. La configuration doit passer `named-checkconf -z` avant activation.
+

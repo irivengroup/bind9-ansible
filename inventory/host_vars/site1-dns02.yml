@@ -2,5 +2,3 @@
 ansible_host: 10.10.1.12
 bind_front_ip: 192.0.2.12
 bind_back_ip: 10.20.1.12
-bind_front_interface: ens192
-bind_back_interface: ens224

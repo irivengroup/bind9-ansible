@@ -11,7 +11,7 @@ def test_ordered_inventory():
     assert hosts == ['site1-dns01', 'site3-dns01', 'site1-dns02', 'site3-dns02']
 
 def test_one_play_one_role():
-    data = yaml.safe_load((ROOT / 'playbooks/site.yml').read_text())
+    data = yaml.safe_load((ROOT / 'playbooks/bind9-deploy.yml').read_text())
     assert len(data) == 1
     assert data[0]['roles'] == ['bind9']
     assert data[0]['serial'] == 1

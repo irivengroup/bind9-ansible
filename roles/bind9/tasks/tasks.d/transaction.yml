@@ -1,7 +1,7 @@
 ---
 - name: Install transaction controller
   ansible.builtin.copy:
-    src: named-transaction
+    src: named-transaction.py
     dest: /usr/local/sbin/named-transaction
     owner: root
     group: root

@@ -9,8 +9,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install ansible-core==2.16.14 pytest pyyaml
-      - run: ansible-playbook -i inventory/hosts.ini playbooks/site.yml --syntax-check
+      - run: ansible-playbook -i inventory/hosts.ini playbooks/bind9-deploy.yml --syntax-check
       - run: python -m pytest -q tests
       - run: python -m compileall -q tests
-      - run: bash -n roles/bind9/files/bind-backup.sh roles/bind9/files/named-healthcheck
-      - run: python -m py_compile roles/bind9/files/named-transaction
+      - run: bash -n roles/bind9/files/bind-backup.sh roles/bind9/files/named-healthcheck.sh
+      - run: python -m py_compile roles/bind9/files/named-transaction.py

@@ -1,37 +1,45 @@
 from pathlib import Path
-import yaml
+
 from jinja2 import Environment, FileSystemLoader
 
 ROOT = Path(__file__).resolve().parents[1]
 T = ROOT / 'roles/bind9/templates'
 ENV = Environment(loader=FileSystemLoader(str(T)))
 
-def render(template, backend=(), frontend=()):
-    return ENV.get_template(template).render(
-        bind_backend_clients=list(backend), bind_frontend_clients=list(frontend),
-        bind_back_ip='10.0.0.1', bind_front_ip='192.0.2.1',
-        bind_primary_host='p', bind_secondary_host='s', bind_tsig_key_name='x',
-        hostvars={'p': {'bind_back_ip': '10.0.0.1'}, 's': {'bind_back_ip': '10.0.0.2'}})
 
-def test_default_empty():
-    defaults = yaml.safe_load((ROOT/'roles/bind9/defaults/main.yml').read_text())
-    inventory = yaml.safe_load((ROOT/'inventory/group_vars/all.yml').read_text())
-    assert defaults['bind_backend_clients'] == []
-    assert inventory['bind_backend_clients'] == []
+def render(name, back, front):
+    return ENV.get_template(name).render(
+        bind_backend_clients=back,
+        bind_frontend_clients=front,
+        bind_back_ip='10.0.0.2',
+        bind_front_ip='192.0.2.2',
+        bind_primary_host='p', bind_secondary_host='s',
+        bind_tsig_key_name='site-transfer',
+        hostvars={'p': {'bind_back_ip': '10.0.0.1'}, 's': {'bind_back_ip': '10.0.0.2'}},
+        bind_authoritative_zones=[], bind_managed_zones=[], bind_forward_zones=[],
+    )
 
-def test_empty_backend_omits_acl_view():
-    assert 'backend_clients' not in render('20-acl.conf.j2', frontend=['192.0.2.0/24'])
-    assert 'view "backend"' not in render('40-views.conf.j2', frontend=['192.0.2.0/24'])
-    assert 'view "peer"' in render('40-views.conf.j2')
 
-def test_nonempty_backend_uses_back_interface():
-    acl = render('20-acl.conf.j2', backend=['10.30.0.0/16'])
-    view = render('40-views.conf.j2', backend=['10.30.0.0/16'])
-    assert 'acl "backend_clients"' in acl and '10.30.0.0/16;' in acl
-    assert 'view "backend"' in view
-    assert 'match-destinations { 10.0.0.1; };' in view
+def test_no_internal_view_when_empty():
+    assert 'view "internal"' not in render('40-views.conf.j2', [], [])
+    assert 'backend_clients' not in render('20-acl.conf.j2', [], [])
+    assert '20-acl.conf' not in render('named.conf.j2', [], [])
+
+
+def test_internal_view_and_acl_when_nonempty():
+    view = render('40-views.conf.j2', ['10.30.0.0/16'], [])
+    assert 'view "internal"' in view
     assert 'view "external"' not in view
+    assert 'view "peer"' in view
+    assert 'allow-recursion { backend_clients; };' in view
+    assert 'include "/etc/named/zones/20-forward-zones.conf";' in view
+    assert 'acl "backend_clients"' in render('20-acl.conf.j2', ['10.30.0.0/16'], [])
+    assert '10.30.0.0/16;' in render('20-acl.conf.j2', ['10.30.0.0/16'], [])
+    assert '20-acl.conf' in render('named.conf.j2', ['10.30.0.0/16'], [])
 
-def test_no_client_acl_include_when_both_empty():
-    assert '/etc/named/20-acl.conf' not in render('named.conf.j2')
-    assert '/etc/named/20-acl.conf' in render('named.conf.j2', backend=['10.0.0.0/8'])
+
+def test_both_views_independent():
+    view = render('40-views.conf.j2', ['10.30.0.0/16'], ['198.51.100.0/24'])
+    assert 'view "internal"' in view
+    assert 'view "external"' in view
+    assert view.index('view "peer"') < view.index('view "external"') < view.index('view "internal"')

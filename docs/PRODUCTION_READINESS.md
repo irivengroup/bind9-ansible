@@ -1,4 +1,4 @@
-# Bind9Project — Production readiness / qualification
+# Bind9-Ansible — Production readiness / qualification
 
 ## Implemented in V4
 
@@ -18,20 +18,20 @@
 6. **Multisite serial consistency:** enforce matching zone contents and SOA serials across both primaries; compare remote DNS responses during acceptance.
 7. **Failure injection:** test malformed zone, missing TSIG, unavailable forwarder, interrupted Ansible, DNS process failure, loss of each NIC and entire site.
 9. **Monitoring:** connect timer failures and stale SOA serials to central monitoring and alerting; add transfer/forwarding latency metrics and retention.
-10. **Recovery:** restore pending transaction with the same `--zone` list; verify restored service and file checksums. The script is installed at `/usr/local/sbin/Bind9Project-transaction`.
+10. **Recovery:** restore pending transaction with the same `--zone` list; verify restored service and file checksums. The script is installed at `/usr/local/sbin/Bind9-Ansible-transaction`.
 
 ## Recovery example
 
 ```bash
-sudo /usr/local/sbin/Bind9Project-transaction status
-sudo /usr/local/sbin/Bind9Project-transaction restore \
+sudo /usr/local/sbin/Bind9-Ansible-transaction status
+sudo /usr/local/sbin/Bind9-Ansible-transaction restore \
   --zone=cloud.example.test --zone=services.example.test
 sudo restorecon -RF /etc/named.conf /etc/named /var/named
 sudo systemctl restart named
 sudo named-checkconf -z /etc/named.conf
 ```
 
-Never run `begin` on an unresolved pending transaction. Archive baseline lives under `/var/backups/Bind9Project/bind`.
+Never run `begin` on an unresolved pending transaction. Archive baseline lives under `/var/backups/Bind9-Ansible/bind`.
 
 ## Lab test matrix
 
@@ -49,3 +49,4 @@ Never run `begin` on an unresolved pending transaction. Archive baseline lives u
 | Site outage | Clients can reach the other site through their configured DNS resolvers |
 
 **Status: implementation for lab qualification; not production certified.**
+

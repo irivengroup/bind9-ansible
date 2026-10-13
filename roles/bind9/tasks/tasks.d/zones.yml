@@ -39,7 +39,7 @@
   when: "bind_primary_group in group_names"
   notify: Reload named configuration
 
-- name: Remove obsolete DNSZIBO-managed reverse zone files
+- name: Remove obsolete Bind9-Ansible-managed reverse zone files
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: absent
@@ -63,7 +63,7 @@
 - name: Preserve or advance reverse SOA serial based on actual PTR changes
   ansible.builtin.command:
     argv: >-
-      {{ ['/usr/local/sbin/reverse-serial', '--snapshot', '/var/lib/Bind9Project/deployment/pending.tar.gz'] +
+      {{ ['/usr/local/sbin/reverse-serial', '--snapshot', '/var/lib/Bind9-Ansible/deployment/pending.tar.gz'] +
       (bind_generated_reverse_zones | map(attribute='domain') | list) }}
   changed_when: false
   when: "bind_primary_group in group_names and (bind_generated_reverse_zones | length > 0)"

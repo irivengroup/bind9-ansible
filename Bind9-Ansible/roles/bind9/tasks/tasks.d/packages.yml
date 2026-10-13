@@ -1,8 +1,0 @@
----
-- name: Install BIND and SELinux tooling
-  ansible.builtin.dnf:
-    name:
-      - bind
-      - bind-utils
-      - policycoreutils-python-utils
-    state: present

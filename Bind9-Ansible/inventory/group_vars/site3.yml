@@ -1,5 +1,0 @@
----
-bind_site_name: site3
-bind_tsig_key_name: site3-transfer
-bind_tsig_algorithm: hmac-sha256
-bind_tsig_secret_file: '{{ lookup("env", "HOME") }}/.local/share/dnszibo/tsig/site3.key'

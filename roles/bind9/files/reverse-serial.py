@@ -6,7 +6,7 @@ import tarfile
 from pathlib import Path
 
 SOA = re.compile(r'(\(\s*)(\d{1,10})(\s+3600\s+900\s+1209600\s+300\s*\))')
-MARKER = '; DNSZIBO-MANAGED-REVERSE'
+MARKER = '; Bind9-Ansible-MANAGED-REVERSE'
 
 
 def reconcile(path, old):

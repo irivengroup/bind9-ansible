@@ -1,32 +1,33 @@
 ---
 # Shared DNS data for all sites; host-specific IPs remain in host_vars.
-bind_backend_clients: []
 bind_frontend_clients:
-- 198.51.100.0/24
-- 203.0.113.0/24
+  - 198.51.100.0/24
+  - 203.0.113.0/24
+
 bind_forward_zones:
-- domain: corp.example.test
-  forwarders:
-  - address: 10.20.0.53
-    port: 53
-  policy: only
-- domain: fake.example.test
-  forwarders:
-  - address: 10.20.0.99
-    port: 53
-  policy: only
+  - domain: corp.example.test
+    forwarders:
+      - address: 10.20.0.53
+        port: 53
+    policy: only
+  - domain: fake.example.test
+    forwarders:
+      - address: 10.20.0.99
+        port: 53
+    policy: only
+
 bind_authoritative_zones:
-- domain: cloud.example.test
-  ttl: 300
-  serial: 2026101101
-  records:
-  - name: app
-    type: A
-    value: 192.0.2.100
-- domain: services.example.test
-  ttl: 300
-  serial: 2026101101
-  records:
-  - name: api
-    type: A
-    value: 192.0.2.101
+  - domain: cloud.example.test
+    ttl: 300
+    serial: 2026101101
+    records:
+      - name: app
+        type: A
+        value: 192.0.2.100
+  - domain: services.example.test
+    ttl: 300
+    serial: 2026101101
+    records:
+      - name: api
+        type: A
+        value: 192.0.2.101

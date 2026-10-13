@@ -1,8 +1,7 @@
-# Noms des modules de zones
+# Modules des zones DNS
 
-- `50-authoritative-zones.conf` : zones DNS autoritaires, incluses dans la vue peer.
-- `60-forward-zones.conf` : forwarding conditionnel et références `in-view`, inclus dans la vue external.
+- `10-authoritative-zones.conf` : déclarations primaires/secondaires des zones autoritaires dans la vue `peer`.
+- `15-external-authoritative-zones.conf` : références `in-view "peer"` depuis la vue `external` (y compris la zone racine locale).
+- `20-forward-zones.conf` : exclusivement les zones `type forward`, dans la vue `external`.
 
-`/etc/named.conf` demeure limité aux quatre includes de premier niveau.
-
-**Migration depuis une version déjà déployée :** les anciens fichiers `50-zones.conf` et `60-front-zones.conf` ne sont pas effacés automatiquement. Ils deviennent non référencés par les vues après mise à jour. Contrôler et archiver ces fichiers séparément après validation de la nouvelle configuration.
+Les inclusions sont définies dans `40-views.conf`. Aucun transfert de zone n'est autorisé depuis la vue `external`.

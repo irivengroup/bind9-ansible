@@ -1,5 +1,5 @@
 ---
-- name: Remove obsolete client ACL module when both client lists are empty
+- name: Remove obsolete client ACL module when external clients are absent
   ansible.builtin.file:
     path: /etc/named/20-acl.conf
     state: absent
@@ -8,3 +8,10 @@
     - (bind_backend_clients | default([], true) | length) == 0
   notify: Reload named configuration
 
+
+- name: Remove obsolete internal authoritative module when BACK clients are absent
+  ansible.builtin.file:
+    path: /etc/named/zones/16-internal-authoritative-zones.conf
+    state: absent
+  when: bind_backend_clients | default([], true) | length == 0
+  notify: Reload named configuration

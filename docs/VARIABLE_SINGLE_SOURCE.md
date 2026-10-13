@@ -1,4 +1,4 @@
-# Source unique des variables DNSZIBO
+# Source unique des variables Bind9-Ansible
 
 | Donnée | Source |
 | --- | --- |
@@ -11,4 +11,5 @@
 | Secret TSIG | Stockage persistant du contrôleur ; `bind_tsig_secret` chargé en mémoire avec `no_log` |
 | Valeurs communes | `roles/bind9/defaults/main.yml` |
 
-Les destinations des forwarders sont des serveurs tiers : elles ne sont pas des IP d'hôtes DNSZIBO.
+Les destinations des forwarders sont des serveurs tiers : elles ne sont pas des IP d'hôtes Bind9-Ansible.
+

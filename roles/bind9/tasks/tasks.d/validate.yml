@@ -4,8 +4,8 @@
     that:
       - bind_authoritative_zones is not defined or (bind_authoritative_zones is sequence and bind_authoritative_zones is not string and bind_authoritative_zones is not mapping)
       - bind_forward_zones is not defined or (bind_forward_zones is sequence and bind_forward_zones is not string and bind_forward_zones is not mapping)
-      - bind_backend_clients is not defined or (bind_backend_clients is sequence and bind_backend_clients is not string and bind_backend_clients is not mapping)
       - bind_frontend_clients is not defined or (bind_frontend_clients is sequence and bind_frontend_clients is not string and bind_frontend_clients is not mapping)
+      - bind_backend_clients is not defined or (bind_backend_clients is sequence and bind_backend_clients is not string and bind_backend_clients is not mapping)
       - bind_tsig_key_name is defined and (bind_tsig_key_name | default('') | string | trim | length > 0)
       - bind_tsig_algorithm is defined and (bind_tsig_algorithm | default('') | string | trim | length > 0)
       - bind_tsig_secret is defined and (bind_tsig_secret | default('') | string | trim | length >= 32)
@@ -41,12 +41,9 @@
       - ansible_host != bind_back_ip
       - ansible_host != bind_front_ip
       - bind_front_ip != bind_back_ip
-      - bind_front_interface is defined
-      - bind_back_interface is defined
-      - bind_front_interface != bind_back_interface
       - bind_tsig_secret | length >= 32
-      - bind_backend_clients is sequence
       - bind_frontend_clients is sequence
+      - bind_backend_clients is sequence
       - bind_forward_zones is sequence
       - bind_authoritative_zones is sequence
       - hostvars[bind_primary_host].bind_back_ip != hostvars[bind_secondary_host].bind_back_ip

@@ -1,8 +1,0 @@
-; DNSZIBO-MANAGED-REVERSE
-$TTL {{ auth_zone.ttl | default(300, true) }}
-@ IN SOA ns1.{{ bind_authoritative_zones[0].domain }}. hostmaster.{{ bind_authoritative_zones[0].domain }}. ( {{ auth_zone.serial }} 3600 900 1209600 300 )
-@ IN NS ns1.{{ bind_authoritative_zones[0].domain }}.
-@ IN NS ns2.{{ bind_authoritative_zones[0].domain }}.
-{% for record in auth_zone.records | default([], true) %}
-{{ record.name }} IN PTR {{ record.value }}
-{% endfor %}

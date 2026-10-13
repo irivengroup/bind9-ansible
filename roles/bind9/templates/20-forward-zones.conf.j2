@@ -1,6 +1,3 @@
-{% for auth_zone in (bind_managed_zones | default(bind_authoritative_zones | default([], true), true)) %}
-zone "{{ auth_zone.domain }}" IN { in-view "peer"; };
-{% endfor %}
 {% for zone in (bind_forward_zones | default([], true)) %}
 zone "{{ zone.domain }}" IN {
     type forward;
@@ -12,4 +9,3 @@ zone "{{ zone.domain }}" IN {
     };
 };
 {% endfor %}
-zone "." IN { in-view "peer"; };

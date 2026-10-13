@@ -1,4 +1,4 @@
-# 🏷️ DNSZIBO V4 — Rôle Ansible `bind9`
+# 🏷️ Bind9-Ansible — Rôle Ansible `bind9`
 
 > Déploiement reproductible et sécurisé d'une architecture BIND 9 multi-sites, avec séparation des réseaux d'administration et de résolution, réplication Primary/Secondary par TSIG, zones autoritaires et forwardées, génération automatique des PTR, sauvegardes et retour arrière transactionnel.
 
@@ -31,23 +31,18 @@ ansible-galaxy collection install -r requirements.yml
 
 ## 🛠️ Variables du Rôle / Playbook
 
-Les paramètres génériques proviennent de `roles/bind9/defaults/main.yml`. Les listes `bind_frontend_clients`, `bind_backend_clients`, `bind_forward_zones` et `bind_authoritative_zones` y sont vides par défaut (`[]`) ; leurs exemples sont déclarés dans `inventory/group_vars/all.yml` et doivent être adaptés avant production.
 
 | Variable | Type | Description | Valeur par défaut | Obligatoire ? |
 |---|---|---|---|---|
 | `bind_frontend_clients` | `list[str]` | Adresses IPv4/IPv6 individuelles ou CIDR canoniques autorisés sur FRONT | `[]` | Non |
-| `bind_backend_clients` | `list[str]` | Adresses IPv4/IPv6 individuelles ou CIDR canoniques autorisés sur BACK ; vue absente si liste vide | `[]` | Non |
+| `bind_backend_clients` | `list[str]` | Adresses IPv4/IPv6 individuelles ou CIDR canoniques autorisés sur BACK ; vue `internal` créée seulement si non vide | `[]` | Non |
 | `bind_forward_zones` | `list[dict]` | Zones forwardées ; champs `domain`, `forwarders` (`address`, `port`), `policy` | `[]` | Non |
 | `bind_authoritative_zones` | `list[dict]` | Zones autoritaires ; `domain`, `ttl`, `serial`, `records` | `[]` | Non |
-| `bind_enable_cgroups` | `bool` | Activation des limites de ressources systemd | `false` | Non |
-| `bind_memory_max` | `str` | Limite mémoire lorsque les cgroups sont activés | `512M` | Non |
-| `bind_tasks_max` | `int` | Limite du nombre de tâches systemd | `256` | Non |
-| `bind_cpu_quota` | `str` | Quota CPU systemd | `100%` | Non |
-| `bind_backup_root` | `str` | Emplacement des sauvegardes BIND | `/var/backups/Bind9Project/bind` | Non |
-| `bind_migration_state_dir` | `str` | État et points de reprise de migration | `/var/lib/Bind9Project/bind-migration` | Non |
+| `bind_backup_root` | `str` | Emplacement des sauvegardes BIND | `/var/backups/Bind9-Ansible/bind` | Non |
+| `bind_migration_state_dir` | `str` | État et points de reprise de migration | `/var/lib/Bind9-Ansible/bind-migration` | Non |
 | `bind_monitoring_enabled` | `bool` | Active la surveillance périodique DNS | `true` | Non |
 
-**Variables d'inventaire indispensables :** `ansible_host`, `bind_back_ip`, `bind_front_ip`, `bind_back_interface`, `bind_front_interface` sont définies par hôte dans `inventory/host_vars/`. Les paramètres TSIG (`bind_tsig_key_name`, `bind_tsig_algorithm`, `bind_tsig_secret_file`) sont définis par site dans `inventory/group_vars/` ; ils ne figurent pas dans les defaults.
+**Variables d'inventaire indispensables :** `ansible_host`, `bind_back_ip`, `bind_front_ip` sont définies par hôte dans `inventory/host_vars/`. Les paramètres TSIG (`bind_tsig_key_name`, `bind_tsig_algorithm`, `bind_tsig_secret_file`) sont définis par site dans `inventory/group_vars/` ; ils ne figurent pas dans les defaults.
 
 **Exemple d’enregistrements directs (masques inverses fixes) :**
 
@@ -89,9 +84,9 @@ vault_dns_operations_token: 'REPLACE_WITH_SECRET'  # exemple facultatif, non con
 
 ```bash
 ansible-vault encrypt inventory/group_vars/all/vault.yml
-ansible-playbook -i inventory/hosts.ini playbooks/site.yml --ask-vault-pass
+ansible-playbook -i inventory/hosts.ini playbooks/bind9-deploy.yml --ask-vault-pass
 # Variante non interactive :
-ansible-playbook -i inventory/hosts.ini playbooks/site.yml \
+ansible-playbook -i inventory/hosts.ini playbooks/bind9-deploy.yml \
   --vault-password-file /chemin/securise/vault-password-file
 ```
 
@@ -149,8 +144,6 @@ site3-dns02
 ansible_host: 10.10.1.11       # ADM : SSH uniquement
 bind_back_ip: 10.20.1.11       # BACK : pairs DNS
 bind_front_ip: 192.0.2.11      # FRONT : clients cloud
-bind_back_interface: ens224
-bind_front_interface: ens192
 ```
 
 ```yaml
@@ -158,14 +151,14 @@ bind_front_interface: ens192
 bind_site_name: site1
 bind_tsig_key_name: site1-transfer
 bind_tsig_algorithm: hmac-sha256
-bind_tsig_secret_file: "{{ lookup('env', 'HOME') }}/.local/share/dnszibo/tsig/site1.key"
+bind_tsig_secret_file: "{{ lookup('env', 'HOME') }}/.local/share/bind9-ansible/tsig/site1.key"
 ```
 
-### 2. Appel du Playbook (`playbooks/site.yml`)
+### 2. Appel du Playbook (`playbooks/bind9-deploy.yml`)
 
 ```yaml
 ---
-- name: Deploy DNSZIBO BIND 9
+- name: Deploy Bind9-Ansible BIND 9
   hosts: dns_deployment_order
   become: true
   gather_facts: true
@@ -183,20 +176,20 @@ L'ordre Primary puis Secondary est intentionnel : il facilite la disponibilité 
 ```bash
 # Préflight : inventaire et syntaxe
 ansible-inventory -i inventory/hosts.ini --graph
-ansible-playbook -i inventory/hosts.ini playbooks/site.yml --syntax-check
+ansible-playbook -i inventory/hosts.ini playbooks/bind9-deploy.yml --syntax-check
 
 # Déploiement complet
-ansible-playbook -i inventory/hosts.ini playbooks/site.yml
+ansible-playbook -i inventory/hosts.ini playbooks/bind9-deploy.yml
 
 # Vérifications ciblées (configuration existante)
-ansible-playbook -i inventory/hosts.ini playbooks/site.yml --tags validate
-ansible-playbook -i inventory/hosts.ini playbooks/site.yml --tags health
+ansible-playbook -i inventory/hosts.ini playbooks/bind9-deploy.yml --tags validate
+ansible-playbook -i inventory/hosts.ini playbooks/bind9-deploy.yml --tags health
 
 # Exclure la configuration de surveillance
-ansible-playbook -i inventory/hosts.ini playbooks/site.yml --skip-tags monitor
+ansible-playbook -i inventory/hosts.ini playbooks/bind9-deploy.yml --skip-tags monitor
 
 # Dry-run indicatif : peut être incomplet pour les opérations de scripts/TSIG
-ansible-playbook -i inventory/hosts.ini playbooks/site.yml --check --diff
+ansible-playbook -i inventory/hosts.ini playbooks/bind9-deploy.yml --check --diff
 ```
 
 ### Sauvegarde, restauration et reprise
@@ -223,8 +216,8 @@ Le dépôt contient des tests Python et un workflow GitHub Actions (`.github/wor
 
 ```bash
 python3 -m pytest -q
-ansible-playbook -i inventory/hosts.ini playbooks/site.yml --syntax-check
-ansible-lint playbooks/site.yml roles/bind9
+ansible-playbook -i inventory/hosts.ini playbooks/bind9-deploy.yml --syntax-check
+ansible-lint playbooks/bind9-deploy.yml roles/bind9
 ```
 
 **Molecule :** framework recommandé pour des tests de convergence, d'idempotence et de restauration sur des cibles de test RHEL 8. Le dépôt examiné ne fournit pas de scénario Molecule certifié ; la commande suivante est un objectif d'intégration, **pas une preuve de tests Molecule déjà réussis** :
@@ -241,38 +234,23 @@ Créer une branche dédiée, conserver les secrets hors Git, modifier les variab
 
 ## 🔎 Politique réseau et DNS inverse
 
-### Clients DNS internes sur BACK (`bind_backend_clients`)
 
-Déclarer les adresses IP ou réseaux autorisés dans `inventory/group_vars/all.yml` :
+Déclarer les clients FRONT et BACK dans `inventory/group_vars/all.yml`. Les listes
+vides n'activent aucune vue client ; `peer` et `deny` restent présentes.
 
 ```yaml
-bind_backend_clients: []  # Aucun client BACK par défaut
-# Exemple :
-# bind_backend_clients:
-#   - 10.30.0.0/16
-#   - 10.30.0.53
-#   - 2001:db8::53
+bind_frontend_clients:
+  - 198.51.100.0/24
+bind_backend_clients:
+  - 10.30.0.0/16
 ```
 
-La valeur par défaut du rôle (`defaults/main.yml`) est `[]`. Si la liste est vide,
-DNSZIBO ne rend ni l'ACL `backend_clients` ni la vue `backend`. Les requêtes
-des clients BACK sont refusées par la vue `deny`, tandis que la vue `peer`
-continue à assurer les échanges Primary/Secondary et les transferts TSIG.
-Si elle est non vide, les clients de la liste sont acceptés **uniquement sur
-l'adresse BACK** ; la vue BACK utilise les zones autoritaires partagées et les
-zones de forwarding configurées. L'interface ADM reste hors du service DNS.
-
-Les vues FRONT et BACK sont indépendantes. Si les deux listes sont vides,
-aucune ACL client n'est incluse dans `named.conf`. Les vues client correspondantes
-ne sont pas rendues ; seules les vues `peer` et `deny` restent présentes.
-
-### Politique de sécurité des vues et de la résolution inverse
-
-- Les enregistrements A et AAAA produisent automatiquement les PTR avec des zones **/24 IPv4** et **/64 IPv6**. Le champ `mask` par enregistrement est interdit.
-- **FRONT** : récursion et cache désactivés ; seuls les enregistrements autoritaires sont accessibles aux clients `bind_frontend_clients`. Les zones forwardées ne sont pas exposées sur FRONT.
-- **BACK** : les clients `bind_backend_clients` peuvent accéder aux zones autoritaires et aux zones forwardées ; la récursion est réservée à cette vue.
-- Les ACL acceptent des adresses IPv4/IPv6 individuelles sans masque, ainsi que des réseaux CIDR canoniques ; les valeurs incorrectes bloquent le déploiement.
-- La vue `peer` demeure réservée aux échanges entre serveurs DNS.
+La vue `external` reçoit les clients FRONT, la vue `internal` les clients BACK.
+Toutes deux permettent la récursion uniquement aux clients autorisés, incluent
+`20-forward-zones.conf` et consultent les zones autoritaires via `in-view "peer"`.
+Les transferts de zones sont interdits dans ces deux vues ; seuls les transferts
+TSIG explicitement autorisés sur les zones Primary de `peer` sont possibles.
+Les PTR sont générés automatiquement en IPv4 /24 et IPv6 /64.
 
 ## 📄 Licence
 
@@ -306,3 +284,25 @@ Les chemins système standards BIND (`/etc/named`, `/var/named`) et les noms de 
 ### PATH des utilitaires d'administration
 
 Le rôle installe `/etc/profile.d/bind9-sbin-path.sh` pour les sessions shell qui chargent `/etc/profile`. Ce fichier ajoute `/usr/local/sbin` au `PATH` **uniquement si ce répertoire est absent**, sans duplication. La prise en compte se fait à la prochaine ouverture de session (ou avec `source /etc/profile.d/bind9-sbin-path.sh`). Les tâches Ansible et les services systemd utilisent des chemins absolus pour les outils critiques et ne dépendent pas du `PATH` interactif.
+
+
+## Politique des vues DNS (FRONT/BACK)
+
+- `peer` : échanges Primary/Secondary sur BACK, transferts TSIG par zone.
+- `external` : uniquement si `bind_frontend_clients` est non vide ; écoute FRONT, récursion contrôlée et forwarding.
+- `internal` : uniquement si `bind_backend_clients` est non vide ; écoute BACK, récursion contrôlée et forwarding.
+- `deny` : refus de toutes les autres requêtes.
+
+La politique globale reste `recursion no`, `allow-transfer { none; }` et
+`dnssec-validation auto`. Les vues client autorisées définissent `recursion yes`.
+
+
+## Vue interne conditionnelle (BACK)
+
+`bind_backend_clients: []` par défaut : aucune ACL `backend_clients` ni vue `internal` n'est générée. Une liste non vide d'adresses individuelles ou de CIDR canoniques active une vue `internal` écoutant exclusivement sur `bind_back_ip`, avec récursion et cache autorisés uniquement pour cette ACL. Elle utilise les zones autoritaires partagées depuis `peer` via `16-internal-authoritative-zones.conf` et les zones forwardées de `20-forward-zones.conf`. Les transferts restent interdits dans cette vue ; seuls les transferts TSIG dans `peer` sont autorisés. La vue `peer` doit apparaître avant `internal` pour intercepter les communications entre homologues.
+
+```yaml
+bind_backend_clients:
+  - 10.30.0.0/16
+  - 10.30.0.53
+```

@@ -12,3 +12,4 @@ example uses per-site NS A records and must be adapted for external delegation.
 
 Do not overlap authoritative zones with forwarding zones. Use only trusted
 values for records; validate all generated files with named-checkconf -z.
+

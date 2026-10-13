@@ -2,4 +2,4 @@
 bind_site_name: site1
 bind_tsig_key_name: site1-transfer
 bind_tsig_algorithm: hmac-sha256
-bind_tsig_secret_file: '{{ lookup("env", "HOME") }}/.local/share/dnszibo/tsig/site1.key'
+bind_tsig_secret_file: '{{ lookup("env", "HOME") }}/.local/share/bind9-ansible/tsig/site1.key'

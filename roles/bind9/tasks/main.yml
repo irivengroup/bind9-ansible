@@ -48,7 +48,7 @@
     patterns:
       - '*.in-addr.arpa.zone'
       - '*.ip6.arpa.zone'
-    contains: '^; DNSZIBO-MANAGED-REVERSE$'
+    contains: '^; Bind9-Ansible-MANAGED-REVERSE$'
     read_whole_file: false
   register: bind_existing_reverse_files
   when: "bind_primary_group in group_names"
@@ -77,7 +77,7 @@
       ansible.builtin.import_tasks: tasks.d/zones.yml
       tags: [deploy, configure, zones, records]
 
-    - name: Configure SELinux and resource limits
+    - name: Configure SELinux contexts
       ansible.builtin.import_tasks: tasks.d/security.yml
       tags: [deploy, configure]
 

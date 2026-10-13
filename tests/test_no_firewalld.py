@@ -13,6 +13,6 @@ def test_no_firewalld_management():
 
 def test_ci_paths_exist():
     ci = (ROOT / '.github/workflows/ci.yml').read_text()
-    for name in ('named-healthcheck', 'named-transaction', 'bind-backup.sh'):
+    for name in ('named-healthcheck.sh', 'named-transaction.py', 'bind-backup.sh'):
         assert (ROLE / 'files' / name).is_file()
         assert name in ci

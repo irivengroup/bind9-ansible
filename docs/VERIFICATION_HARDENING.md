@@ -1,4 +1,4 @@
-# Passe de vérification et de durcissement — DNSZIBO V4
+# Passe de vérification et de durcissement — Bind9-Ansible V4
 
 ## Modifications
 
@@ -13,3 +13,4 @@
 - Aucun test d'intégration réel Ansible / named-checkconf / named-checkzone / AXFR / restauration SELinux sur RHEL 8 n'a été exécuté dans cet environnement.
 - **Point à arbitrer avant production :** la vue FRONT actuelle autorise la récursion pour ses clients. Une politique antérieure demandait l'absence de récursion sur FRONT ; les zones de forwarding de cette vue doivent être repensées avant de désactiver la récursion sans casser la résolution.
 - Les tags `configure`, `zones` et `records` ne doivent pas être utilisés seuls pour un déploiement transactionnel. Préférer `--tags deploy`.
+

@@ -14,3 +14,4 @@
 ne sont pas disponibles ici. Aucun test de déploiement, transfert TSIG, restauration
 réelle ou intégration BIND n'est revendiqué. Les zones inverses ne doivent être
 publiées que sur des espaces DNS dont l'autorité est effectivement déléguée.
+

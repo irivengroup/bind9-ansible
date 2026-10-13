@@ -1,4 +1,4 @@
-# TSIG automatique — DNSZIBO
+# TSIG automatique — Bind9-Ansible
 
 ## Source de vérité
 
@@ -29,7 +29,8 @@ La clé est générée une fois par site (32 octets aléatoires, HMAC-SHA256) pu
 ## Vérification
 
 `ansible-inventory -i inventory/hosts.ini --host site1-dns01`
-`ansible-playbook -i inventory/hosts.ini playbooks/site.yml --syntax-check`
+`ansible-playbook -i inventory/hosts.ini playbooks/bind9-deploy.yml --syntax-check`
 `pytest -q`
 
 La qualification réelle sur RHEL 8 reste obligatoire.
+

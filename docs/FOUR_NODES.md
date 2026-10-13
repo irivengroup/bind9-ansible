@@ -9,3 +9,4 @@ The TSIG secret is currently shared by the four nodes; use separate keys per sit
 in production by defining bind_tsig_secret in site-scoped encrypted Vault vars.
 The role's destructive first migration requires a tested recovery plan.
 Check `ansible-inventory -i inventory/hosts.ini --graph` before deployment.
+

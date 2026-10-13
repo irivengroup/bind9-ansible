@@ -1,4 +1,4 @@
-# Robustesse du rôle Bind9Project
+# Robustesse du rôle Bind9-Ansible
 
 - Déploiement incrémental : aucun nettoyage global de `/etc/named` ou `/var/named`.
 - Contrôle précoce des chemins gérés (liens symboliques refusés).
@@ -12,3 +12,4 @@
 - Les mises à jour de plusieurs fichiers ne sont pas atomiques. En cas d'échec, restaurer les sauvegardes de fichiers et relancer la validation avant redémarrage.
 - Les fichiers historiques non gérés restent en place. Les inclusions et la configuration effective doivent être contrôlées.
 - Les clés TSIG doivent être stockées dans Ansible Vault; les fichiers secrets sont protégés en 0640.
+

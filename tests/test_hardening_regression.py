@@ -9,7 +9,7 @@ def test_front_and_peer_views_separated():
     assert 'match-destinations { {{ bind_front_ip }}; };' in text
     assert 'match-destinations { {{ bind_back_ip }}; };' in text
     assert 'view "peer"' in text
-    assert 'in-view "peer"' in (ROLE / "templates/20-forward-zones.conf.j2").read_text()
+    assert 'in-view "peer"' in (ROLE / "templates/15-external-authoritative-zones.conf.j2").read_text()
     assert 'recursion no;' in text
 
 

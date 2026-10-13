@@ -8,7 +8,7 @@ def test_adm_address_only_in_host_vars():
     assert 'ansible_host' not in all_vars
     for f in (ROOT / 'inventory/host_vars').glob('*.yml'):
         values = yaml.safe_load(f.read_text())
-        assert set(values) == {'ansible_host', 'bind_front_ip', 'bind_back_ip', 'bind_front_interface', 'bind_back_interface'}
+        assert set(values) == {'ansible_host', 'bind_front_ip', 'bind_back_ip'}
         assert len({values['ansible_host'], values['bind_back_ip'], values['bind_front_ip']}) == 3
 
 def test_bind_templates_never_use_management_address():

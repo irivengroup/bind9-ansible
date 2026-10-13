@@ -8,3 +8,4 @@
 - Firewalld zone bindings, existing allow rules, IPv6, upstream egress and SSH reachability require site-specific review.
 - Protect Vault secrets and never commit plaintext TSIG keys.
 - Never deploy example IP addresses without replacing them.
+

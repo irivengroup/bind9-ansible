@@ -3,12 +3,8 @@ bind_frontend_clients: []
 bind_backend_clients: []
 bind_forward_zones: []
 bind_authoritative_zones: []
-bind_enable_cgroups: false
-bind_memory_max: 512M
-bind_tasks_max: 256
-bind_cpu_quota: 100%
-bind_backup_root: /var/backups/Bind9Project/bind
-bind_migration_state_dir: /var/lib/Bind9Project/bind-migration
+bind_backup_root: /var/backups/Bind9-Ansible/bind
+bind_migration_state_dir: /var/lib/Bind9-Ansible/bind-migration
 bind_monitoring_enabled: true
 
 # Inventory role group names are configurable for reuse across projects.

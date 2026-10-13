@@ -8,7 +8,7 @@ Avant restauration, arrêter le service, vérifier l'archive et planifier la fus
 ## Sauvegardes complètes horaires (V4)
 
 Avant toute modification de configuration, le rôle installe puis exécute
-`/usr/local/sbin/bind-backup.sh backup --root /var/backups/Bind9Project/bind`.
+`/usr/local/sbin/bind-backup.sh backup --root /var/backups/Bind9-Ansible/bind`.
 Le mécanisme sauvegarde `/etc/named.conf`, `/etc/named/` et `/var/named/`
 avec les ACL, attributs étendus, propriétaires et métadonnées SELinux (GNU tar).
 Il réutilise la sauvegarde de l'heure UTC courante et conserve les cinq archives
@@ -41,3 +41,4 @@ sauvegarde de référence. Pour revenir exactement à l'état pré-déploiement,
 utiliser le rollback transactionnel.
 
 Implementation: `bind-backup.sh` is the Bash entrypoint for the `snapshot` operation and delegates `backup`, `list`, and `restore` to the standalone Python file `bind-backup.sh`. No embedded Python heredoc remains.
+

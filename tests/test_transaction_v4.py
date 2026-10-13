@@ -9,11 +9,11 @@ ROLE = ROOT / 'roles/bind9'
 
 
 def test_transaction_script_parses():
-    ast.parse((ROLE / 'files/named-transaction').read_text())
+    ast.parse((ROLE / 'files/named-transaction.py').read_text())
 
 
 def test_transaction_lifecycle_and_recovery():
-    script = (ROLE / 'files/named-transaction').read_text()
+    script = (ROLE / 'files/named-transaction.py').read_text()
     for fragment in ('pending.json', 'pending.tar.gz', 'sha256(', 'flock(', 'SNAPSHOT_CREATED', 'RESTORED', 'COMMITTED', 'Symlink refused'):
         assert fragment in script
     assert 'extractall(' not in script
@@ -32,7 +32,7 @@ def test_rollback_order():
 def test_monitoring_timer():
     tasks = yaml.safe_load((ROLE / 'tasks/tasks.d/monitoring.yml').read_text())
     assert any('named-healthcheck.timer' in str(t) for t in tasks)
-    subprocess.run(['bash', '-n', str(ROLE / 'files/named-healthcheck')], check=True)
+    subprocess.run(['bash', '-n', str(ROLE / 'files/named-healthcheck.sh')], check=True)
 
 
 def test_zone_layout_unchanged():

@@ -10,3 +10,4 @@ Le rôle n'efface plus `/etc/named.conf`, `/etc/named` ni `/var/named`.
 - En cas d'échec de `named-checkconf`, Ansible arrête le déploiement; il ne supprime aucun ancien fichier. Une restauration manuelle peut être réalisée à partir de l'archive de référence.
 
 **Attention** : le template `/etc/named.conf` reste géré dans son intégralité. Les directives personnalisées présentes dans l'ancien fichier sont sauvegardées, mais pas automatiquement fusionnées. Les reporter dans les variables ou templates avant activation. Vérifier aussi les conflits éventuels avec les fichiers historiques.
+
