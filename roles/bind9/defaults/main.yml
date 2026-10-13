@@ -5,7 +5,7 @@ bind_forward_zones: []
 bind_authoritative_zones: []
 bind_backup_root: /var/backups/Bind9-Ansible/bind
 bind_migration_state_dir: /var/lib/Bind9-Ansible/bind-migration
-bind_monitoring_enabled: true
+bind_monitoring_enabled: false
 
 # Inventory role group names are configurable for reuse across projects.
 bind_primary_group: dns_primary
