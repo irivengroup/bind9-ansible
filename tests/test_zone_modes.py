@@ -17,7 +17,7 @@ def test_three_zone_modes():
         shared = env.get_template('15-external-authoritative-zones.conf.j2').render(bind_authoritative_zones=azones)
         assert shared.count('in-view "peer";') == len(azones) + 1
         peer_conf = env.get_template('10-authoritative-zones.conf.j2').render(bind_authoritative_zones=azones, group_names=['dns_primary'], bind_tsig_key_name='transfer', hostvars=peer, bind_secondary_host='s')
-        assert peer_conf.count('type primary;') == len(azones) + 1
+        assert peer_conf.count('type master;') == len(azones) + 1
 
 def test_no_obsolete_client_name():
     for f in (ROLE / 'templates').glob('*.j2'):

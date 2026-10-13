@@ -1,0 +1,5 @@
+---
+# Example addresses: replace before deployment.
+ansible_host: 10.12.2.11
+bind_front_ip: 192.0.2.21
+bind_back_ip: 10.22.2.11

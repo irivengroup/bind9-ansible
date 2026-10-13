@@ -306,3 +306,60 @@ bind_backend_clients:
   - 10.30.0.0/16
   - 10.30.0.53
 ```
+
+### Condition minimale des clients DNS
+
+Au moins une des listes `bind_frontend_clients` et `bind_backend_clients` doit être non vide. Le rôle interrompt le déploiement lors des validations si les deux listes sont vides. Chaque vue client reste facultative individuellement : la vue `external` est créée uniquement si `bind_frontend_clients` est renseignée, et la vue `internal` uniquement si `bind_backend_clients` est renseignée.
+
+### Inclusion des ACL
+
+`/etc/named/20-acl.conf` est toujours inclus dans `named.conf` et déployé par le rôle. Les ACL `frontend_clients` et `backend_clients` restent chacune conditionnelles à leur liste respective. La validation préalable interdit que les deux listes soient vides simultanément.
+
+
+## Inventaires isolés par environnement et site
+
+Le rôle utilise désormais `bind_environment` et `bind_site_name` pour contrôler
+l'appartenance des homologues Primary/Secondary. Le même nom de site peut exister
+indépendamment en production, développement et préproduction.
+
+Les inventaires sont fournis dans `inventory/prod/`, `inventory/dev/` et
+`inventory/preprod/`. Chaque environnement possède ses propres `hosts.ini`,
+`group_vars/` (ACL, zones, forwarders, TSIG) et `host_vars/` (adresses).
+Les adresses, zones et réseaux fournis sont **des exemples à remplacer**.
+
+```bash
+ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --limit site1 --tags deploy
+ansible-playbook -i inventory/dev/hosts.ini playbooks/bind9-deploy.yml --limit site1 --tags deploy
+ansible-playbook -i inventory/preprod/hosts.ini playbooks/bind9-deploy.yml --tags deploy
+```
+
+N'utilisez qu'**un inventaire d'environnement à la fois** : cela évite les
+collisions de noms d'hôtes ou de groupes entre environnements. Les secrets TSIG
+sont isolés par chemin `<environnement>/<site>.key`. L'ancien inventaire
+`inventory/hosts.ini` reste temporairement disponible pour compatibilité.
+
+## Compatibilité Python 3.8+ et BIND RHEL 8+
+
+- Les scripts Python et filtres sont contrôlés par un test de parsing ciblant Python 3.8 ; la CI définit une matrice Python 3.8 à 3.12. Le résultat de cette matrice n'est pas attesté tant qu'elle n'a pas été exécutée sur GitHub Actions.
+- Les déclarations de zones BIND utilisent les mots-clés `type master`, `type slave` et `masters`, compatibles avec la génération BIND 9.11 livrée avec RHEL 8.
+- Les vues `peer`, `external` et `internal`, les références `in-view`, les règles TSIG et `dnssec-validation auto` restent en place.
+- La compatibilité RHEL 9+ doit être confirmée par `named-checkconf -z /etc/named.conf` et des tests de résolution, forwarding, AXFR/IXFR et rollback sur les versions ciblées.
+- L'installation et l'exécution réelles sur RHEL 8+ ne sont pas validées par les tests unitaires du dépôt.
+
+
+### Sécurisation des adresses source et des transferts
+
+- `query-source` n'est pas forcé globalement : le routage détermine la source des requêtes sortantes des vues clientes. Vérifier les règles de routage/pare-feu vers les forwarders.
+- `transfer-source` et `notify-source` sont définis **uniquement dans la vue `peer`** et utilisent `bind_back_ip`.
+- `allow-transfer { none; };` demeure global et dans la vue `peer`; les zones Primary autorisent explicitement les transferts par clé TSIG.
+- Les Secondary n'acceptent les NOTIFY que s'ils sont signés avec la clé TSIG du couple environnement/site.
+- Les vues clientes refusent les transferts et la vue `deny` bloque les clients non autorisés.
+- **Limite de sécurité importante :** une directive `allow-transfer` par clé TSIG ne lie pas cryptographiquement la requête à une interface réseau. La segmentation BACK et les filtrages réseau TCP/UDP 53 restent nécessaires pour empêcher l'accès aux transferts depuis FRONT. Les vues `in-view` partagent les zones de `peer`; tester explicitement les tentatives AXFR sur FRONT.
+- Exécuter `named-checkconf -z /etc/named.conf`, puis vérifier AXFR/NOTIFY signés et non signés sur les interfaces BACK et FRONT avant mise en production.
+
+
+## Routes de retour FRONT (RHEL 8+)
+
+Le déploiement `--tags deploy` détecte automatiquement l’interface associée à `bind_front_ip`, sa connexion NetworkManager active et sa passerelle IPv4 (`nmcli`). Il ajoute des routes **persistantes et ciblées** pour les réseaux IPv4 déclarés dans `bind_frontend_clients` qui ne sont pas déjà routés via FRONT, sans toucher à la route par défaut portée par BACK. Le script est installé sous `/usr/local/sbin/bind-front-routes`.
+
+Pré-requis : `nmcli`, `ip`, Python 3.8+ et une passerelle IPv4 renseignée sur la connexion FRONT. Si aucune passerelle n’est détectée, le déploiement échoue explicitement plutôt que d’inventer une route. Les CIDR IPv6 sont ignorés par le gestionnaire de routes IPv4 ; les réseaux IPv6 nécessitent une politique de routage distincte. Les ACL sont utilisées comme source déclarative : n’y inclure que les réseaux réellement joignables via FRONT. **Attention** : la modification réseau est persistante et n’est pas comprise dans le rollback transactionnel BIND. Vérifier préalablement la connectivité SSH ADM et les chemins de retour.

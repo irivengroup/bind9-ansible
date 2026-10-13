@@ -14,6 +14,12 @@
     fail_msg: 'Template inputs must be correctly typed and mandatory DNS/TSIG values must be nonempty.'
   no_log: true
 
+- name: Require at least one configured DNS client network
+  ansible.builtin.assert:
+    that:
+      - (bind_frontend_clients | length > 0) or (bind_backend_clients | length > 0)
+    fail_msg: 'At least one of bind_frontend_clients or bind_backend_clients must be nonempty.'
+
 - name: Validate individual client ACL entries
   ansible.builtin.assert:
     that:
@@ -33,7 +39,7 @@
   ansible.builtin.assert:
     that:
       - ansible_distribution == 'RedHat'
-      - ansible_distribution_major_version == '8'
+      - (ansible_distribution_major_version | int) >= 8
       - ((bind_primary_group in group_names) | int) + ((bind_secondary_group in group_names) | int) == 1
       - bind_front_ip is defined
       - bind_back_ip is defined
@@ -52,7 +58,7 @@
       - hostvars[bind_primary_host].bind_front_ip is defined
       - hostvars[bind_secondary_host].bind_front_ip is defined
       - (bind_forward_zones | map(attribute='domain') | list | unique | length) == (bind_forward_zones | length)
-    fail_msg: 'Invalid RHEL 8 BIND settings, zone overlap or TSIG secret.'
+    fail_msg: 'Invalid RHEL 8+ BIND settings, zone overlap or TSIG secret.'
   no_log: true
 - name: Validate configured peer identity
   ansible.builtin.assert:

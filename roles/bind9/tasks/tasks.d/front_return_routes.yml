@@ -1,0 +1,22 @@
+---
+- name: Install secure FRONT return route manager
+  ansible.builtin.copy:
+    src: front-routes.py
+    dest: /usr/local/sbin/bind-front-routes
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Persist return routes for external DNS clients through FRONT
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /usr/local/sbin/bind-front-routes
+      - --front-ip
+      - '{{ bind_front_ip }}'
+      - --clients-json
+      - '{{ bind_frontend_clients | to_json }}'
+      - --apply
+  register: bind_front_route_result
+  changed_when: (bind_front_route_result.stdout | from_json).changed | bool
+  when: bind_frontend_clients | length > 0

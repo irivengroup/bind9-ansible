@@ -16,7 +16,7 @@ def test_both_roles_render_all_zones():
         text = env.get_template('10-authoritative-zones.conf.j2').render(bind_authoritative_zones=zones,group_names=['dns_'+role],bind_tsig_key_name='transfer',hostvars={'p': {'bind_back_ip':'10.1.1.1','bind_front_ip':'192.0.2.1'}, 's': {'bind_back_ip':'10.1.1.2','bind_front_ip':'192.0.2.2'}},bind_primary_host='p',bind_secondary_host='s',bind_back_ip='10.1.1.2',bind_forward_zones=[])
         for zone in zones:
             assert f'zone "{zone["domain"]}"' in text
-            assert f'{role if role == "primary" else "secondary"};' in text
+            assert f'{"master" if role == "primary" else "slave"};' in text
 
 def test_primary_file_render():
     env = Environment(loader=FileSystemLoader(str(ROLE/'templates')))

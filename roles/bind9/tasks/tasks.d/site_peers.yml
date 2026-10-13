@@ -2,6 +2,9 @@
 - name: Validate declared DNS site group
   ansible.builtin.assert:
     that:
+      - bind_environment is defined
+      - bind_environment is string
+      - bind_environment | length > 0
       - bind_site_name is defined
       - bind_site_name is string
       - bind_site_name | length > 0
@@ -21,18 +24,28 @@
       the group must exist and contain the host. Define the inventory groups specified by bind_primary_group and
       bind_secondary_group.
 
-- name: Validate DNS site membership
+- name: Discover DNS peers belonging to the same environment and site
+  ansible.builtin.set_fact:
+    bind_site_primary_hosts: >-
+      {{ groups[bind_primary_group] | default([]) | select('in', groups[bind_site_name]) | list }}
+    bind_site_secondary_hosts: >-
+      {{ groups[bind_secondary_group] | default([]) | select('in', groups[bind_site_name]) | list }}
+
+- name: Validate DNS peers share the environment and site
   ansible.builtin.assert:
     that:
-      - bind_site_name is defined
-      - (groups[bind_site_name] | intersect(groups[bind_primary_group]) | length) == 1
-      - (groups[bind_site_name] | intersect(groups[bind_secondary_group]) | length) == 1
-    fail_msg: 'Each site requires exactly one primary and one secondary.'
+      - bind_site_primary_hosts | length == 1
+      - bind_site_secondary_hosts | length == 1
+      - hostvars[bind_site_primary_hosts[0]].bind_environment == bind_environment
+      - hostvars[bind_site_secondary_hosts[0]].bind_environment == bind_environment
+      - hostvars[bind_site_primary_hosts[0]].bind_site_name == bind_site_name
+      - hostvars[bind_site_secondary_hosts[0]].bind_site_name == bind_site_name
+    fail_msg: 'Each environment/site pair requires exactly one primary and one secondary; never mix environments.'
 
-- name: Resolve peer hostnames from inventory membership
+- name: Resolve peer hostnames from environment and site membership
   ansible.builtin.set_fact:
-    bind_primary_host: "{{ (groups[bind_site_name] | intersect(groups[bind_primary_group])) | first }}"
-    bind_secondary_host: "{{ (groups[bind_site_name] | intersect(groups[bind_secondary_group])) | first }}"
+    bind_primary_host: "{{ bind_site_primary_hosts[0] }}"
+    bind_secondary_host: "{{ bind_site_secondary_hosts[0] }}"
 
 - name: Validate required peer host variables
   ansible.builtin.assert:
@@ -42,4 +55,3 @@
       - hostvars[bind_primary_host].bind_front_ip is defined
       - hostvars[bind_secondary_host].bind_front_ip is defined
     fail_msg: 'Missing peer address or inconsistent host_vars role.'
-

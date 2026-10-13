@@ -11,11 +11,6 @@
     - 20-acl.conf
     - 30-options.conf
     - 40-views.conf
-  when: >-
-    item != '20-acl.conf' or
-    (bind_frontend_clients | default([], true) | length > 0) or
-    (bind_backend_clients | default([], true) | length > 0)
-
   notify: Reload named configuration
 - name: Deploy zone configuration modules
   ansible.builtin.template:

@@ -3,14 +3,32 @@ on: [push, pull_request]
 jobs:
   validation:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: '3.8'
+            ansible-version: '2.13.13'
+          - python-version: '3.9'
+            ansible-version: '2.14.18'
+          - python-version: '3.10'
+            ansible-version: '2.16.14'
+          - python-version: '3.11'
+            ansible-version: '2.16.14'
+          - python-version: '3.12'
+            ansible-version: '2.16.14'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-      - run: pip install ansible-core==2.16.14 pytest pyyaml
-      - run: ansible-playbook -i inventory/hosts.ini playbooks/bind9-deploy.yml --syntax-check
-      - run: python -m pytest -q tests
-      - run: python -m compileall -q tests
-      - run: bash -n roles/bind9/files/bind-backup.sh roles/bind9/files/named-healthcheck.sh
-      - run: python -m py_compile roles/bind9/files/named-transaction.py
+          python-version: ${{ matrix.python-version }}
+      - name: Install validation dependencies
+        run: python -m pip install 'ansible-core==${{ matrix.ansible-version }}' pytest pyyaml
+      - name: Ansible syntax check
+        run: ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --syntax-check
+      - name: Unit tests
+        run: python -m pytest -q tests
+      - name: Compile Python sources
+        run: python -m compileall -q roles/bind9/files roles/bind9/filter_plugins tests && python -m py_compile roles/bind9/files/named-transaction.py roles/bind9/files/reverse-serial.py roles/bind9/files/tsig-secret.py
+      - name: Check shell syntax
+        run: bash -n roles/bind9/files/bind-backup.sh roles/bind9/files/named-healthcheck.sh

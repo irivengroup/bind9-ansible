@@ -34,6 +34,10 @@
   ansible.builtin.import_tasks: tasks.d/packages.yml
   tags: [deploy, install]
 
+- name: Configure persistent FRONT return routes for external clients
+  ansible.builtin.import_tasks: tasks.d/front_return_routes.yml
+  tags: [deploy, configure, network]
+
 - name: Back up full BIND configuration before changes
   ansible.builtin.import_tasks: tasks.d/migration.yml
   tags: [deploy, backup]

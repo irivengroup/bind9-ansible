@@ -23,7 +23,7 @@ def render(name, back, front):
 def test_no_internal_view_when_empty():
     assert 'view "internal"' not in render('40-views.conf.j2', [], [])
     assert 'backend_clients' not in render('20-acl.conf.j2', [], [])
-    assert '20-acl.conf' not in render('named.conf.j2', [], [])
+    assert 'include "/etc/named/20-acl.conf";' in render('named.conf.j2', [], [])
 
 
 def test_internal_view_and_acl_when_nonempty():

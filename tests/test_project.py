@@ -10,7 +10,7 @@ def test_no_unrestricted_transfers():
     s = (ROOT / 'roles/bind9/templates/10-authoritative-zones.conf.j2').read_text()
     assert 'allow-transfer { key' in s
     assert 'allow-transfer { none; }' in s
-    assert 'transfer-source {{ bind_back_ip }};' in s
+    assert 'transfer-source {{ bind_back_ip }};' in (ROOT / 'roles/bind9/templates/40-views.conf.j2').read_text()
 
 def test_forwarding_is_conditional():
     options = (ROOT / 'roles/bind9/templates/30-options.conf.j2').read_text()

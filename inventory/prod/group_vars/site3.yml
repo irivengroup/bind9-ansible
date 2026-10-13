@@ -1,0 +1,25 @@
+---
+bind_site_name: site3
+bind_tsig_key_name: prod-site3-transfer
+bind_tsig_algorithm: hmac-sha256
+bind_tsig_secret_file: "{{ lookup('env', 'HOME') }}/.local/share/bind9-ansible/tsig/prod/site3.key"
+
+bind_frontend_clients:
+  - 198.51.100.0/24
+bind_backend_clients: []
+
+bind_forward_zones:
+  - domain: corp.site3.prod.example.test
+    policy: only
+    forwarders:
+      - address: 10.12.0.53
+        port: 53
+
+bind_authoritative_zones:
+  - domain: site3.prod.example.test
+    ttl: 300
+    serial: 2026101301
+    records:
+      - name: app
+        type: A
+        value: 192.0.2.102
