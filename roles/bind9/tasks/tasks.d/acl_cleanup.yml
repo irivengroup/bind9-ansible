@@ -1,7 +1,0 @@
----
-- name: Remove obsolete internal authoritative module when BACK clients are absent
-  ansible.builtin.file:
-    path: /etc/named/zones/16-internal-authoritative-zones.conf
-    state: absent
-  when: bind_backend_clients | default([], true) | length == 0
-  notify: Reload named configuration

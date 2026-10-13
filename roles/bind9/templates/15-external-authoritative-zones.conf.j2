@@ -1,5 +1,0 @@
-{# Shared authoritative zones are defined in peer and referenced in external. #}
-{% for auth_zone in (bind_managed_zones | default(bind_authoritative_zones | default([], true), true)) %}
-zone "{{ auth_zone.domain }}" IN { in-view "peer"; };
-{% endfor %}
-zone "." IN { in-view "peer"; };

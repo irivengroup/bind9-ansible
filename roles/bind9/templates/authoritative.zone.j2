@@ -1,3 +1,4 @@
+; Bind9-Ansible-MANAGED-ZONE
 $TTL {{ auth_zone.ttl | default(300) }}
 @ IN SOA ns1.{{ auth_zone.domain }}. hostmaster.{{ auth_zone.domain }}. ( {{ auth_zone.serial }} 3600 900 1209600 300 )
 @ IN NS ns1.{{ auth_zone.domain }}.

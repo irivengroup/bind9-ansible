@@ -1,4 +1,131 @@
-include "/etc/named/10-tsig.conf";
-include "/etc/named/20-acl.conf";
-include "/etc/named/30-options.conf";
-include "/etc/named/40-views.conf";
+{# Single canonical RHEL 8+ BIND configuration; zone data remains in /var/named. #}
+key "{{ bind_tsig_key_name }}" {
+    algorithm {{ bind_tsig_algorithm }};
+    secret "{{ bind_tsig_secret }}";
+};
+
+{% if bind_frontend_clients | default([], true) | length > 0 %}
+acl "frontend_clients" {
+{% for cidr in bind_frontend_clients %}    {{ cidr }};
+{% endfor %}};
+{% endif %}
+{% if bind_backend_clients | default([], true) | length > 0 %}
+acl "backend_clients" {
+{% for cidr in bind_backend_clients %}    {{ cidr }};
+{% endfor %}};
+{% endif %}
+
+options {
+    directory "/var/named";
+    listen-on port 53 { {{ bind_front_ip }}; {{ bind_back_ip }}; };
+    listen-on-v6 { none; };
+    recursion no;
+    allow-recursion { none; };
+    allow-query-cache { none; };
+    allow-query { none; };
+    allow-transfer { none; };
+    dnssec-validation auto;
+    empty-zones-enable no;
+    minimal-responses yes;
+    version "not disclosed";
+};
+
+// Dedicated peer view for primary/secondary zone transfers, independent of client ACLs.
+view "peer" IN {
+    match-clients { {{ hostvars[bind_primary_host].bind_back_ip }}; {{ hostvars[bind_secondary_host].bind_back_ip }}; key "{{ bind_tsig_key_name }}"; };
+    match-destinations { {{ bind_back_ip }}; };
+    recursion no;
+    transfer-source {{ bind_back_ip }};
+    notify-source {{ bind_back_ip }};
+    allow-transfer { none; };
+    // Transfers are permitted only by per-zone TSIG rules in this peer view.
+    allow-query { {{ hostvars[bind_primary_host].bind_back_ip }}; {{ hostvars[bind_secondary_host].bind_back_ip }}; key "{{ bind_tsig_key_name }}"; };
+    allow-query-cache { none; };
+{% for auth_zone in (bind_managed_zones | default(bind_authoritative_zones | default([], true), true)) %}
+zone "{{ auth_zone.domain }}" IN {
+{% if (bind_primary_group | default("dns_primary")) in group_names %}
+    type master;
+    file "/var/named/zones/{{ auth_zone.domain }}.zone";
+    allow-update { none; };
+    allow-transfer { key "{{ bind_tsig_key_name }}"; };
+    notify explicit;
+    also-notify { {{ hostvars[bind_secondary_host].bind_back_ip }} key "{{ bind_tsig_key_name }}"; };
+{% else %}
+    type slave;
+    file "slaves/{{ auth_zone.domain }}.zone";
+    masters { {{ hostvars[bind_primary_host].bind_back_ip }} key "{{ bind_tsig_key_name }}"; };
+    allow-transfer { none; };
+    allow-notify { key "{{ bind_tsig_key_name }}"; };
+{% endif %}
+};
+{% endfor %}
+zone "." IN {
+    type master;
+    file "/var/named/empty-root.zone";
+    allow-transfer { none; };
+};
+};
+{% if bind_frontend_clients | default([], true) | length > 0 %}
+// Cloud clients arriving exclusively on the FRONT interface.
+view "external" IN {
+    match-clients { frontend_clients; };
+    match-destinations { {{ bind_front_ip }}; };
+    recursion yes;
+    allow-recursion { frontend_clients; };
+    allow-query-cache { frontend_clients; };
+    allow-query { frontend_clients; };
+    allow-transfer { none; };
+    // Authoritative zones are shared from the peer view without duplication.
+{# Shared authoritative zones are defined in peer and referenced in external. #}
+{% for auth_zone in (bind_managed_zones | default(bind_authoritative_zones | default([], true), true)) %}
+zone "{{ auth_zone.domain }}" IN { in-view "peer"; };
+{% endfor %}
+zone "." IN { in-view "peer"; };
+    // Forwarding is restricted to declared external client ACLs.
+{% for zone in (bind_forward_zones | default([], true)) %}
+zone "{{ zone.domain }}" IN {
+    type forward;
+    forward only;
+    forwarders {
+{% for server in zone.forwarders %}
+        {{ server.address }} port {{ server.port | default(53) }};
+{% endfor %}
+    };
+};
+{% endfor %}
+};
+{% endif %}
+{% if bind_backend_clients | default([], true) | length > 0 %}
+// Internal clients on BACK; peer view retains precedence for DNS replication.
+view "internal" IN {
+    match-clients { backend_clients; };
+    match-destinations { {{ bind_back_ip }}; };
+    recursion yes;
+    allow-recursion { backend_clients; };
+    allow-query-cache { backend_clients; };
+    allow-query { backend_clients; };
+    allow-transfer { none; };
+{# Shared authoritative zones from the peer view, without duplicate definitions. #}
+{% for auth_zone in (bind_managed_zones | default(bind_authoritative_zones | default([], true), true)) %}
+zone "{{ auth_zone.domain }}" IN { in-view "peer"; };
+{% endfor %}
+zone "." IN { in-view "peer"; };
+{% for zone in (bind_forward_zones | default([], true)) %}
+zone "{{ zone.domain }}" IN {
+    type forward;
+    forward only;
+    forwarders {
+{% for server in zone.forwarders %}
+        {{ server.address }} port {{ server.port | default(53) }};
+{% endfor %}
+    };
+};
+{% endfor %}
+};
+{% endif %}
+view "deny" IN {
+    match-clients { any; };
+    recursion no;
+    allow-query { none; };
+    allow-query-cache { none; };
+};

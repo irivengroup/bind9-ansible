@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Advance SOA serial when a managed reverse zone changes within a transaction."""
+"""Advance SOA serial when a managed reverse zone changes against the pre-deployment backup."""
 import argparse
 import re
 import tarfile
@@ -41,10 +41,10 @@ def reconcile(path, old):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--snapshot', required=True)
+    parser.add_argument('--backup', required=True)
     parser.add_argument('zones', nargs='*')
     args = parser.parse_args()
-    with tarfile.open(args.snapshot, 'r:gz') as archive:
+    with tarfile.open(args.backup, 'r:gz') as archive:
         previous = {}
         for member in archive:
             if member.isfile() and member.name.startswith('var/named/zones/'):

@@ -7,7 +7,5 @@
     group: named
     mode: "{{ item.mode }}"
   loop:
-    - {path: /etc/named, owner: root, mode: '0750'}
-    - {path: /etc/named/zones, owner: root, mode: '0750'}
     - {path: /var/named/zones, owner: root, mode: '0750'}
     - {path: /var/named/slaves, owner: named, mode: '0750'}

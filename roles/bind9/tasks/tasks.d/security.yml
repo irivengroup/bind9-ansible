@@ -18,7 +18,7 @@
   changed_when: false
 - name: Verify SELinux file labels are not unlabelled
   ansible.builtin.command:
-    argv: [ls, -Z, /etc/named/10-tsig.conf]
+    argv: [ls, -Z, /etc/named.conf]
   register: bind_selinux_context
   changed_when: false
 - name: Reject unlabelled TSIG file

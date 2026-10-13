@@ -5,16 +5,6 @@
     follow: false
   loop:
     - /etc/named.conf
-    - /etc/named
-    - /etc/named/zones
-    - /etc/named/10-tsig.conf
-    - /etc/named/20-acl.conf
-    - /etc/named/30-options.conf
-    - /etc/named/40-views.conf
-    - /etc/named/zones/10-authoritative-zones.conf
-    - /etc/named/zones/15-external-authoritative-zones.conf
-    - /etc/named/zones/16-internal-authoritative-zones.conf
-    - /etc/named/zones/20-forward-zones.conf
     - /var/named
     - /var/named/zones
     - /var/named/slaves

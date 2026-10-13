@@ -29,6 +29,6 @@ jobs:
       - name: Unit tests
         run: python -m pytest -q tests
       - name: Compile Python sources
-        run: python -m compileall -q roles/bind9/files roles/bind9/filter_plugins tests && python -m py_compile roles/bind9/files/named-transaction.py roles/bind9/files/reverse-serial.py roles/bind9/files/tsig-secret.py
+        run: python -m compileall -q roles/bind9/files roles/bind9/filter_plugins tests && python -m py_compile roles/bind9/files/reverse-serial.py roles/bind9/files/tsig-secret.py
       - name: Check shell syntax
-        run: bash -n roles/bind9/files/bind-backup.sh roles/bind9/files/named-healthcheck.sh
+        run: bash -n roles/bind9/files/bind-configtool.sh roles/bind9/files/named-healthcheck.sh

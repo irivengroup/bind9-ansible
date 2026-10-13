@@ -1,48 +1,30 @@
 ---
-- name: Deploy BIND include files before entrypoint
-  ansible.builtin.template:
-    src: '{{ item }}.j2'
-    dest: '/etc/named/{{ item }}'
-    owner: root
-    group: named
-    mode: '0640'
-    backup: true
-  loop:
-    - 20-acl.conf
-    - 30-options.conf
-    - 40-views.conf
-  notify: Reload named configuration
-- name: Deploy zone configuration modules
-  ansible.builtin.template:
-    src: "{{ item.src }}"
-    dest: "/etc/named/zones/{{ item.dest }}"
-    owner: root
-    group: named
-    mode: "0640"
-    backup: true
-  loop:
-    - {src: 10-authoritative-zones.conf.j2, dest: 10-authoritative-zones.conf}
-    - {src: 15-external-authoritative-zones.conf.j2, dest: 15-external-authoritative-zones.conf}
-    - {src: 16-internal-authoritative-zones.conf.j2, dest: 16-internal-authoritative-zones.conf}
-    - {src: 20-forward-zones.conf.j2, dest: 20-forward-zones.conf}
-  when: item.dest != "16-internal-authoritative-zones.conf" or (bind_backend_clients | length > 0)
-  notify: Reload named configuration
-- name: Install shared TSIG key
-  ansible.builtin.template:
-    src: 10-tsig.conf.j2
-    dest: /etc/named/10-tsig.conf
-    owner: root
-    group: named
-    mode: '0640'
-    backup: true
-  no_log: true
-  notify: Reload named configuration
-- name: Deploy main named.conf last
+- name: Deploy the single canonical BIND configuration
   ansible.builtin.template:
     src: named.conf.j2
     dest: /etc/named.conf
     owner: root
     group: named
     mode: '0640'
-    backup: true
+  no_log: true
   notify: Reload named configuration
+
+- name: Remove obsolete Bind9-Ansible configuration fragments
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/named/10-tsig.conf
+    - /etc/named/20-acl.conf
+    - /etc/named/30-options.conf
+    - /etc/named/40-views.conf
+    - /etc/named/zones/10-authoritative-zones.conf
+    - /etc/named/zones/15-external-authoritative-zones.conf
+    - /etc/named/zones/16-internal-authoritative-zones.conf
+    - /etc/named/zones/20-forward-zones.conf
+  notify: Reload named configuration
+
+- name: Remove obsolete transaction executable from previous deployments
+  ansible.builtin.file:
+    path: /usr/local/sbin/named-transaction
+    state: absent

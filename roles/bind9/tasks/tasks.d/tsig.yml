@@ -5,7 +5,7 @@
       - bind_tsig_key_name is match('^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$')
       - bind_tsig_algorithm == 'hmac-sha256'
       - bind_tsig_secret_file is match('^/')
-      - bind_tsig_secret_file != '/etc/named/10-tsig.conf'
+      - bind_tsig_secret_file != '/etc/named.conf'
     fail_msg: 'Invalid TSIG key name, algorithm or controller secret path.'
 
 - name: Create private controller TSIG directory

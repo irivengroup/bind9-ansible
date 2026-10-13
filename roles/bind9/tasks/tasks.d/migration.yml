@@ -7,20 +7,42 @@
     group: root
     mode: '0700'
 
-- name: Install BIND backup and snapshot utility
+- name: Install BIND backup and restore utility
   ansible.builtin.copy:
-    src: bind-backup.sh
-    dest: /usr/local/sbin/bind-backup.sh
+    src: bind-configtool.sh
+    dest: /usr/local/sbin/bind-configtool
     owner: root
     group: root
     mode: '0700'
 
+- name: Remove legacy BIND backup command
+  ansible.builtin.file:
+    path: /usr/local/sbin/bind-backup.sh
+    state: absent
+
+- name: Remove previous installed configtool with .sh extension
+  ansible.builtin.file:
+    path: /usr/local/sbin/bind-configtool.sh
+    state: absent
+
 - name: Back up full BIND configuration before any changes
   ansible.builtin.command:
     argv:
-      - /usr/local/sbin/bind-backup.sh
+      - /usr/local/sbin/bind-configtool
       - backup
+      - --force
       - --root
       - "{{ bind_backup_root }}"
-  register: bind_snapshot_result
-  changed_when: "'BACKUP_CREATED' in bind_snapshot_result.stdout"
+  register: bind_backup_result
+  changed_when: "'BACKUP_CREATED' in bind_backup_result.stdout"
+
+- name: Record the exact pre-deployment backup for recovery
+  ansible.builtin.set_fact:
+    bind_recovery_archive: "{{ bind_backup_result.stdout | trim | regex_replace('^BACKUP_CREATED ', '') }}"
+
+- name: Verify backup archive path was returned
+  ansible.builtin.assert:
+    that:
+      - bind_backup_result.stdout is match('^BACKUP_CREATED /.+[.]tar[.]gz$')
+      - bind_recovery_archive | dirname == bind_backup_root
+    fail_msg: 'No valid pre-deployment backup; refusing to modify BIND.'

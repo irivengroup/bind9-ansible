@@ -86,6 +86,7 @@
     that:
       - item.1.address is defined
       - item.1.address | length > 0
+      - item.1.address | valid_ip_address
       - item.1.port | default(53) | int >= 1
       - item.1.port | default(53) | int <= 65535
     fail_msg: 'Invalid forwarding server address or port.'
@@ -151,6 +152,7 @@
       - item.1.type in ['A', 'AAAA', 'CNAME', 'TXT', 'MX', 'PTR', 'SRV', 'CAA']
       - item.1.value is defined
       - item.1.value | string | length > 0
+      - item.1 | valid_dns_record
       - "'\n' not in item.1.value | string"
     fail_msg: 'Invalid DNS resource record.'
   loop: "{{ (bind_managed_zones) | subelements('records', skip_missing=True) }}"

@@ -34,10 +34,6 @@
   ansible.builtin.import_tasks: tasks.d/packages.yml
   tags: [deploy, install]
 
-- name: Configure persistent FRONT return routes for external clients
-  ansible.builtin.import_tasks: tasks.d/front_return_routes.yml
-  tags: [deploy, configure, network]
-
 - name: Back up full BIND configuration before changes
   ansible.builtin.import_tasks: tasks.d/migration.yml
   tags: [deploy, backup]
@@ -46,7 +42,7 @@
   ansible.builtin.import_tasks: tasks.d/directories.yml
   tags: [deploy, configure]
 
-- name: Find existing reverse zone files before transaction
+- name: Find existing reverse zone files before deployment
   ansible.builtin.find:
     paths: /var/named/zones
     patterns:
@@ -58,22 +54,13 @@
   when: "bind_primary_group in group_names"
   tags: [deploy]
 
-- name: Include previously managed reverse zones in transaction snapshot
-  tags: [deploy]
-  ansible.builtin.set_fact:
-    bind_transaction_zones: "{{ (bind_managed_zones | map(attribute='domain') | list) + (bind_existing_reverse_files.files | default([]) | map(attribute='path') | map('basename') | map('regex_replace', '[.]zone$', '') | list) | unique | list }}"
-
-- name: Prepare transaction controller
-  ansible.builtin.import_tasks: tasks.d/transaction.yml
-  tags: [deploy, configure]
-
 - name: Apply DNS changes with rollback on failure
   block:
-    - name: Remove obsolete client ACL configuration
-      ansible.builtin.import_tasks: tasks.d/acl_cleanup.yml
-      tags: [deploy, configure]
+    - name: Configure persistent FRONT return routes for external clients
+      ansible.builtin.import_tasks: tasks.d/front_return_routes.yml
+      tags: [deploy, configure, network]
 
-    - name: Install modular configuration
+    - name: Install canonical named.conf
       ansible.builtin.import_tasks: tasks.d/configuration.yml
       tags: [deploy, configure]
 
@@ -97,18 +84,29 @@
       ansible.builtin.import_tasks: tasks.d/health.yml
       tags: [deploy, health]
 
-    - name: Commit the successful deployment
+    - name: Commit validated FRONT routes
       ansible.builtin.command:
-        argv: [/usr/local/sbin/named-transaction, commit]
-      changed_when: true
+        argv: [/usr/bin/python3, /usr/local/sbin/bind-front-routes, --commit]
+      changed_when: false
       tags: [deploy]
 
   rescue:
-    - name: Restore files from the deployment snapshot
+    - name: Roll back FRONT routes independently from BIND
       ansible.builtin.command:
-        argv: >-
-          {{ ['/usr/local/sbin/named-transaction', 'restore'] +
-          ((bind_transaction_zones)  | map('regex_replace', '^', '--zone=') | list) }}
+        argv: [/usr/bin/python3, /usr/local/sbin/bind-front-routes, --rollback]
+      register: bind_front_rollback
+      changed_when: (bind_front_rollback.stdout | from_json).changed | bool
+      tags: [deploy]
+
+    - name: Restore the pre-deployment BIND backup
+      ansible.builtin.command:
+        argv:
+          - /usr/local/sbin/bind-configtool
+          - restore
+          - --root
+          - "{{ bind_backup_root }}"
+          - --archive
+          - "{{ bind_recovery_archive | basename }}"
       register: bind_rollback
       tags: [deploy]
       changed_when: true
