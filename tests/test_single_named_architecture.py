@@ -44,7 +44,8 @@ def test_named_conf_render_with_both_client_views():
         'bind_backend_clients': ['10.10.0.0/24'],
         'bind_primary_group': 'dns_primary', 'group_names': ['dns_primary'],
         'bind_primary_host': 'p', 'bind_secondary_host': 's',
-        'hostvars': {'p': {'bind_back_ip': '10.10.0.10'}, 's': {'bind_back_ip': '10.10.0.11'}},
+        'hostvars': {'p': {'bind_back_ip': '10.10.0.10', 'bind_front_ip': '192.0.2.10'},
+                     's': {'bind_back_ip': '10.10.0.11', 'bind_front_ip': '192.0.2.11'}},
         'bind_authoritative_zones': [{'domain': 'prod.example.test'}],
         'bind_forward_zones': [{'domain': 'corp.example.test', 'forwarders': [{'address': '10.20.0.53'}]}],
     }
@@ -53,7 +54,7 @@ def test_named_conf_render_with_both_client_views():
     assert 'zone "prod.example.test" IN' in out
     assert 'zone "corp.example.test" IN' in out
     assert 'masters {' not in out
-    assert 'allow-transfer { !{ !10.10.0.11; any; }; key "site-transfer"; };' in out
+    assert 'allow-transfer { !{ !bind_secondary_back_ip; any; }; key "site-transfer"; };' in out
     assert out.count('include "') == 1
     assert 'include "/etc/named.rfc1912.zones";' in out
     assert 'secret "base64fake=";' in out
@@ -66,13 +67,14 @@ def test_named_conf_render_secondary_front_only():
         'bind_back_ip': '10.10.0.11', 'bind_frontend_clients': ['192.0.2.0/24'],
         'bind_backend_clients': [], 'bind_primary_group': 'dns_primary',
         'group_names': ['dns_secondary'], 'bind_primary_host': 'p', 'bind_secondary_host': 's',
-        'hostvars': {'p': {'bind_back_ip': '10.10.0.10'}, 's': {'bind_back_ip': '10.10.0.11'}},
+        'hostvars': {'p': {'bind_back_ip': '10.10.0.10', 'bind_front_ip': '192.0.2.10'},
+                     's': {'bind_back_ip': '10.10.0.11', 'bind_front_ip': '192.0.2.11'}},
         'bind_authoritative_zones': [{'domain': 'prod.example.test'}], 'bind_forward_zones': [],
     }
     out = Environment(undefined=StrictUndefined).from_string(TEMPLATE.read_text()).render(**context)
     assert 'view "internal"' not in out
     assert 'type slave;' in out and 'masters { 10.10.0.10 key "site-transfer"; };' in out
-    assert 'allow-notify { !{ !10.10.0.10; any; }; key "site-transfer"; };' in out
+    assert 'allow-notify { !{ !bind_primary_back_ip; any; }; key "site-transfer"; };' in out
 
 
 def test_configuration_task_deploys_single_file_and_removes_old_fragments():

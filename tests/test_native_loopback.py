@@ -21,21 +21,32 @@ class TestNativeLoopback:
     @pytest.mark.parametrize('role', ['dns_primary', 'dns_secondary'])
     @pytest.mark.parametrize('front,back', [([], []), (['192.0.2.0/24'], []), ([], ['10.0.0.0/24']), (['192.0.2.0/24'], ['10.0.0.0/24'])])
     def test_local_view_is_available_and_restricted_in_all_client_modes(self, role, front, back):
+        primary = role == 'dns_primary'
         context = dict(bind_tsig_key_name='test-transfer', bind_tsig_algorithm='hmac-sha256',
-                       bind_tsig_secret='test-render-only', bind_front_ip='192.0.2.11',
-                       bind_back_ip='10.0.0.11', bind_frontend_clients=front,
+                       bind_tsig_secret='test-render-only', bind_front_ip='192.0.2.11' if primary else '192.0.2.12',
+                       bind_back_ip='10.0.0.11' if primary else '10.0.0.12', bind_frontend_clients=front,
                        bind_backend_clients=back, group_names=[role],
                        bind_primary_host='p', bind_secondary_host='s',
-                       hostvars={'p': {'bind_back_ip': '10.0.0.11'}, 's': {'bind_back_ip': '10.0.0.12'}},
+                       hostvars={'p': {'bind_back_ip': '10.0.0.11', 'bind_front_ip': '192.0.2.11'},
+                                 's': {'bind_back_ip': '10.0.0.12', 'bind_front_ip': '192.0.2.12'}},
                        bind_authoritative_zones=[{'domain': 'example.test'}],
                        bind_forward_zones=[{'domain': 'corp.test', 'forwarders': [{'address': '10.0.0.53'}]}])
         rendered = Environment(undefined=StrictUndefined).from_string(
             (ROLE / 'templates/named.conf.j2').read_text()).render(**context)
-        assert 'listen-on port 53 { 127.0.0.1; 192.0.2.11; 10.0.0.11; };' in rendered
+        # Use an exact literal rather than BIND's built-in localhost ACL,
+        # whose membership also follows the server's interface addresses.
+        assert 'acl "local_loopback" {\n    127.0.0.1;\n};' in rendered
+        assert rendered.count('127.0.0.1') == 1
+        assert rendered.index('acl "local_loopback"') < rendered.index('options {')
+        prefix = 'bind_primary_' if primary else 'bind_secondary_'
+        assert 'listen-on port 53 { local_loopback; ' + prefix + 'front_ip; ' + prefix + 'back_ip; };' in rendered
+        peer = rendered.split('view "peer" IN {', 1)[1].split('view "local" IN {', 1)[0]
+        assert 'allow-query {\n        local_loopback;' in peer
+        assert 'match-destinations { ' + prefix + 'back_ip; };' in peer
         assert rendered.index('view "peer"') < rendered.index('view "local"') < rendered.index('view "deny"')
         local = rendered.split('view "local" IN {', 1)[1].split('\nview "', 1)[0]
         for directive in ('match-clients', 'match-destinations', 'allow-recursion', 'allow-query-cache', 'allow-query'):
-            assert directive + ' { 127.0.0.1; };' in local
+            assert directive + ' { local_loopback; };' in local
         assert 'allow-transfer { none; };' in local
         assert 'include "/etc/named.rfc1912.zones";' in local
         assert 'zone "example.test" IN { in-view "peer"; };' in local

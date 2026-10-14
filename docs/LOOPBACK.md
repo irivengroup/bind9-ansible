@@ -1,6 +1,6 @@
 # Loopback natif dans le template canonique
 
-`roles/bind9/templates/named.conf.j2` produit `/etc/named.conf` et écoute sur 127.0.0.1, FRONT et BACK. La vue `local`, après `peer`, exige une source ET une destination 127.0.0.1. Elle inclut uniquement `/etc/named.rfc1912.zones`, fourni par le paquet RHEL, et partage les zones métier via `in-view "peer"`. Les suffixes forwardés sont déclarés dans cette vue ; les autres noms restent bloqués par la racine privée.
+`roles/bind9/templates/named.conf.j2` produit `/etc/named.conf` et écoute sur 127.0.0.1, FRONT et BACK. L'ACL `local_loopback`, définie une fois avec exactement `127.0.0.1`, est utilisée dans l'écoute, le contrôle global `allow-query-on`, les permissions peer et les cinq règles de la vue `local`. Cette vue, après `peer`, exige une source ET une destination 127.0.0.1. Elle inclut uniquement `/etc/named.rfc1912.zones`, fourni par le paquet RHEL, et partage les zones métier via `in-view "peer"`. Les suffixes forwardés sont déclarés dans cette vue ; les autres noms restent bloqués par la racine privée. Détail et recette actuels : [ACL_SERVEURS.md](ACL_SERVEURS.md) ; première livraison du loopback : [ACL_LOOPBACK.md](ACL_LOOPBACK.md).
 
 Les fichiers natifs `named.localhost`, `named.loopback`, `named.empty` ne sont pas remplacés. Leur présence et l'absence de liens symboliques sont vérifiées après installation des paquets. L'écoute IPv6 reste désactivée ; une réponse AAAA `::1` est possible en transport IPv4. Le rôle ne modifie ni `/etc/resolv.conf` ni les adresses réseau.
 

@@ -1,79 +1,42 @@
 {
   "project": "Bind9-Ansible",
-  "release": "2026.10.14-nettoyage",
-  "source_archive": "Bind9-Ansible-routes-named.zip",
-  "source_sha256": "16ced90e797da8bd3d37428243b00f23e256de3ebed2bcf13cbb4067f4401ffb",
+  "release": "2026.10.14-acl-serveurs",
+  "source_archive": "Bind9-Ansible-acl-loopback.zip",
+  "source_sha256": "4fbec03083aa49fc31663f5a49c942dba73e99cc4c71025fd862112d2d2b5108",
   "playbook": "playbooks/bind9-deploy.yml",
   "changes": {
     "modified": [
-      ".github/workflows/ci.yml",
       "README.md",
+      "docs/ACL_LOOPBACK.md",
       "docs/LOOPBACK.md",
-      "docs/VALIDATION_FRONT_ROUTES.md",
-      "docs/VALIDATION_NAMED.md",
-      "roles/bind9/defaults/main.yml",
-      "roles/bind9/files/bind-configtool.sh",
-      "roles/bind9/filter_plugins/dns_topology.py",
-      "roles/bind9/handlers/main.yml",
-      "roles/bind9/tasks/tasks.d/security.yml",
-      "tests/test_front_routes_ansible.py",
-      "tests/test_security_remediation.py",
-      "tests/test_single_named_architecture.py",
-      "tests/test_tsig_provisioning.py"
+      "roles/bind9/templates/named.conf.j2",
+      "tests/test_native_loopback.py",
+      "tests/test_single_named_architecture.py"
     ],
     "added": [
-      "docs/VALIDATION_NETTOYAGE.md"
+      "docs/ACL_SERVEURS.md",
+      "tests/test_server_acls.py"
     ],
-    "unchanged_files": 84,
-    "removed": [
-      "docs/FIND_COMPATIBILITY.md",
-      "docs/VALIDATION_LOOPBACK.md",
-      "requirements.yml"
-    ],
+    "unchanged_files": 94,
+    "removed": [],
     "regenerated_metadata": [
       "DELIVERY.json",
       "SOURCE-MANIFEST.sha256"
     ]
   },
   "checks": {
-    "unit_and_regression_tests": 207,
+    "rerun_unit_and_regression_tests": 201,
     "dns": {
       "configurations_loaded": 44,
       "dns_checks": 107,
       "native_files_unchanged": true
     },
-    "coverage_controller_filters": "99%",
-    "source_reference_audit": {
-      "assets_referenced": 9,
-      "task_files_referenced": 21,
-      "handlers_notified": 1,
-      "defaults_consumed": 9,
-      "filters_consumed": 21,
-      "yaml_files_parsed": 48,
-      "restorecon_baseline_exit": 1,
-      "restorecon_current_exit": 0
-    },
-    "networkmanager": {
-      "networkmanager": "1.46.0",
-      "ansible_workflows": 4,
-      "idempotence": true,
-      "selective_recovery": true,
-      "profile_reload_persistence": true,
-      "pending_dns_unapplied": true,
-      "original_routes_back_adm_and_default_preserved": true
-    },
-    "preflight": {
-      "inventories": 3,
-      "hosts": 12,
-      "real_preflight_assertions": true,
-      "target_facts_simulated": true
-    },
+    "route_workflows_rerun": false,
+    "previous_delivery_checks": "See preserved VALIDATION_NETTOYAGE.md; not rerun for ACL change",
     "pyflakes": "EXÉCUTÉ: no findings",
-    "bandit_modified_python_files": "EXÉCUTÉ: no findings",
     "ansible": "2.9.27",
     "controller_python": "3.8.20",
     "bind_lab": "9.18.24",
-    "networkmanager_lab": "1.46.0",
     "target_rhel8_python368": "NON EXÉCUTÉ",
     "remote_ci": "NON EXÉCUTÉ",
     "production_qualification": "NON TERMINÉE"

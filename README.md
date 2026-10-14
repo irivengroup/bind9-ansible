@@ -2,7 +2,7 @@
 
 > Déployer et exploiter une paire BIND 9 par site, avec résolution privée, réplication TSIG, loopback natif RHEL et routes de retour FRONT ajoutées sans reconfigurer le réseau existant.
 
-Le point d'entrée est `playbooks/bind9-deploy.yml`. Le rôle produit une configuration canonique `/etc/named.conf` depuis `roles/bind9/templates/named.conf.j2`. Cette livraison inclut le README, les sources nettoyées, les tests et les procédures de reprise. La qualification sur vos serveurs reste **NON TERMINÉE** : les essais exécutés sont des essais Linux isolés, décrits dans [VALIDATION_NETTOYAGE.md](docs/VALIDATION_NETTOYAGE.md), [VALIDATION_NAMED.md](docs/VALIDATION_NAMED.md) et [VALIDATION_FRONT_ROUTES.md](docs/VALIDATION_FRONT_ROUTES.md).
+Le point d'entrée est `playbooks/bind9-deploy.yml`. Le rôle produit une configuration canonique `/etc/named.conf` depuis `roles/bind9/templates/named.conf.j2`. Cette livraison inclut `local_loopback` et les six ACL des adresses FRONT/BACK des serveurs, les sources nettoyées, les tests et les procédures de reprise. La qualification sur vos serveurs reste **NON TERMINÉE**. Les contrôles actuels sont décrits dans [ACL_SERVEURS.md](docs/ACL_SERVEURS.md) ; les preuves précédentes figurent dans [ACL_LOOPBACK.md](docs/ACL_LOOPBACK.md), [VALIDATION_NETTOYAGE.md](docs/VALIDATION_NETTOYAGE.md), [VALIDATION_NAMED.md](docs/VALIDATION_NAMED.md) et [VALIDATION_FRONT_ROUTES.md](docs/VALIDATION_FRONT_ROUTES.md).
 
 ## 📊 Matrice de compatibilité
 
@@ -137,6 +137,8 @@ Dans l'éditeur Vault, définir uniquement les variables nécessaires, telles qu
 
 ## 🛡️ Sécurité et fonctionnement DNS
 
+Les ACL `bind_primary_back_ip`, `bind_secondary_back_ip`, `bind_primary_front_ip`, `bind_secondary_front_ip`, `bind_servers_back_ip` et `bind_servers_front_ip` sont générées à partir des deux pairs du site courant. Elles remplacent les IP dans les listes d'accès compatibles ; l'écoute et les destinations des vues utilisent les ACL individuelles du rôle local. Ce sont des noms BIND, sans nouvelles variables d'inventaire. Les directives de transport nécessitant une IP explicite la conservent. Membres et applications : [ACL_SERVEURS.md](docs/ACL_SERVEURS.md).
+
 La sélection des vues dépend de la source **et** de la destination : `peer` sur BACK, `local` depuis/vers 127.0.0.1, `external` sur FRONT, `internal` sur BACK, puis `deny`. Les vues clientes n'existent que si leur liste est non vide. La récursion et les transferts sont refusés globalement ; la récursion autorisée reste limitée aux clients déclarés et aux suffixes forwardés. La racine privée retourne NXDOMAIN pour les autres noms : ce projet ne fournit pas un résolveur Internet général.
 
 Les zones sont partagées par `in-view "peer"`, qui conserve les permissions de la zone d'origine. La règle primaire AXFR exige simultanément la source BACK du secondaire **et** la clé TSIG. La vue FRONT exclut également les adresses BACK des pairs et leur clé de transfert. Les secondaires interdisent les transferts, utilisent des masters signés et le primaire envoie des NOTIFY signés depuis BACK. BIND autorise implicitement les NOTIFY des masters : `allow-notify` ne peut pas réduire cette autorisation implicite ; la signature des transferts protège les données reçues.
@@ -191,13 +193,13 @@ Adapter les valeurs d'exemple. Codes : 0 = refus DNS explicite dans les deux ess
 
 | État | Contrôles |
 |---|---|
-| **EXÉCUTÉ** | 207 tests et régressions ; syntaxe Ansible 2.9.27 sur trois inventaires, assertions des 12 hôtes ; Pyflakes sans erreur ; 44 configurations BIND chargées et 107 contrôles DNS réels ; NetworkManager isolé : persistance, idempotence, reprise, préservation du réseau existant |
+| **EXÉCUTÉ** | Livraison ACL serveurs : 201 tests relancés, syntaxe Ansible 2.9.27 sur trois inventaires, 44 configurations BIND chargées et 107 contrôles DNS réels. Livraison nettoyée précédente : suite de 207 tests, assertions des 12 hôtes, Pyflakes et essais NetworkManager ; périmètres détaillés dans les rapports |
 | **NON EXÉCUTÉ** | Déploiement sur RHEL 8/Python 3.6.8, versions BIND/NM cibles, SELinux et pare-feu réels, redémarrage des serveurs, AXFR/IXFR et forwards réels, deuxième déploiement complet sur la paire, restauration opérationnelle, charge et CI distante |
 
 Les rapports fournissent pour chaque contrôle manquant la raison, les prérequis, la procédure, le résultat attendu et le risque restant. Les 44 configurations couvrent les branches du template ; elles ne prouvent pas toutes les combinaisons arbitraires d'inventaire ni tous les incidents réseau. La sauvegarde à chaud d'un secondaire ne garantit pas un instantané atomique de ses journaux BIND ; qualifier la restauration et votre RPO/RTO avant production.
 
 ## 📦 Livraison et traçabilité
 
-La livraison nettoyée est produite à partir de `Bind9-Ansible-routes-named.zip`, sans modifier cette archive ni les références du projet. `DELIVERY.json` décrit la provenance et les différences ; `SOURCE-MANIFEST.sha256` décrit les fichiers ; le ZIP a une empreinte SHA-256 externe. Les caches, logs de validation, environnements Python et secrets générés sont exclus. Les suppressions motivées et la correction SELinux figurent dans [VALIDATION_NETTOYAGE.md](docs/VALIDATION_NETTOYAGE.md) ; les tâches de migration utiles restent conservées.
+La livraison ACL serveurs est produite à partir de `Bind9-Ansible-acl-loopback.zip`, sans modifier cette archive ni les références du projet. `DELIVERY.json` décrit la provenance et les différences ; `SOURCE-MANIFEST.sha256` décrit les fichiers ; le ZIP a une empreinte SHA-256 externe. Les caches, logs de validation, environnements Python et secrets générés sont exclus. Les suppressions motivées et la correction SELinux de la livraison précédente figurent dans [VALIDATION_NETTOYAGE.md](docs/VALIDATION_NETTOYAGE.md) ; les tâches de migration utiles restent conservées.
 
 Les tests sont fournis avec les sources. Le nom public du projet reste **Bind9-Ansible** et le playbook reste **bind9-deploy.yml**. Les métadonnées du rôle déclarent `license: proprietary` ; aucun texte de licence détaillant les droits n'est fourni dans cette archive.
