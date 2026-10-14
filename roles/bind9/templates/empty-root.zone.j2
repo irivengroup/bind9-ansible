@@ -2,3 +2,10 @@ $TTL 60
 @ IN SOA localhost. hostmaster.localhost. ( 1 3600 900 604800 60 )
   IN NS localhost.
 localhost. IN A 127.0.0.1
+{# Only declared forward suffixes escape the private root; others stay NXDOMAIN. #}
+{% for delegation in '.' | forward_delegations(bind_managed_zones | default(bind_authoritative_zones), bind_forward_zones | default([])) %}
+{% for server in delegation.servers %}
+{{ delegation.domain }} IN NS {{ server.name }}
+{{ server.name }} IN {{ server.type }} {{ server.address }}
+{% endfor %}
+{% endfor %}

@@ -20,13 +20,13 @@ def invoke(tmp_path, dig_body, signed_key=True):
 
 
 def test_explicit_refusal_for_both(tmp_path):
-    result = invoke(tmp_path, 'echo "Transfer failed" >&2; exit 9')
+    result = invoke(tmp_path, 'echo "status: REFUSED"; exit 9')
     assert result.returncode == 0
-    assert result.stdout.count('PASS:') == 2
+    assert result.stdout.count('DENIED:') == 2
 
 
 def test_successful_axfr_is_security_failure(tmp_path):
-    result = invoke(tmp_path, 'exit 0')
+    result = invoke(tmp_path, 'echo "example.test. 300 IN SOA ns.example.test. mail.example.test. 1 3600 900 1209600 300"; exit 0')
     assert result.returncode == 1
     assert 'FAIL' in result.stderr
 
@@ -35,6 +35,25 @@ def test_ambiguous_failure_is_not_a_pass(tmp_path):
     result = invoke(tmp_path, 'echo "timed out" >&2; exit 9')
     assert result.returncode == 2
     assert 'INCONCLUSIVE' in result.stderr
+
+
+def test_generic_transfer_failure_connection_failure_or_empty_output_is_inconclusive(tmp_path):
+    for body in ('echo "Transfer failed"; exit 9', 'echo "connection refused"; exit 9', 'exit 0',
+                 'echo "status: NOTAUTH BADKEY"; exit 9'):
+        result = invoke(tmp_path, body)
+        assert result.returncode == 2
+        assert 'INCONCLUSIVE' in result.stderr
+
+
+def test_yaml_capability_detection_accepts_optional_no_spelling_in_real_dig_help(tmp_path):
+    # Actual dig 9.18 help advertises +[no]yaml, not +yaml. Without
+    # recognizing it, an explicit wire refusal is lost in generic text output.
+    for help_text in ('+[no]yaml', '+yaml'):
+        body = ('if [ "$1" = "-h" ]; then echo "' + help_text + '"; exit 0; fi\n'
+                'case "$*" in *+yaml*) echo "status: REFUSED";; *) echo "Transfer failed";; esac\nexit 9')
+        result = invoke(tmp_path, body)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.count('DENIED:') == 2
 
 
 def test_missing_tsig_is_not_a_pass(tmp_path):

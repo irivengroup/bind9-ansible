@@ -1,0 +1,23 @@
+---
+# The package is the source of truth: inspect its files, never template them.
+- name: Inspect distribution-owned localhost configuration and zone data
+  ansible.builtin.stat:
+    path: '{{ item }}'
+    follow: false
+  loop:
+    - /etc/named.rfc1912.zones
+    - /var/named/named.localhost
+    - /var/named/named.loopback
+    - /var/named/named.empty
+  register: bind_native_loopback_files
+
+- name: Require native BIND files without replacing missing or unsafe files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg | default(false)
+      - not (item.stat.islnk | default(false))
+    fail_msg: 'Native BIND file missing or unsafe: {{ item.item }}. Repair the RHEL bind package; the role does not replace vendor files.'
+  loop: '{{ bind_native_loopback_files.results }}'
+  loop_control:
+    label: '{{ item.item }}'

@@ -1,0 +1,41 @@
+---
+- name: Verify the active profile has not changed during the route operation
+  ansible.builtin.command:
+    argv: [nmcli, -g, GENERAL.CON-UUID, device, show, '{{ bind_front_plan.device }}']
+  environment: {LC_ALL: C}
+  register: bind_front_verified_uuid
+  changed_when: false
+  failed_when: bind_front_verified_uuid.rc != 0 or (bind_front_verified_uuid.stdout | trim) != bind_front_plan.uuid
+
+- name: Read persistent routes after the operation
+  ansible.builtin.command:
+    argv: [nmcli, -g, ipv4.routes, connection, show, uuid, '{{ bind_front_plan.uuid }}']
+  environment: {LC_ALL: C}
+  register: bind_front_verified_profile
+  changed_when: false
+
+- name: Require exact additive persistence
+  ansible.builtin.assert:
+    that:
+      - bind_front_plan.profile_before | front_profile_unchanged(bind_front_verified_profile.stdout, bind_front_plan)
+
+- name: Read the main table after the operation
+  ansible.builtin.command:
+    argv: [ip, -j, -4, route, show, table, main]
+  register: bind_front_verified_kernel
+  changed_when: false
+
+- name: Require all original routes and defaults to remain intact
+  ansible.builtin.assert:
+    that:
+      - bind_front_plan.runtime_before | front_routes_unchanged(bind_front_verified_kernel.stdout, bind_front_plan)
+
+- name: Verify effective return routes using the FRONT source address
+  ansible.builtin.command:
+    argv: [ip, -j, -4, route, get, '{{ item.address }}', from, '{{ bind_front_ip }}']
+  loop: '{{ bind_front_plan.probes }}'
+  register: bind_front_verified_return
+  changed_when: false
+  failed_when: >-
+    bind_front_verified_return.rc != 0 or
+    not (bind_front_verified_return.stdout | front_route_lookup(bind_front_plan.device, item.gateway))

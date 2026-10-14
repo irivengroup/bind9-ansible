@@ -1,9 +1,7 @@
 """Regression tests for the intentionally non-modular named.conf architecture."""
 from pathlib import Path
 import ast
-import configparser
 
-import pytest
 from jinja2 import Environment, StrictUndefined
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,14 +11,16 @@ TEMPLATE = ROLE / 'templates/named.conf.j2'
 
 def test_exactly_one_named_configuration_template():
     assert sorted(p.name for p in (ROLE / 'templates').glob('*.conf.j2')) == ['named.conf.j2']
-    assert 'include "' not in TEMPLATE.read_text()
+    # Only distribution-owned native zones may be included; no custom fragments.
+    assert TEMPLATE.read_text().count('include "') == 1
+    assert 'include "/etc/named.rfc1912.zones";' in TEMPLATE.read_text()
 
 
 def test_single_template_contains_all_views_and_security_controls():
     s = TEMPLATE.read_text()
     for part in ('options {', 'view "peer"', 'view "external"', 'view "internal"', 'view "deny"',
                  'recursion no;', 'allow-transfer { none; };', 'dnssec-validation auto;',
-                 'type master;', 'type slave;', 'allow-notify { key', 'allow-transfer { key'):
+                 'type master;', 'type slave;', 'allow-notify { !{ !', 'allow-transfer { !{ !'):
         assert part in s
     assert s.index('view "peer"') < s.index('view "external"') < s.index('view "internal"') < s.index('view "deny"')
 
@@ -53,8 +53,9 @@ def test_named_conf_render_with_both_client_views():
     assert 'zone "prod.example.test" IN' in out
     assert 'zone "corp.example.test" IN' in out
     assert 'masters {' not in out
-    assert 'allow-transfer { key "site-transfer"; };' in out
-    assert 'include "' not in out
+    assert 'allow-transfer { !{ !10.10.0.11; any; }; key "site-transfer"; };' in out
+    assert out.count('include "') == 1
+    assert 'include "/etc/named.rfc1912.zones";' in out
     assert 'secret "base64fake=";' in out
 
 
@@ -71,7 +72,7 @@ def test_named_conf_render_secondary_front_only():
     out = Environment(undefined=StrictUndefined).from_string(TEMPLATE.read_text()).render(**context)
     assert 'view "internal"' not in out
     assert 'type slave;' in out and 'masters { 10.10.0.10 key "site-transfer"; };' in out
-    assert 'allow-notify { key "site-transfer"; };' in out
+    assert 'allow-notify { !{ !10.10.0.10; any; }; key "site-transfer"; };' in out
 
 
 def test_configuration_task_deploys_single_file_and_removes_old_fragments():

@@ -7,11 +7,14 @@ from pathlib import Path
 
 SOA = re.compile(r'(\(\s*)(\d{1,10})(\s+3600\s+900\s+1209600\s+300\s*\))')
 MARKER = '; Bind9-Ansible-MANAGED-REVERSE'
+# The canonical template carries the general ownership marker first so restore
+# can delete only owned files. Accept both this header and the legacy one.
+HEADERS = (MARKER + '\n', '; Bind9-Ansible-MANAGED-ZONE\n' + MARKER + '\n')
 
 
 def reconcile(path, old):
     current = path.read_text()
-    if not current.startswith(MARKER + '\n'):
+    if not current.startswith(HEADERS):
         raise ValueError('Refusing unmanaged reverse zone')
     match = SOA.search(current)
     if not match:
@@ -19,7 +22,7 @@ def reconcile(path, old):
     desired_serial = int(match.group(2))
     if old is None:
         return False
-    if not old.startswith(MARKER + '\n'):
+    if not old.startswith(HEADERS):
         raise ValueError('Refusing to overwrite pre-existing unmanaged reverse zone')
     old_match = SOA.search(old)
     if not old_match:

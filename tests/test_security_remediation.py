@@ -1,7 +1,11 @@
 """Security regressions for the 2026-10 remediation."""
 import importlib.util
 from pathlib import Path
+import shutil
+import subprocess
+
 import pytest
+import yaml
 
 ROOT = Path('roles/bind9')
 
@@ -11,19 +15,6 @@ def load(name, path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-def test_front_conflict_detection_checks_all_more_specific_routes(monkeypatch):
-    module = load('front_routes_security', ROOT / 'files/front-routes.py')
-    monkeypatch.setattr(module, 'run', lambda *args: '[{"dst":"203.0.113.128/25","dev":"back0"},{"dst":"default","dev":"back0"}]')
-    networks = module.targets(['203.0.113.0/24'])
-    assert module.conflicts(networks, 'front0') == ['203.0.113.128/25 via back0']
-
-
-def test_front_conflict_detection_allows_same_device(monkeypatch):
-    module = load('front_routes_security_ok', ROOT / 'files/front-routes.py')
-    monkeypatch.setattr(module, 'run', lambda *args: '[{"dst":"203.0.113.128/25","dev":"front0"}]')
-    assert module.conflicts(module.targets(['203.0.113.0/24']), 'front0') == []
 
 
 def test_invalid_forwarder_and_record_rejected():
@@ -36,10 +27,12 @@ def test_invalid_forwarder_and_record_rejected():
     assert not module.valid_dns_record({'type': 'TXT', 'value': 'foo\nbar'})
 
 
-def test_network_rollback_separate_from_bind_restore():
+def test_bind_restore_is_independent_of_committed_native_network_routes():
     main = (ROOT / 'tasks/main.yml').read_text()
-    assert main.index('tasks.d/migration.yml') < main.index('tasks.d/front_return_routes.yml')
-    assert '--rollback' in main and '--commit' in main
+    assert 'tasks.d/front_return_routes.yml' in main
+    assert 'bind-front-routes' not in main
+    assert 'bind_recovery_archive | basename' in main
+    assert main.index('tasks.d/migration.yml') < main.index('tasks.d/configuration.yml')
 
 
 def test_backups_have_collision_resistant_names_and_owned_cleanup():
@@ -47,3 +40,25 @@ def test_backups_have_collision_resistant_names_and_owned_cleanup():
     assert '/dev/urandom' in shell
     assert 'Bind9-Ansible-MANAGED-ZONE' in shell
     assert 'named-checkconf -z' in shell
+
+
+@pytest.mark.skipif(not shutil.which('sh'), reason='Requires a POSIX shell for the command double')
+def test_restorecon_succeeds_with_canonical_layout_and_no_legacy_directory(tmp_path):
+    """Exercise the actual argv against a fresh layout, detecting missing paths.
+
+    This checks the missing-directory regression; it does not emulate SELinux
+    policy or prove the labels applied by restorecon on RHEL.
+    """
+    tasks = yaml.safe_load((ROOT / 'tasks/tasks.d/security.yml').read_text())
+    task = next(task for task in tasks if task['name'] == 'Restore SELinux contexts')
+    argv = task['ansible.builtin.command']['argv']
+    (tmp_path / 'etc').mkdir()
+    (tmp_path / 'etc/named.conf').write_text('')
+    (tmp_path / 'var/named').mkdir(parents=True)
+    double = tmp_path / 'restorecon-double.sh'
+    double.write_text('for path do\n  [ "$path" = "-RF" ] && continue\n'
+                      '  [ -e "$path" ] || exit 1\ndone\n')
+    paths = [str(tmp_path / path.lstrip('/')) if path.startswith('/') else path for path in argv[1:]]
+    result = subprocess.run(['sh', str(double)] + paths, capture_output=True, text=True)
+    assert result.returncode == 0, 'restorecon must not target absent legacy files'
+    assert set(argv[2:]) == {'/etc/named.conf', '/var/named'}

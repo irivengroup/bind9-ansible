@@ -1,0 +1,47 @@
+---
+# Explicit recovery entry point for an interrupted operation; never auto-recover
+# a directory that could still belong to a running deployment.
+- name: Require normal mode for explicit route recovery
+  ansible.builtin.assert:
+    that: [not ansible_check_mode]
+    fail_msg: 'Route recovery requires normal mode after inspecting the interrupted journal.'
+
+- name: Inspect private route recovery paths
+  ansible.builtin.stat:
+    path: '{{ item }}'
+    follow: false
+  loop:
+    - /var/lib/Bind9-Ansible
+    - /var/lib/Bind9-Ansible/front-routes.lock
+    - /var/lib/Bind9-Ansible/front-routes.lock/plan.json
+  register: bind_front_recovery_paths
+
+- name: Require root-owned safe journal paths
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.uid == 0
+      - not (item.stat.islnk | default(false))
+      - (item.stat.isdir | default(false)) or (item.stat.isreg | default(false))
+      - item.stat.mode in ['0600', '0700']
+      - item.stat.size | int < 262144
+    fail_msg: 'Recovery journal missing or unsafe; inspect it manually without removing the operation lock.'
+  loop: '{{ bind_front_recovery_paths.results }}'
+  loop_control:
+    label: '{{ item.item }}'
+
+- name: Read the interrupted operation journal
+  ansible.builtin.slurp:
+    src: /var/lib/Bind9-Ansible/front-routes.lock/plan.json
+  register: bind_front_recovery_data
+
+- name: Validate the interrupted plan on the controller
+  ansible.builtin.set_fact:
+    bind_front_plan: '{{ bind_front_recovery_data.content | b64decode | from_json | front_route_journal }}'
+
+- name: Mark the interrupted route operation pending
+  ansible.builtin.set_fact:
+    bind_front_route_transaction_pending: true
+
+- name: Restore only routes added by the interrupted operation
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_rollback.yml'

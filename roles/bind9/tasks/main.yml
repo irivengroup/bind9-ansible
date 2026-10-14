@@ -25,14 +25,36 @@
   ansible.builtin.import_tasks: tasks.d/path_safety.yml
   tags: [deploy, preflight]
 
+- name: Recover an explicitly requested interrupted FRONT operation
+  ansible.builtin.import_tasks: tasks.d/front_routes_recover.yml
+  tags: [never, routes-recover]
+
+- name: Install dependencies before DNS checks require dig on a fresh secondary
+  ansible.builtin.import_tasks: tasks.d/packages.yml
+  tags: [deploy, install]
+
 - name: Verify local primary before secondary deployment
   ansible.builtin.import_tasks: tasks.d/primary_readiness.yml
   tags: [deploy, preflight]
   when: "bind_secondary_group in group_names and ((bind_managed_zones) | length > 0)"
 
-- name: Install dependencies
-  ansible.builtin.import_tasks: tasks.d/packages.yml
-  tags: [deploy, install]
+- name: Verify distribution-owned localhost zone files
+  ansible.builtin.import_tasks: tasks.d/native_loopback.yml
+  tags: [deploy, validate]
+
+- name: Determine whether routes belong to a complete DNS deployment
+  ansible.builtin.set_fact:
+    bind_front_routes_defer_commit: '{{ "all" in ansible_run_tags or "deploy" in ansible_run_tags }}'
+    bind_front_route_transaction_pending: false
+    bind_front_route_rollback_attempted: false
+  tags: [deploy, routes]
+
+- name: Add only return routes when explicitly running the routes tag
+  ansible.builtin.import_tasks: tasks.d/front_return_routes.yml
+  tags: [deploy, routes]
+  when:
+    - bind_frontend_clients | length > 0
+    - not (bind_front_routes_defer_commit | bool)
 
 - name: Back up full BIND configuration before changes
   ansible.builtin.import_tasks: tasks.d/migration.yml
@@ -49,16 +71,19 @@
       - '*.in-addr.arpa.zone'
       - '*.ip6.arpa.zone'
     contains: '^; Bind9-Ansible-MANAGED-REVERSE$'
-    read_whole_file: false
+    # Omit read_whole_file for older Ansible; contains already scans line by line.
   register: bind_existing_reverse_files
   when: "bind_primary_group in group_names"
   tags: [deploy]
 
 - name: Apply DNS changes with rollback on failure
   block:
-    - name: Configure persistent FRONT return routes for external clients
+    - name: Add return routes as part of the protected DNS deployment
       ansible.builtin.import_tasks: tasks.d/front_return_routes.yml
-      tags: [deploy, configure, network]
+      tags: [deploy]
+      when:
+        - bind_frontend_clients | length > 0
+        - bind_front_routes_defer_commit | default(false) | bool
 
     - name: Install canonical named.conf
       ansible.builtin.import_tasks: tasks.d/configuration.yml
@@ -84,18 +109,35 @@
       ansible.builtin.import_tasks: tasks.d/health.yml
       tags: [deploy, health]
 
-    - name: Commit validated FRONT routes
-      ansible.builtin.command:
-        argv: [/usr/bin/python3, /usr/local/sbin/bind-front-routes, --commit]
-      changed_when: false
+    - name: Verify pending return routes after successful DNS health checks
+      ansible.builtin.import_tasks: tasks.d/front_routes_verify.yml
       tags: [deploy]
+      when: bind_front_route_transaction_pending | default(false) | bool
+
+    - name: Commit return routes after successful DNS deployment
+      ansible.builtin.import_tasks: tasks.d/front_routes_commit.yml
+      tags: [deploy]
+      when: bind_front_route_transaction_pending | default(false) | bool
 
   rescue:
-    - name: Roll back FRONT routes independently from BIND
-      ansible.builtin.command:
-        argv: [/usr/bin/python3, /usr/local/sbin/bind-front-routes, --rollback]
-      register: bind_front_rollback
-      changed_when: (bind_front_rollback.stdout | from_json).changed | bool
+    - name: Remove routes created by the failed DNS deployment
+      block:
+        - name: Roll back owned FRONT route additions
+          # Evaluate the ownership guard once: a static import would reevaluate
+          # it after the helper sets rollback_attempted, skipping its removals.
+          ansible.builtin.include_tasks:
+            file: '{{ role_path }}/tasks/tasks.d/front_routes_rollback.yml'
+            apply:
+              tags: [deploy]
+          when:
+            - bind_front_route_transaction_pending | default(false) | bool
+            - not (bind_front_route_rollback_attempted | default(false) | bool)
+      rescue:
+        # Continue the existing DNS restoration, but surface the incomplete
+        # network rollback in the final fatal error and retain its journal.
+        - name: Record an incomplete FRONT rollback without masking it
+          ansible.builtin.set_fact:
+            bind_front_route_rollback_error: '{{ ansible_failed_result.msg | default("FRONT rollback failed; inspect the recovery journal") }}'
       tags: [deploy]
 
     - name: Restore the pre-deployment BIND backup
@@ -121,7 +163,12 @@
 
     - name: Stop deployment after rollback
       ansible.builtin.fail:
-        msg: 'named deployment failed; managed files restored. Inspect service and logs.'
+        msg: >-
+          named deployment failed; managed files restored. Inspect service and logs.
+          {{ ('FRONT rollback incomplete: ' ~
+          (bind_front_route_rollback_error | default('see the failed route task')) ~
+          '. Recovery journal retained.')
+          if (bind_front_route_transaction_pending | default(false) | bool) else '' }}
       tags: [deploy]
 
 

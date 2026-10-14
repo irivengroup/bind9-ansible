@@ -7,3 +7,10 @@ $TTL {{ auth_zone.ttl | default(300, true) }}
 {% for record in auth_zone.records | default([], true) %}
 {{ record.name }} IN PTR {{ record.value }}
 {% endfor %}
+{# Reverse authorities need the same cuts for explicitly forwarded children. #}
+{% for delegation in auth_zone.domain | forward_delegations(bind_managed_zones | default(bind_authoritative_zones), bind_forward_zones | default([])) %}
+{% for server in delegation.servers %}
+{{ delegation.domain }} IN NS {{ server.name }}
+{{ server.name }} IN {{ server.type }} {{ server.address }}
+{% endfor %}
+{% endfor %}

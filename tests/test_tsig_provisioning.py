@@ -1,7 +1,5 @@
 from pathlib import Path
 import base64
-import importlib.util
-import os
 import stat
 import subprocess
 import sys

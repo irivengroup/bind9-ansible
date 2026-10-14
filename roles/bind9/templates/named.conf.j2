@@ -17,7 +17,7 @@ acl "backend_clients" {
 
 options {
     directory "/var/named";
-    listen-on port 53 { {{ bind_front_ip }}; {{ bind_back_ip }}; };
+    listen-on port 53 { 127.0.0.1; {{ bind_front_ip }}; {{ bind_back_ip }}; };
     listen-on-v6 { none; };
     recursion no;
     allow-recursion { none; };
@@ -25,6 +25,16 @@ options {
     allow-query { none; };
     allow-transfer { none; };
     dnssec-validation auto;
+{# Private unsigned zones require an explicitly bounded exception, never global no. #}
+{% set unsigned_zones = [] %}
+{% for zone in bind_forward_zones | default([]) %}
+{% if zone.dnssec_validate | default(true) == false %}
+{% set _ = unsigned_zones.append(zone.domain) %}
+{% endif %}
+{% endfor %}
+{% if unsigned_zones | length > 0 %}
+    validate-except { {% for domain in unsigned_zones %}"{{ domain }}"; {% endfor %}};
+{% endif %}
     empty-zones-enable no;
     minimal-responses yes;
     version "not disclosed";
@@ -38,8 +48,20 @@ view "peer" IN {
     transfer-source {{ bind_back_ip }};
     notify-source {{ bind_back_ip }};
     allow-transfer { none; };
-    // Transfers are permitted only by per-zone TSIG rules in this peer view.
-    allow-query { {{ hostvars[bind_primary_host].bind_back_ip }}; {{ hostvars[bind_secondary_host].bind_back_ip }}; key "{{ bind_tsig_key_name }}"; };
+    // Shared zones require both the secondary BACK source and the site TSIG.
+    // Shared zones retain these permissions through in-view; view selection still isolates destinations.
+    allow-query {
+        127.0.0.1;
+        {{ hostvars[bind_primary_host].bind_back_ip }};
+        {{ hostvars[bind_secondary_host].bind_back_ip }};
+        key "{{ bind_tsig_key_name }}";
+{% if bind_frontend_clients | default([], true) | length > 0 %}
+        frontend_clients;
+{% endif %}
+{% if bind_backend_clients | default([], true) | length > 0 %}
+        backend_clients;
+{% endif %}
+    };
     allow-query-cache { none; };
 {% for auth_zone in (bind_managed_zones | default(bind_authoritative_zones | default([], true), true)) %}
 zone "{{ auth_zone.domain }}" IN {
@@ -47,7 +69,8 @@ zone "{{ auth_zone.domain }}" IN {
     type master;
     file "/var/named/zones/{{ auth_zone.domain }}.zone";
     allow-update { none; };
-    allow-transfer { key "{{ bind_tsig_key_name }}"; };
+    // A nested ACL expresses address AND key, including through in-view.
+    allow-transfer { !{ !{{ hostvars[bind_secondary_host].bind_back_ip }}; any; }; key "{{ bind_tsig_key_name }}"; };
     notify explicit;
     also-notify { {{ hostvars[bind_secondary_host].bind_back_ip }} key "{{ bind_tsig_key_name }}"; };
 {% else %}
@@ -55,7 +78,7 @@ zone "{{ auth_zone.domain }}" IN {
     file "slaves/{{ auth_zone.domain }}.zone";
     masters { {{ hostvars[bind_primary_host].bind_back_ip }} key "{{ bind_tsig_key_name }}"; };
     allow-transfer { none; };
-    allow-notify { key "{{ bind_tsig_key_name }}"; };
+    allow-notify { !{ !{{ hostvars[bind_primary_host].bind_back_ip }}; any; }; key "{{ bind_tsig_key_name }}"; };
 {% endif %}
 };
 {% endfor %}
@@ -65,10 +88,38 @@ zone "." IN {
     allow-transfer { none; };
 };
 };
+// The distribution owns localhost/loopback zone definitions and data files.
+// Keep this view after peer: in-view references must target an earlier view.
+view "local" IN {
+    match-clients { 127.0.0.1; };
+    match-destinations { 127.0.0.1; };
+    recursion yes;
+    allow-recursion { 127.0.0.1; };
+    allow-query-cache { 127.0.0.1; };
+    allow-query { 127.0.0.1; };
+    allow-transfer { none; };
+    include "/etc/named.rfc1912.zones";
+{% for auth_zone in (bind_managed_zones | default(bind_authoritative_zones | default([], true), true)) %}
+zone "{{ auth_zone.domain }}" IN { in-view "peer"; };
+{% endfor %}
+zone "." IN { in-view "peer"; };
+{% for zone in (bind_forward_zones | default([], true)) %}
+zone "{{ zone.domain }}" IN {
+    type forward;
+    forward only;
+    forwarders {
+{% for server in zone.forwarders %}
+        {{ server.address }} port {{ server.port | default(53) }};
+{% endfor %}
+    };
+};
+{% endfor %}
+};
 {% if bind_frontend_clients | default([], true) | length > 0 %}
 // Cloud clients arriving exclusively on the FRONT interface.
 view "external" IN {
-    match-clients { frontend_clients; };
+    // A peer address or transfer key must never select a client view on FRONT.
+    match-clients { !{{ hostvars[bind_primary_host].bind_back_ip }}; !{{ hostvars[bind_secondary_host].bind_back_ip }}; !key "{{ bind_tsig_key_name }}"; frontend_clients; };
     match-destinations { {{ bind_front_ip }}; };
     recursion yes;
     allow-recursion { frontend_clients; };

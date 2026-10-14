@@ -11,6 +11,8 @@ bind_backend_clients: []
 bind_forward_zones:
   - domain: corp.site3.prod.example.test
     policy: only
+    # Confirmed private unsigned suffix; exception is restricted to this domain.
+    dnssec_validate: false
     forwarders:
       - address: 10.12.0.53
         port: 53
@@ -18,7 +20,7 @@ bind_forward_zones:
 bind_authoritative_zones:
   - domain: site3.prod.example.test
     ttl: 300
-    serial: 2026101301
+    serial: 2026101401
     records:
       - name: app
         type: A

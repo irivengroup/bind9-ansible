@@ -1,4 +1,66 @@
 ---
+- name: Verify native localhost forward and reverse answers over UDP and TCP
+  ansible.builtin.command:
+    argv:
+      - dig
+      - '{{ item.transport }}'
+      - +time=3
+      - +tries=1
+      - +norecurse
+      - +noall
+      - +comments
+      - +answer
+      - -b
+      - 127.0.0.1
+      - '@127.0.0.1'
+      - '{{ item.name }}'
+      - '{{ item.type }}'
+  loop:
+    - {transport: '+notcp', name: localhost, type: A, answer: '127[.]0[.]0[.]1'}
+    - {transport: '+tcp', name: localhost, type: A, answer: '127[.]0[.]0[.]1'}
+    - {transport: '+notcp', name: 1.0.0.127.in-addr.arpa, type: PTR, answer: 'localhost[.]'}
+    - {transport: '+tcp', name: 1.0.0.127.in-addr.arpa, type: PTR, answer: 'localhost[.]'}
+  loop_control:
+    label: '{{ item.transport }} {{ item.name }} {{ item.type }}'
+  register: bind_loopback_check
+  changed_when: false
+  retries: 3
+  delay: 2
+  until: >-
+    bind_loopback_check.rc == 0 and
+    'status: NOERROR' in bind_loopback_check.stdout and
+    bind_loopback_check.stdout is search('flags:.*\baa\b') and
+    bind_loopback_check.stdout is search('(?m)^' ~ (item.name | regex_escape) ~ '[.]?\s+\d+\s+IN\s+' ~ item.type ~ '\s+' ~ item.answer ~ '\s*$')
+  failed_when: >-
+    bind_loopback_check.rc != 0 or
+    'status: NOERROR' not in bind_loopback_check.stdout or
+    bind_loopback_check.stdout is not search('flags:.*\baa\b') or
+    bind_loopback_check.stdout is not search('(?m)^' ~ (item.name | regex_escape) ~ '[.]?\s+\d+\s+IN\s+' ~ item.type ~ '\s+' ~ item.answer ~ '\s*$')
+
+- name: Read actual reconciled SOA serials from primary zone files
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/named-checkzone
+      - '{{ item.domain }}'
+      - '/var/named/zones/{{ item.domain }}.zone'
+  loop: '{{ bind_managed_zones }}'
+  delegate_to: '{{ bind_primary_host }}'
+  register: bind_checked_primary_serials
+  changed_when: false
+
+- name: Reset expected SOA serial mapping for this health check
+  ansible.builtin.set_fact:
+    bind_expected_soa_serials: {}
+
+- name: Derive expected SOA serials after reverse reconciliation
+  ansible.builtin.set_fact:
+    bind_expected_soa_serials: >-
+      {{ bind_expected_soa_serials | combine({item.item.domain:
+      (item.stdout | checked_soa_serial(item.item.domain))}) }}
+  loop: '{{ bind_checked_primary_serials.results }}'
+  loop_control:
+    label: '{{ item.item.domain }}'
+
 - name: Check authoritative SOA on the back interface
   ansible.builtin.command:
     argv:
@@ -23,12 +85,28 @@
   delay: 5
   until: >-
     bind_soa_checks.rc == 0 and
-    'status: NOERROR' in bind_soa_checks.stdout and
-    bind_soa_checks.stdout is search('flags:.*\baa\b') and
-    (item.serial | string) in bind_soa_checks.stdout
+    (bind_soa_checks.stdout | soa_matches(item.domain, bind_expected_soa_serials[item.domain]))
   failed_when: >-
     bind_soa_checks.rc != 0 or
-    'status: NOERROR' not in bind_soa_checks.stdout or
-    bind_soa_checks.stdout is not search('flags:.*\baa\b') or
-    (item.serial | string) not in bind_soa_checks.stdout
+    not (bind_soa_checks.stdout | soa_matches(item.domain, bind_expected_soa_serials[item.domain]))
+
+- name: Verify each conditional forward zone through the native local view
+  ansible.builtin.command:
+    argv: [dig, '{{ item.1 }}', +time=3, +tries=1, +noall, +comments, +answer,
+           -b, 127.0.0.1, '@127.0.0.1', '{{ item.0.domain }}', SOA]
+  loop: '{{ bind_forward_zones | product(["+notcp", "+tcp"]) | list }}'
+  loop_control:
+    label: '{{ item.1 }} {{ item.0.domain }} SOA'
+  register: bind_forward_health
+  changed_when: false
+  retries: 3
+  delay: 2
+  until: >-
+    bind_forward_health.rc == 0 and
+    'status: NOERROR' in bind_forward_health.stdout and
+    bind_forward_health.stdout is search('(?mi)^' ~ (item.0.domain | regex_escape) ~ '[.]?\s+\d+\s+IN\s+SOA\s+')
+  failed_when: >-
+    bind_forward_health.rc != 0 or
+    'status: NOERROR' not in bind_forward_health.stdout or
+    bind_forward_health.stdout is not search('(?mi)^' ~ (item.0.domain | regex_escape) ~ '[.]?\s+\d+\s+IN\s+SOA\s+')
 

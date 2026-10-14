@@ -20,12 +20,20 @@
       - (bind_frontend_clients | length > 0) or (bind_backend_clients | length > 0)
     fail_msg: 'At least one of bind_frontend_clients or bind_backend_clients must be nonempty.'
 
+- name: Validate literal service addresses and TSIG material before interpolation
+  ansible.builtin.assert:
+    that:
+      - bind_front_ip | dns_identity_valid(bind_back_ip, bind_tsig_key_name, bind_tsig_algorithm, bind_tsig_secret)
+    fail_msg: 'FRONT/BACK must be distinct unicast IPv4 addresses; TSIG requires a safe name, SHA-256 algorithm and a canonical secret of at least 256 bits.'
+  no_log: true
+
 - name: Validate individual client ACL entries
   ansible.builtin.assert:
     that:
       - item is string
       - item | trim | length > 0
       - item | valid_client_address
+      - item | dns_client_safe
       - "'\\n' not in item"
       - "';' not in item"
       - "'{' not in item"
@@ -87,6 +95,12 @@
       - item.1.address is defined
       - item.1.address | length > 0
       - item.1.address | valid_ip_address
+      - item.1 | dns_forwarder_safe
+      - >-
+        (item.1.port | default(53) | int) != 53 or item.1.address not in
+        [bind_front_ip, bind_back_ip, '127.0.0.1',
+        hostvars[bind_primary_host].bind_front_ip, hostvars[bind_primary_host].bind_back_ip,
+        hostvars[bind_secondary_host].bind_front_ip, hostvars[bind_secondary_host].bind_back_ip]
       - item.1.port | default(53) | int >= 1
       - item.1.port | default(53) | int <= 65535
     fail_msg: 'Invalid forwarding server address or port.'
@@ -133,17 +147,11 @@
   loop_control:
     label: "{{ item.domain }}"
 
-- name: Reject overlapping authoritative and forwarded suffixes
+- name: Validate DNS topology and private forwarding delegation cuts
   ansible.builtin.assert:
     that:
-      - >-
-        not (item.0.domain == item.1.domain or
-        item.0.domain.endswith('.' ~ item.1.domain) or
-        item.1.domain.endswith('.' ~ item.0.domain))
-    fail_msg: 'Authoritative and forwarded zones cannot overlap.'
-  loop: "{{ (bind_managed_zones) | product(bind_forward_zones) | list }}"
-  loop_control:
-    label: "{{ item.0.domain }} / {{ item.1.domain }}"
+      - bind_managed_zones | dns_topology_valid(bind_forward_zones)
+    fail_msg: 'Invalid DNS topology: native zone collision, hidden authoritative data or ambiguous forwarding.'
 
 - name: Validate authoritative resource records
   ansible.builtin.assert:

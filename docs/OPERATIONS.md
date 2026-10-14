@@ -3,6 +3,8 @@
 Le rôle déploie **un seul fichier de configuration** : `/etc/named.conf`.
 Les fichiers de données des zones primaires restent dans `/var/named/zones/` et les zones secondaires dans `/var/named/slaves/`.
 Aucun include de configuration `/etc/named/*.conf` n'est créé.
+La vue locale inclut uniquement `/etc/named.rfc1912.zones` du paquet RHEL,
+sans modifier ce fichier ni ses fichiers de zones. Voir [LOOPBACK.md](LOOPBACK.md).
 
 ## Sauvegarde et restauration
 
@@ -15,7 +17,9 @@ sudo /usr/local/sbin/bind-configtool restore --root /var/backups/Bind9-Ansible/b
 sudo systemctl start named
 ```
 
-La restauration valide le checksum SHA-256 et `named-checkconf -z`. Les archives incluent `/etc/named.conf`, `/etc/named` s'il existe, et `/var/named` ; elles contiennent donc aussi les données des zones. Les éventuels fichiers créés après la sauvegarde et non présents dans l'archive ne sont pas automatiquement effacés par l'extraction tar.
+La restauration valide le checksum SHA-256 et `named-checkconf -z`. Les archives incluent `/etc/named.conf`, `/etc/named` s'il existe, et `/var/named` ; elles contiennent donc aussi les données des zones. Les fichiers `.zone` absents de l'archive et portant en première ligne `Bind9-Ansible-MANAGED-ZONE` sont supprimés par l'outil. Les fichiers non marqués sont préservés ; l'extraction tar seule ne supprime pas ces fichiers supplémentaires.
+
+En cas d'échec pris en charge par le bloc DNS d'un déploiement complet, les routes FRONT créées par cette exécution sont retirées avant cette restauration. Les routes préexistantes restent. Une panne de suppression conserve le journal et reste signalée ; une panne SSH ou un arrêt brutal peut demander `routes-recover` après inspection. La commande manuelle `restore` ci-dessus ne supprime pas les routes déjà committées. Voir [FRONT_ROUTES.md](FRONT_ROUTES.md).
 
 ## Migration depuis l'architecture modulaire
 
@@ -28,7 +32,7 @@ ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --tags d
 ansible-playbook -i inventory/dev/hosts.ini playbooks/bind9-deploy.yml --limit site1 --tags deploy
 ```
 
-Ne pas lancer isolément les tags `zones`, `records` ou `configure` : ils ne garantissent pas la sauvegarde et le contrôle de santé. La route par défaut BACK et les routes de retour FRONT restent gérées séparément du backup BIND.
+Ne pas lancer isolément les tags `zones`, `records` ou `configure` : ils ne garantissent pas la sauvegarde et le contrôle de santé. Les seuls ajouts réseau concernent les routes IPv4 manquantes vers les clients FRONT. Le tag `routes` exécute uniquement cette opération ; voir [FRONT_ROUTES.md](FRONT_ROUTES.md). Les paramètres et routes existants sont conservés.
 
 ### Test de refus AXFR depuis FRONT
 
@@ -39,3 +43,5 @@ bind-configtool check-front-axfr FRONT_DNS_IP ZONE CLIENT_SOURCE_IP /chemin/prot
 ```
 
 Code 0 : AXFR refusé explicitement en non signé et signé ; 1 : AXFR réussi (faille) ; 2 : contrôle incomplet ou ambigu.
+
+Une sortie vide, une erreur réseau, `Transfer failed` seul ou une erreur TSIG ne constituent pas un refus prouvé. Certaines versions anciennes de dig n'affichent pas le RCODE AXFR ; une preuve explicite complémentaire est alors nécessaire. Ne pas conclure au succès de la recette sur un code 2.

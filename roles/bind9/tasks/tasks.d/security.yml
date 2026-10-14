@@ -14,14 +14,15 @@
 
 - name: Restore SELinux contexts
   ansible.builtin.command:
-    argv: [restorecon, -RF, /etc/named.conf, /etc/named, /var/named]
+    # The canonical layout does not create the obsolete /etc/named directory.
+    argv: [restorecon, -RF, /etc/named.conf, /var/named]
   changed_when: false
 - name: Verify SELinux file labels are not unlabelled
   ansible.builtin.command:
     argv: [ls, -Z, /etc/named.conf]
   register: bind_selinux_context
   changed_when: false
-- name: Reject unlabelled TSIG file
+- name: Reject unlabelled canonical configuration containing TSIG
   ansible.builtin.assert:
     that:
       - "'unlabeled_t' not in bind_selinux_context.stdout"

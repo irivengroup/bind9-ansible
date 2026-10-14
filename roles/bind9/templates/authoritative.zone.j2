@@ -8,3 +8,10 @@ ns2 IN A {{ hostvars[bind_secondary_host].bind_front_ip }}
 {% for record in auth_zone.records | default([], true) %}
 {{ record.name }} IN {{ record.type }} {{ record.value }}
 {% endfor %}
+{# A forward zone beneath this authority needs a DNS cut, not NXDOMAIN. #}
+{% for delegation in auth_zone.domain | forward_delegations(bind_managed_zones | default(bind_authoritative_zones), bind_forward_zones | default([])) %}
+{% for server in delegation.servers %}
+{{ delegation.domain }} IN NS {{ server.name }}
+{{ server.name }} IN {{ server.type }} {{ server.address }}
+{% endfor %}
+{% endfor %}

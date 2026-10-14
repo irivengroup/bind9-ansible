@@ -8,6 +8,8 @@ jobs:
       matrix:
         include:
           - python-version: '3.8'
+            ansible-version: '2.9.27'
+          - python-version: '3.8'
             ansible-version: '2.13.13'
           - python-version: '3.9'
             ansible-version: '2.14.18'
@@ -23,12 +25,38 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install validation dependencies
-        run: python -m pip install 'ansible-core==${{ matrix.ansible-version }}' pytest pyyaml
+        run: |
+          if [ '${{ matrix.ansible-version }}' = '2.9.27' ]; then
+            python -m pip install 'ansible==2.9.27' 'jinja2==3.0.3' pytest pyyaml
+          else
+            python -m pip install 'ansible-core==${{ matrix.ansible-version }}' pytest pyyaml
+          fi
       - name: Ansible syntax check
         run: ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --syntax-check
+      - name: Detect unused Python imports and undefined names
+        run: |
+          python -m pip install 'pyflakes==3.2.0'
+          python -m pyflakes roles/bind9/filter_plugins roles/bind9/files tests
       - name: Unit tests
         run: python -m pytest -q tests
       - name: Compile Python sources
         run: python -m compileall -q roles/bind9/files roles/bind9/filter_plugins tests && python -m py_compile roles/bind9/files/reverse-serial.py roles/bind9/files/tsig-secret.py
       - name: Check shell syntax
-        run: bash -n roles/bind9/files/bind-configtool.sh roles/bind9/files/named-healthcheck.sh
+        run: bash -n roles/bind9/files/bind-configtool.sh roles/bind9/files/named-healthcheck.sh tests/run_integration_front_routes.sh
+      - name: Native route task workflows on legacy Ansible
+        if: matrix.ansible-version == '2.9.27'
+        run: sudo --preserve-env=PATH "$(command -v python)" -m pytest -q tests/test_front_routes_ansible.py
+      - name: Preflight all delivered inventories on legacy Ansible
+        if: matrix.ansible-version == '2.9.27'
+        run: python tests/integration_preflight.py
+      - name: DNS and native route planner coverage
+        if: matrix.ansible-version == '2.9.27'
+        run: |
+          python -m pip install 'coverage==7.6.1'
+          python -m coverage run --include='*/roles/bind9/filter_plugins/front_routes.py,*/roles/bind9/filter_plugins/dns_topology.py,*/roles/bind9/filter_plugins/soa_health.py' -m pytest -q tests/test_native_front_routes.py tests/test_dns_topology.py tests/test_soa_health.py
+          python -m coverage report --fail-under=98
+      - name: Analyze modified production Python code
+        if: matrix.ansible-version == '2.9.27'
+        run: |
+          python -m pip install 'bandit==1.7.10'
+          python -m bandit -q roles/bind9/filter_plugins/front_routes.py roles/bind9/filter_plugins/dns_topology.py roles/bind9/filter_plugins/soa_health.py roles/bind9/files/reverse-serial.py

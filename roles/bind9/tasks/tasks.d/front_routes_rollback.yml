@@ -1,0 +1,73 @@
+---
+# Remove only entries that were absent in the persisted pre-operation snapshot.
+# command rc is handled explicitly: absent entries are possible after a partial
+# operation, but every other error is fatal and preserves the recovery journal.
+- name: Record that selective FRONT rollback was attempted
+  ansible.builtin.set_fact:
+    bind_front_route_rollback_attempted: true
+
+- name: Inspect active FRONT identity before rollback
+  ansible.builtin.command:
+    argv: [nmcli, -g, GENERAL.CON-UUID, device, show, '{{ bind_front_plan.device }}']
+  environment: {LC_ALL: C}
+  register: bind_front_rollback_uuid
+  changed_when: false
+  failed_when: bind_front_rollback_uuid.rc != 0 or (bind_front_rollback_uuid.stdout | trim) != bind_front_plan.uuid
+
+- name: Read persistent routes available for selective rollback
+  ansible.builtin.command:
+    argv: [nmcli, -g, ipv4.routes, connection, show, uuid, '{{ bind_front_plan.uuid }}']
+  environment: {LC_ALL: C}
+  register: bind_front_rollback_profile
+  changed_when: false
+
+- name: Select only present owned persistent additions
+  ansible.builtin.set_fact:
+    bind_front_profile_removals: '{{ bind_front_plan | front_owned_profile_routes(bind_front_rollback_profile.stdout) }}'
+
+- name: Remove owned persistent additions
+  ansible.builtin.command:
+    argv: [nmcli, --wait, '10', connection, modify, uuid, '{{ bind_front_plan.uuid }}', -ipv4.routes, '{{ item }}']
+  environment: {LC_ALL: C}
+  loop: '{{ bind_front_profile_removals }}'
+
+- name: Read runtime routes available for selective rollback
+  ansible.builtin.command:
+    argv: [ip, -j, -4, route, show, table, main]
+  register: bind_front_rollback_kernel
+  changed_when: false
+
+- name: Select only present owned active additions
+  ansible.builtin.set_fact:
+    bind_front_runtime_removals: '{{ bind_front_plan | front_owned_runtime_routes(bind_front_rollback_kernel.stdout) }}'
+
+- name: Remove owned active additions
+  ansible.builtin.command:
+    argv: [nmcli, --wait, '10', device, modify, '{{ bind_front_plan.device }}', -ipv4.routes, '{{ item }}']
+  environment: {LC_ALL: C}
+  loop: '{{ bind_front_runtime_removals }}'
+
+- name: Read restored profile and main table
+  ansible.builtin.command:
+    argv: '{{ item }}'
+  loop:
+    - [nmcli, -g, ipv4.routes, connection, show, uuid, '{{ bind_front_plan.uuid }}']
+    - [ip, -j, -4, route, show, table, main]
+  environment: {LC_ALL: C}
+  register: bind_front_restored
+  changed_when: false
+
+- name: Require the exact original routing state
+  ansible.builtin.assert:
+    that:
+      - bind_front_plan.profile_before | front_profile_unchanged(bind_front_restored.results[0].stdout, bind_front_plan, false)
+      - bind_front_plan.runtime_before | front_routes_unchanged(bind_front_restored.results[1].stdout, bind_front_plan, false)
+
+- name: Remove the recovery journal after successful rollback
+  ansible.builtin.file:
+    path: /var/lib/Bind9-Ansible/front-routes.lock
+    state: absent
+
+- name: Mark owned FRONT additions completely rolled back
+  ansible.builtin.set_fact:
+    bind_front_route_transaction_pending: false

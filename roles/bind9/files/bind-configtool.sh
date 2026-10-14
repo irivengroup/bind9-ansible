@@ -6,21 +6,29 @@ usage() { echo 'usage: bind-configtool {backup [--force]|list|restore --archive 
 action=$1; shift
 check_front_axfr() {
   (($# == 4)) || usage
-  local server=$1 zone=$2 source=$3 keyfile=$4 label output status
+  local server=$1 zone=$2 source=$3 keyfile=$4 label output dig_help
   command -v dig >/dev/null 2>&1 || { echo 'dig missing' >&2; return 2; }
   [[ -f $keyfile && -r $keyfile && ! -L $keyfile ]] || { echo 'TSIG keyfile must be a readable regular file, not a symlink' >&2; return 2; }
+  dig_help=$(dig -h 2>&1) || true
   # Never echo the key or use dig -y: the secret must not appear in process arguments.
   for label in unsigned signed; do
     local -a args=(+time=3 +tries=1 -b "$source" "@$server" "$zone" AXFR)
+    # Recent dig exposes the actual AXFR response RCODE in YAML. Older dig
+    # can print only "Transfer failed"; that is deliberately inconclusive.
+    [[ $dig_help == *'+[no]yaml'* || $dig_help == *'+yaml'* ]] && args+=(+yaml)
     [[ $label == signed ]] && args+=(-k "$keyfile")
-    status=0
-    output=$(dig "${args[@]}" 2>&1) || status=$?
-    if [[ $status -eq 0 ]]; then
+    # A wire refusal can make dig exit nonzero; classify its DNS response.
+    output=$(dig "${args[@]}" 2>&1) || true
+    if grep -Eq '[[:space:]]IN[[:space:]]+SOA[[:space:]]' <<< "$output"; then
       echo "FAIL: FRONT AXFR succeeded ($label)" >&2
       return 1
     fi
-    if grep -Eiq 'Transfer failed|REFUSED|NOTAUTH|connection refused' <<< "$output"; then
-      echo "PASS: FRONT AXFR denied ($label)"
+    if grep -Eq 'BADKEY|BADSIG|BADTIME' <<< "$output"; then
+      echo "INCONCLUSIVE: TSIG authentication failed ($label)" >&2
+      return 2
+    fi
+    if grep -Eq 'status: (REFUSED|NOTAUTH)([,[:space:]]|$)' <<< "$output"; then
+      echo "DENIED: FRONT AXFR explicitly refused ($label)"
     else
       echo "INCONCLUSIVE: FRONT AXFR did not return an explicit denial ($label): $output" >&2
       return 2
@@ -33,11 +41,10 @@ if [[ $action == check-front-axfr ]]; then
 fi
 root=/var/backups/Bind9-Ansible/bind
 archive_name=
-force=false
 while (($#)); do
   case "$1" in
     --root) (($# >= 2)) || usage; root=$2; shift 2 ;;
-    --force) [[ $action == backup ]] || usage; force=true; shift ;;
+    --force) [[ $action == backup ]] || usage; shift ;;
     --archive) (($# >= 2)) || usage; archive_name=$2; shift 2 ;;
     *) usage ;;
   esac
