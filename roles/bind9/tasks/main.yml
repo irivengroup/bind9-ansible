@@ -1,5 +1,5 @@
 ---
-- name: Normalize optional DNSSEC configuration before any role changes
+- name: Validate optional DNSSEC input before any role changes
   ansible.builtin.import_tasks: tasks.d/dnssec_settings.yml
   tags: [always]
 
@@ -59,7 +59,7 @@
 
 - name: Require explicit boolean route management setting
   ansible.builtin.assert:
-    that: [bind_front_routes_enabled is boolean]
+    that: ["(bind_front_routes_enabled | type_debug) == 'bool'"]
     fail_msg: 'bind_front_routes_enabled must be a YAML boolean.'
   tags: [always]
 
@@ -112,18 +112,18 @@
         - bind_cloud_clients | length > 0
         - bind_front_routes_defer_commit | default(false) | bool
 
-    - name: Prepare IPv4 transport and native administrative reload
+    - name: Preserve native transport and prepare administrative reload
       ansible.builtin.import_tasks: tasks.d/named_runtime.yml
       tags: [deploy, configure]
 
     - name: Remove managed DNSSEC components when validation is disabled
       ansible.builtin.import_tasks: tasks.d/dnssec_disable.yml
-      when: not bind_dnssec_active
+      when: not (bind_dnssec_active == 'auto' or (bind_dnssec_active | bool))
       tags: [deploy, configure]
 
     - name: Prepare optional DNSSEC validation and scoped private exceptions
       ansible.builtin.import_tasks: tasks.d/dnssec_install.yml
-      when: bind_dnssec_active
+      when: bind_dnssec_active == 'auto' or (bind_dnssec_active | bool)
       tags: [deploy, configure]
 
     - name: Install canonical named.conf
@@ -148,7 +148,7 @@
 
     - name: Activate scoped private DNSSEC exceptions before health checks
       ansible.builtin.import_tasks: tasks.d/dnssec_activate.yml
-      when: bind_dnssec_active
+      when: bind_dnssec_active == 'auto' or (bind_dnssec_active | bool)
       tags: [deploy]
 
     - name: Verify DNS queries and SOA consistency

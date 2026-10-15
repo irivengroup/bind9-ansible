@@ -61,7 +61,7 @@ Une sortie vide, une erreur réseau, `Transfer failed` seul ou une erreur TSIG n
 
 ## Passage depuis la livraison avec vues
 
-Sauvegarder les deux pairs et relever leurs SOA avant le déploiement en recette. La configuration autorise la fusion calculée `bind_allowed_clients` des listes cloud et internes, charge les zones natives globalement et désactive DNSSEC par défaut (`bind_dnssec_enabled: false`). Déclarer `dnssec_validate: false` seulement sur les suffixes privés non signés qui nécessitent une exception. Les modifications des données exigent un serial supérieur au serial servi. Déployer le primaire avant le secondaire et appliquer [TESTS_FONCTIONNELS.md](TESTS_FONCTIONNELS.md). Le passage à chaud depuis des vues n'a pas été exécuté sur RHEL : contrôler le rechargement et les journaux ; planifier un restart en recette si nécessaire. Le rollback automatique porte sur l'hôte courant, sans restaurer les hôtes déjà déployés.
+Sauvegarder les deux pairs et relever leurs SOA avant le déploiement en recette. La configuration autorise la fusion calculée `bind_allowed_clients` des listes cloud et internes, charge les zones natives globalement et désactive DNSSEC par défaut (`bind_dnssec_active: false`). Déclarer `dnssec_validate: false` seulement sur les suffixes privés non signés qui nécessitent une exception. Les modifications des données exigent un serial supérieur au serial servi. Déployer le primaire avant le secondaire et appliquer [TESTS_FONCTIONNELS.md](TESTS_FONCTIONNELS.md). Le passage à chaud depuis des vues n'a pas été exécuté sur RHEL : contrôler le rechargement et les journaux ; planifier un restart en recette si nécessaire. Le rollback automatique porte sur l'hôte courant, sans restaurer les hôtes déjà déployés.
 
 ## DNSSEC, services et retour arrière
 
@@ -91,7 +91,7 @@ Ansible avant mutation. Elle refuse les chemins non réguliers ou non root.
 Avec `false`, arrêter/désactiver le timer et arrêter le service privé avant
 de retirer hooks, unités et helper. Recharger les définitions systemd avant
 de retirer l’exécutable ; conserver les ancres officielles et le journal
-d’appartenance. Le drop-in commun maintient IPv4 et le reload RNDC.
+d’appartenance. Le drop-in commun conserve le lancement natif et le reload RNDC ; seule l’écoute DNS IPv6 est désactivée.
 
 Si un échec déclenche le rescue, les unités privées sont arrêtées et leur timer
 désactivé, puis named est arrêté. Les assets initiaux sont restaurés avec
@@ -107,3 +107,15 @@ Qualifier la séquence sur une paire RHEL 8 de recette, dont SELinux et systemd.
 Les tests locaux substituent systemd et ne prouvent pas les redémarrages réels.
 Le helper source reste livré dans le ZIP pour les modes activés, mais n’est
 pas installé sur une cible neuve en mode `false`.
+
+
+## Migration de la variable et contrôle du contrôleur
+
+Utiliser uniquement `bind_dnssec_active: false`, `true` ou `auto` comme entrée
+DNSSEC. Remplacer l’ancien nom `bind_dnssec_enabled` dans les inventaires et
+paramètres CLI. Ne pas définir un mode intermédiaire ; le rôle n’en calcule
+plus et son assertion de surcharge est supprimée. Un `false` YAML sans
+quotes est valide. Ne pas retirer la validation stricte au profit d’un simple
+cast `bool` : une valeur invalide doit échouer avant toute modification.
+Les contrôles de types utilisent `type_debug`, sans test Jinja 2.11 requis.
+Voir [DURCISSEMENT_DNSSEC.md](DURCISSEMENT_DNSSEC.md) pour les blocs impactés.

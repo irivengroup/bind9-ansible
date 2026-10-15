@@ -11,4 +11,4 @@
     - {path: /var/named/slaves, owner: named, mode: '0750'}
     - {path: /var/named/data, owner: named, mode: '0750'}
     - {path: /var/named/dynamic, owner: named, mode: '0750'}
-  when: item.path != '/var/named/dynamic' or bind_dnssec_active
+  when: item.path != '/var/named/dynamic' or bind_dnssec_active == 'auto' or (bind_dnssec_active | bool)

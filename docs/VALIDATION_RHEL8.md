@@ -1,31 +1,29 @@
 # Compatibilité et vérification — 15 octobre 2026
 
-Projet **Bind9-Ansible**, playbook `playbooks/bind9-deploy.yml`, cible RHEL 8, Ansible 2.9 et Python serveur 3.6.8. Source conservée : `Bind9-Ansible-dnssec-optionnel.zip`, SHA-256 `81955c7fffba917c6dafb980c96520406945b5391b350d81610cb857d4c025ea`. Le fichier original sur D: n’a pas été relu. Différences et preuves exactes : `DELIVERY.json` ; contenu : `SOURCE-MANIFEST.sha256`.
+Projet **Bind9-Ansible**, playbook `playbooks/bind9-deploy.yml`, cible RHEL 8, Ansible 2.9 et Python serveur 3.6.8. Source conservée : `Bind9-Ansible-dnssec-enabled.zip`, SHA-256 `c4768f9f8c6538ea043b1eea1c74d1686a527f78b6743e2120b8b39ee607dfd3`. Le fichier original sur D: n’a pas été relu. Différences et preuves exactes : `DELIVERY.json` ; contenu : `SOURCE-MANIFEST.sha256`.
 
 Le routage a été remplacé par des tâches Ansible natives sans dépendance ajoutée. Le filtre Python correspondant a été supprimé ; les scripts nécessaires au DNS restent présents. Structure BIND sans vues, ACL techniques, zones natives et tags sont conservés ; DNSSEC devient optionnel, défaut `false` ; les inventaires déclarent deux listes plates IPv4 ; `bind_allowed_clients` est leur fusion calculée, jamais une troisième entrée. Les corrections de cycle de vie de la livraison précédente restent couvertes. Voir [VALIDATION_ROUTES_NATIVES.md](VALIDATION_ROUTES_NATIVES.md) et [VERIFICATION_GLOBALE.md](VERIFICATION_GLOBALE.md).
 
-## Contrôles du renommage
+## Contrôles du durcissement
 
-Cette révision remplace uniquement le nom public par `bind_dnssec_enabled`, avec
-les mêmes modes et le même défaut. Le fait booléen interne est désormais
-`bind_dnssec_active`, pour ne pas écraser cette entrée à trois valeurs.
-**EXÉCUTÉ** : 308 tests rapides et trois workflows d’installation/deuxième passage
-(`false`, `true`, `auto`), syntaxe des trois
-inventaires, préflight des 12 hôtes avec faits simulés, Pyflakes et six parcours
-du vrai runner Ansible 2.9 (booléens, chaînes CLI, `auto` et défaut). Les sources
-exécutables modifiées sont comparées octet par octet à la source précédente
-après substitution inverse des identifiants public et interne. Aucun changement de logique.
+`bind_dnssec_active` est l’unique entrée DNSSEC, défaut `false`. Les faits
+intermédiaires et leur assertion sont supprimés ; les décisions utilisent
+l’entrée validée. Les contrôles `boolean` et `integer` nécessitant Jinja 2.11
+sont remplacés par `type_debug`, y compris dans le routage. Les valeurs
+invalides restent refusées. Impact : [DURCISSEMENT_DNSSEC.md](DURCISSEMENT_DNSSEC.md).
 
-**NON EXÉCUTÉ** pour ce seul renommage : les 14 workflows de routage, les cinq
-autres workflows de cycle de vie DNSSEC, les laboratoires BIND/NetworkManager et la
-mesure de couverture complète. Ils ont été exécutés sur l’archive source ;
-leurs preuves sont conservées séparément dans `DELIVERY.json`. Raison : aucun
-changement de logique ou de rendu. Pour les rejouer : suivre les prérequis et
-commandes de la section Reproduction, dont `sudo python -m pytest -q tests` et
-les deux scripts d’intégration. Attendu : mêmes réponses, routes et restaurations ;
-risque restant : intégration non réexécutée sur cette archive renommée.
+**EXÉCUTÉ** : suites sous Ansible 2.9.27 avec Jinja 2.10.3 et 3.0.3 ; rendu
+des trois modes, chaînes CLI et booléens, collisions extra-vars, contrôles de
+types et de refus, fichiers/runtime et routes. La non-régression reproduit
+l’ancien message de faits dérivés sur l’archive source ; les anciens tests
+de types échouent sur Jinja 2.10.3 et leurs remplacements y réussissent.
+La cause exacte du serveur utilisateur n’est pas confirmée par cette simulation.
+Le transport est natif IPv4/IPv6 ; seule l’écoute DNS IPv6 est fermée. Les
+forwarders IPv6 et leur glue AAAA sont pris en charge. Les comptes, périmètres
+et sommes de contrôle figurent dans `DELIVERY.json`.
+Les dépréciations du vieux runtime sont affichées, pas masquées.
 
-## Preuves locales de l’archive source
+## Preuves locales
 
 | Contrôle | Statut | Résultat et périmètre |
 |---|---|---|
@@ -33,11 +31,12 @@ risque restant : intégration non réexécutée sur cette archive renommée.
 | Workflows Ansible | **EXÉCUTÉ** | Parcours réels avec doubles CLI : simulation, ajouts, stdout vide, deuxième passage, échecs d’application/vérification, rollback DNS et reprise. La restauration DNS/systemd réelle n’est pas exécutée par ces doubles |
 | NetworkManager 1.46.0 | **EXÉCUTÉ** | Quatre workflows réels isolés, `nmcli` persistant et `ip route` actif ; idempotence, reprise sélective, persistance après réactivation du profil de laboratoire, routes initiales et DNS pending conservés |
 | Dépendances | **EXÉCUTÉ** | netaddr absent du contrôleur de recette, aucun filtre réseau externe ni Python personnalisé de routage dans le rôle |
-| Couverture Python restante | **EXÉCUTÉ** | Quatre modules, 277 instructions, une non couverte, 99 % arrondi ; seuil 98 % conservé. La logique YAML est testée par scénarios, elle ne contribue pas à cette mesure Python |
+| Couverture Python restante | **EXÉCUTÉ** | Quatre modules, 286 instructions, deux non couvertes, 99 % arrondi ; seuil 98 % conservé. La logique YAML est testée par scénarios, elle ne contribue pas à cette mesure Python |
 | Préflight | **EXÉCUTÉ** | Trois inventaires, 12 hôtes, vraies assertions et faits cibles simulés ; syntaxe Ansible 2.9.27 |
-| BIND EL8 / 9.18.24 | **EXÉCUTÉ** | Chacun 108 configurations chargées et 263 contrôles DNS réels, fichiers natifs inchangés, tests cryptographiques DNSSEC avec ancre temporaire |
+| BIND EL8 / 9.18.24 | **EXÉCUTÉ** | Chacun 109 configurations chargées et 270 contrôles DNS réels, fichiers natifs inchangés, tests cryptographiques DNSSEC avec ancre temporaire |
 | Python 3.6.8 extrait EL8 | **EXÉCUTÉ** | Compilation de tous les Python de production restants et réconciliation DNSSEC isolée ; aucun module Ansible/DNF exécuté sur un serveur RHEL |
 | Qualité | **EXÉCUTÉ** | Pyflakes, Bandit, compilation, syntaxe shell ; 62 YAML, 34 fichiers de tâches accessibles, 12 assets, un handler, onze variables par défaut et 11 filtres restants référencés |
+| IPv6 sortant / écoute | **EXÉCUTÉ** | Client IPv4 vers upstream IPv6, UDP et repli TCP prouvés par le journal upstream ; absence de listener DNS IPv6 en UDP/TCP, processus sans famille forcée |
 | Exemples DNS | **EXÉCUTÉ** | Deux zones forwardées, validation désactivée par défaut, rendus des deux rôles contrôlés par named-checkconf -z EL8 |
 
 La suite complète et ses nombres exacts figurent dans `DELIVERY.json`. Les binaires EL8 sont des RPM AlmaLinux extraits sans installation/scriptlets et exécutés sous WSL Ubuntu avec leurs bibliothèques. La crypto-policy DEFAULT de laboratoire n’est pas la preuve d’une politique effective RHEL/FIPS. Les unités systemd, SELinux et le réseau de production ne sont pas qualifiés par ces essais.
@@ -64,14 +63,14 @@ Voir [DNSSEC.md](DNSSEC.md) et [OPERATIONS.md](OPERATIONS.md).
 
 ## Reproduction
 
-Sur un contrôleur Linux de recette : Python 3.8.20, Ansible 2.9.27, Jinja2 3.0.3, PyYAML 6.0.2, pytest 8.3.5 ; coverage 7.6.1, Bandit 1.7.10 et Pyflakes 3.2.0 pour la QA. Aucun paquet ou collection réseau supplémentaire n’est requis.
+Sur un contrôleur Linux de recette : Python 3.8.20, Ansible 2.9.27, Jinja2 2.10.3 ou 3.0.3 avec MarkupSafe 2.0.1, PyYAML 6.0.2, pytest 8.3.5 ; coverage 7.6.1, Bandit 1.7.10 et Pyflakes 3.2.0 pour la QA. Aucun paquet ou collection réseau supplémentaire n’est requis.
 
 ```bash
 sudo python -m pytest -q tests
 python tests/integration_preflight.py
 python -m pyflakes roles/bind9/filter_plugins roles/bind9/files tests
 sudo python -m coverage run --include='*/roles/bind9/filter_plugins/dns_topology.py,*/roles/bind9/filter_plugins/soa_health.py,*/roles/bind9/filter_plugins/client_acl.py,*/roles/bind9/files/bind-private-dnssec.py' \
-  -m pytest -q tests/test_native_front_routes.py tests/test_dns_topology.py tests/test_soa_health.py tests/test_security_remediation.py tests/test_private_dnssec.py tests/test_global_review.py
+  -m pytest -q tests/test_optional_dnssec.py tests/test_client_list_required.py tests/test_native_front_routes.py tests/test_dns_topology.py tests/test_soa_health.py tests/test_security_remediation.py tests/test_private_dnssec.py tests/test_global_review.py
 python -m coverage report --fail-under=98
 sudo bash tests/run_integration_front_routes.sh
 ```
@@ -90,7 +89,7 @@ Toutes les lignes ci-dessous sont **NON EXÉCUTÉ**, pour la raison indiquée. L
 | Contrôle / raison | Prérequis et procédure | Attendu / risque restant |
 |---|---|---|
 | RHEL/Python/DNF réels : aucune cible | Paire RHEL 8, SSH/sudo et dépôts ; relever rpm/Python/Ansible, ping puis deploy primaire avant secondaire | Modules et paquets compatibles, service sain ; divergences des bindings et du système installé possibles |
-| Unités/RNDC natifs et SELinux : pas de système cible | `systemctl cat named`, status named-setup-rndc/private-dnssec/timer, journalctl/audit ; reload puis reboot de recette ; vérifier listeners IPv4 et absence d'AVC | Hooks et timer exécutés avant santé, clé accessible uniquement aux acteurs prévus ; confinement/override personnalisé peut bloquer le service |
+| Unités/RNDC natifs et SELinux : pas de système cible | `systemctl cat named`, status named-setup-rndc/private-dnssec/timer, journalctl/audit ; reload puis reboot de recette ; vérifier listeners DNS IPv4 uniquement, absence d’option de famille forcée et absence d'AVC | Hooks et timer exécutés avant santé, clé accessible uniquement aux acteurs prévus ; confinement/override personnalisé peut bloquer le service |
 | NTA sur sept jours : pas de test longue durée | Suivre nta -dump et journaux au-delà d'une semaine sur recette ; provoquer une panne de renouvellement maîtrisée et vérifier son alerte/reprise | Exceptions renouvelées, expiration détectée, aucune désactivation globale ; indisponibilité privée si renouvellement arrêté |
 | Chaînes/ancres réelles, RFC5011 et crypto-policy/FIPS : réseau cloisonné inaccessible | Politique installée, horloge correcte, paquets/ancres à jour ; update-crypto-policies --show, named-checkconf, dig des zones cibles et journaux de clés | Confiance exploitable pour zones strictes, données privées exemptées identifiées ; la racine privée peut empêcher une chaîne publique/le rafraîchissement des clés |
 | Pare-feu et clients : réseau cible indisponible | Clients de la liste unique réellement déclarés et sources interdites ; suivre TESTS_FONCTIONNELS, UDP/TCP, SOA des deux pairs et refus AXFR | Réponses exactes, refus explicites ; vieux dig peut rester inconclusif, filtrage/route peut rompre le service |

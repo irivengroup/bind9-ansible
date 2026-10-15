@@ -1,4 +1,3 @@
 ---
 # Variables shared within this environment only.
 bind_environment: prod
-bind_dnssec_enabled: false  # false, true ou auto

@@ -79,11 +79,10 @@
     that:
       - item.1.address is defined
       - item.1.address | length > 0
-      - item.1.address | valid_ip_address
       - item.1 | dns_forwarder_safe
       - >-
         (item.1.port | default(53) | int) != 53 or item.1.address not in
-        [bind_front_ip, bind_back_ip, '127.0.0.1',
+        [bind_front_ip, bind_back_ip, '127.0.0.1', '::1',
         hostvars[bind_primary_host].bind_front_ip, hostvars[bind_primary_host].bind_back_ip,
         hostvars[bind_secondary_host].bind_front_ip, hostvars[bind_secondary_host].bind_back_ip]
       - item.1.port | default(53) | int >= 1

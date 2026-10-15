@@ -9,7 +9,7 @@
   ansible.builtin.assert:
     that:
       - bind_cloud_clients is sequence and bind_cloud_clients is not string and bind_cloud_clients is not mapping
-      - bind_front_route_metric is integer and bind_front_route_metric is not boolean
+      - (bind_front_route_metric | type_debug) in ['int', 'long']
       - bind_front_route_metric | int >= 1 and bind_front_route_metric | int <= 4294967295
       - bind_front_profile.results[2].stdout | trim in ['0', '254']
       - (bind_front_kernel.results[0].stdout | from_json) is sequence and (bind_front_kernel.results[0].stdout | from_json) is not mapping

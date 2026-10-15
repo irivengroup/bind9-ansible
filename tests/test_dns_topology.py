@@ -1,4 +1,4 @@
-"""Regression coverage for authoritative cuts, IPv4 endpoints and unsafe inputs."""
+"""Regression coverage for delegation cuts, dual-stack upstreams and unsafe inputs."""
 import base64
 import importlib.util
 import ipaddress
@@ -6,6 +6,9 @@ from pathlib import Path
 
 import pytest
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
+import yaml
+
+from route_task_expressions import TaskExpressions
 
 ROLE = Path(__file__).resolve().parents[1] / 'roles/bind9'
 spec = importlib.util.spec_from_file_location('dns_topology', ROLE / 'filter_plugins/dns_topology.py')
@@ -51,7 +54,7 @@ class TestDnsTopology:
         ([{'domain': 'in-addr.arpa'}], []),
         ([{'domain': 'example.test', 'records': [{'name': 'app.corp'}]}], [forwarding()]),
         ([{'domain': 'example.test', 'records': [{'name': 'corp'}]}], [forwarding()]),
-        ([], [forwarding(forwarders=[{'address': '2001:db8::53'}])]),
+        ([], [forwarding(forwarders=[{'address': '::'}])]),
         ([], [forwarding(dnssec_validate='false')]),
         ([], [forwarding(dnssec_validate=None)]),
     ])
@@ -109,13 +112,61 @@ class TestDnsTopology:
         assert FilterModule().filters()['dns_client_safe'](client) is expected
 
     @pytest.mark.parametrize('server,expected', [({'address': '192.0.2.53'}, True),
-        ({'address': '2001:db8::53', 'port': '5353'}, False), ({'address': 'bad'}, False),
+        ({'address': '2001:db8::53', 'port': '5353'}, True), ({'address': 'bad'}, False),
         ({'address': '0.0.0.0'}, False), ({'address': '224.0.0.1'}, False),
         ({'address': '192.0.2.53', 'port': False}, False), ({'address': '192.0.2.53', 'port': 1.5}, False),
         ({'address': '192.0.2.53', 'port': 'bad;'}, False), ({'address': '192.0.2.53', 'port': 0}, False),
         ({'address': '192.0.2.53', 'port': 65536}, False), ({}, False)])
     def test_forwarder_port_and_destination_are_safe(self, server, expected):
         assert FilterModule().filters()['dns_forwarder_safe'](server) is expected
+
+    @pytest.mark.parametrize('address,expected',[
+        ('fd00::53',True),('::1',True),('::',False),('ff02::1',False),
+        ('fe80::53',False),('fe80::53%eth0',False),('::ffff:192.0.2.53',False),
+        ('2001:db8::53; include',False),(' 2001:db8::53',False),
+        ('255.255.255.255',False),('192.000.2.53',False),(53,False),(None,False)])
+    def test_dual_stack_forwarder_literals_cannot_bypass_endpoint_guards(self,address,expected):
+        assert FilterModule.forwarder({'address':address}) is expected
+
+    @pytest.mark.parametrize('value',[None,'2001:db8::53',[]])
+    def test_forwarder_requires_an_endpoint_mapping(self,value):
+        assert FilterModule.forwarder(value) is False
+
+    def test_ipv6_forwarders_render_aaaa_glue_in_both_zone_templates(self):
+        forward=forwarding(forwarders=[{'address':'192.0.2.53'},{'address':'2001:db8:0::53'}])
+        for authorities,parent in (([],'.'),([{'domain':'example.test'}],'example.test')):
+            plan=DnsTopology(authorities,[forward]).delegations(parent)[0]
+            assert [item['type'] for item in plan['servers']]==['A','AAAA']
+            assert plan['servers'][1]['address']=='2001:db8::53'
+        env=Environment(loader=FileSystemLoader(str(ROLE/'templates')),undefined=StrictUndefined)
+        env.filters.update(FilterModule().filters())
+        context=dict(bind_authoritative_zones=[],bind_forward_zones=[forward])
+        root=env.get_template('empty-root.zone.j2').render(**context)
+        assert 'IN AAAA 2001:db8::53' in root
+        zone={'domain':'example.test','serial':2,'records':[]}
+        context.update(auth_zone=zone,bind_authoritative_zones=[zone],bind_managed_zones=[zone],
+                       bind_primary_host='p',bind_secondary_host='s',
+                       hostvars={'p':{'bind_front_ip':'192.0.2.1'},'s':{'bind_front_ip':'192.0.2.2'}})
+        authoritative=env.get_template('authoritative.zone.j2').render(**context)
+        assert 'IN AAAA 2001:db8::53' in authoritative
+
+    @pytest.mark.parametrize('address,port,accepted',[
+        ('2001:db8::53',53,True),('::1',5353,True),('192.0.2.53',53,True),
+        ('::1',53,False),('127.0.0.1',53,False),('::ffff:192.0.2.53',53,False)])
+    def test_real_forwarder_task_supports_ipv6_without_local_endpoint_bypass(self,address,port,accepted):
+        tasks=yaml.safe_load((ROLE/'tasks/tasks.d/validate.yml').read_text())
+        task=next(item for item in tasks if item['name']=='Validate each forwarding destination')
+        variables=dict(bind_forward_zones=[forwarding(forwarders=[{'address':address,'port':port}])],
+                       bind_front_ip='192.0.2.11',bind_back_ip='10.0.0.11',
+                       bind_primary_host='p',bind_secondary_host='s',
+                       hostvars={'p':{'bind_front_ip':'192.0.2.11','bind_back_ip':'10.0.0.11'},
+                                 's':{'bind_front_ip':'192.0.2.12','bind_back_ip':'10.0.0.12'}})
+        runner=TaskExpressions(variables)
+        if accepted:
+            runner.run('validate.yml',tasks=[task])
+        else:
+            with pytest.raises(ValueError,match='Validate each forwarding destination'):
+                runner.run('validate.yml',tasks=[task])
 
     def test_long_zone_cannot_generate_an_invalid_nameserver_name(self):
         long_name = '.'.join(['a' * 60] * 4 + ['test'])

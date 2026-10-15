@@ -2,7 +2,7 @@
 bind_cloud_clients: []
 bind_internal_clients: []
 # YAML true/false or auto. false deploys no DNSSEC-specific runtime assets.
-bind_dnssec_enabled: false
+bind_dnssec_active: false
 bind_forward_zones: []
 bind_authoritative_zones: []
 bind_backup_root: /var/backups/Bind9-Ansible/bind

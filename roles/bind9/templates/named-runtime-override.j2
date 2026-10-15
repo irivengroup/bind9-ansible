@@ -1,6 +1,5 @@
-# Bind9-Ansible: IPv4 transport and local administrative reload, in every mode.
+# Bind9-Ansible: preserve native dual-stack startup and local RNDC administration.
+# DNS IPv6 listening is disabled by named.conf, never by a process-wide -4 flag.
 [Service]
-ExecStart=
-ExecStart=/usr/sbin/named -4 -u named -c ${NAMEDCONF} $OPTIONS
 ExecReload=
 ExecReload=/usr/sbin/rndc -s 127.0.0.1 -k /etc/rndc.key reload

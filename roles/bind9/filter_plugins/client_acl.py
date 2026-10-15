@@ -1,4 +1,4 @@
-"""Validate IPv4 transport addresses and typed DNS record data."""
+"""Validate IPv4 client/service addresses and typed IPv4/IPv6 DNS record data."""
 import ipaddress
 
 

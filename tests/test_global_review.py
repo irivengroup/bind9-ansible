@@ -56,8 +56,10 @@ class TestGlobalReview:
 
     def test_startup_command_change_restarts_the_existing_process(self):
         handler = yaml.safe_load((ROLE / 'handlers/main.yml').read_text())[0]['ansible.builtin.systemd']
+        assert handler['daemon_reload'] is True
         render = Environment(undefined=StrictUndefined).from_string(handler['state']).render
         assert render(bind_named_override={'changed': True}) == 'restarted'
+        assert render(bind_named_runtime_override={'changed': True}) == 'restarted'
         assert render(bind_named_override={'changed': False}) == 'reloaded'
         assert render() == 'reloaded'
         install = yaml.safe_load((ROLE / 'tasks/tasks.d/dnssec_install.yml').read_text())

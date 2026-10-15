@@ -1,5 +1,7 @@
 # Vérification globale et nettoyage — 15 octobre 2026
 
+> Rapport historique de la livraison indiquée ci-dessous. La politique actuelle est décrite dans [DNSSEC.md](DNSSEC.md), [TRANSPORT_DNS.md](TRANSPORT_DNS.md) et [VALIDATION_RHEL8.md](VALIDATION_RHEL8.md).
+
 > Historique de la livraison source, conservé pour ses constats et corrections. Le routage a depuis été réimplémenté en tâches natives ; ses mesures actuelles sont dans [VALIDATION_ROUTES_NATIVES.md](VALIDATION_ROUTES_NATIVES.md). Les nombres de tests, fichiers et couverture ci-dessous décrivent uniquement cette livraison antérieure.
 
 Cette passe porte sur **Bind9-Ansible**, à partir de l’archive locale `Bind9-Ansible-consolide.zip`. Les sources de référence et anciennes archives sont conservées. Le projet, le playbook `playbooks/bind9-deploy.yml`, les variables publiques d’inventaire, les zones natives, DNSSEC auto, IPv4 et le comportement NXDOMAIN restent en place.

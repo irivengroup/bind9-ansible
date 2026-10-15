@@ -13,6 +13,7 @@ import importlib.util
 import ipaddress
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import shlex
@@ -93,8 +94,6 @@ class LoopbackIntegration:
         for zone in context['bind_managed_zones']:
             template = 'reverse.zone.j2' if zone.get('reverse') else 'authoritative.zone.j2'
             (data / 'zones' / (zone['domain'] + '.zone')).write_text(self.jinja.get_template(template).render(auth_zone=zone, **context))
-        setting = context.get('bind_dnssec_enabled', False)
-        context['bind_dnssec_mode'] = 'auto' if setting == 'auto' else ('enabled' if setting is True else 'disabled')
         context['bind_allowed_clients'] = list(dict.fromkeys(context.get('bind_cloud_clients', []) + context.get('bind_internal_clients', [])))
         config = self.jinja.get_template('named.conf.j2').render(**context)
         config = config.replace('/var/named', str(data)).replace('/etc/named.rfc1912.zones', str(native))
@@ -175,7 +174,7 @@ class LoopbackIntegration:
     def exercise_replication(self, folder, original, validation='auto'):
         """Test initial TSIG transfer, signed NOTIFY convergence and forwarding."""
         primary = copy.deepcopy(original)
-        primary.update(bind_dnssec_enabled=validation, bind_front_ip='127.0.0.2', bind_back_ip='127.0.0.3',
+        primary.update(bind_dnssec_active=validation, bind_front_ip='127.0.0.2', bind_back_ip='127.0.0.3',
                        group_names=[primary['bind_primary_group']],
                        bind_cloud_clients=['127.0.0.10'], bind_internal_clients=['127.0.0.11'])
         primary['hostvars'][primary['bind_primary_host']].update(bind_front_ip='127.0.0.2', bind_back_ip='127.0.0.3')
@@ -218,7 +217,7 @@ class LoopbackIntegration:
             for config in (uconf, pconf, sconf):
                 log = (config.parent / 'named.log').open('w+')
                 logs.append(log)
-                processes.append(subprocess.Popen([str(self.named), '-4', '-g', '-c', str(config), '-n', '1', '-U', '1'], stdout=log, stderr=log))
+                processes.append(subprocess.Popen([str(self.named), '-g', '-c', str(config), '-n', '1', '-U', '1'], stdout=log, stderr=log))
             zone = primary['bind_authoritative_zones'][0]
             record = next(x for x in zone['records'] if x['type'] == 'A')
             query = record['name'] + '.' + zone['domain']
@@ -363,7 +362,7 @@ class LoopbackIntegration:
             port = reservation.getsockname()[1]
         self.sandbox_config(path, port)
         with (folder / 'named.log').open('w+') as log:
-            process = subprocess.Popen([str(self.named), '-4', '-g', '-c', str(path), '-n', '1', '-U', '1'], stdout=log, stderr=log)
+            process = subprocess.Popen([str(self.named), '-g', '-c', str(path), '-n', '1', '-U', '1'], stdout=log, stderr=log)
             try:
                 for attempt in range(50):
                     if process.poll() is not None:
@@ -448,6 +447,99 @@ class LoopbackIntegration:
                     process.kill()
                     process.wait()
 
+    def exercise_ipv6_upstream(self,folder,original):
+        """Prove IPv6 UDP/TCP egress while both IPv6 DNS listeners stay closed."""
+        context=copy.deepcopy(original)
+        domain='ipv6-upstream.example.test'
+        upstream=folder/'upstream'
+        upstream.mkdir(parents=True)
+        remote=socket.socket(socket.AF_INET6,socket.SOCK_STREAM)
+        remote.bind(('::1',0))
+        uport=remote.getsockname()[1]
+        local=socket.socket()
+        local.bind(('127.0.0.1',0))
+        while local.getsockname()[1]==uport:
+            local.close()
+            local=socket.socket()
+            local.bind(('127.0.0.1',0))
+        port=local.getsockname()[1]
+        context.update(bind_dnssec_active=False,bind_authoritative_zones=[],bind_managed_zones=[],
+                       bind_forward_zones=[{'domain':domain,'forwarders':[{'address':'::1','port':uport}]}],
+                       bind_front_ip='127.0.0.2',bind_back_ip='127.0.0.3',
+                       group_names=[context['bind_primary_group']],bind_cloud_clients=['127.0.0.10'],bind_internal_clients=[])
+        context['hostvars'][context['bind_primary_host']].update(bind_front_ip='127.0.0.2',bind_back_ip='127.0.0.3')
+        context['hostvars'][context['bind_secondary_host']].update(bind_front_ip='127.0.0.4',bind_back_ip='127.0.0.5')
+        config=self.render(folder/'resolver',context)
+        self.sandbox_config(config,port)
+        zone=upstream/'forward.zone'
+        zone.write_text('$TTL 60\n@ IN SOA ns.'+domain+'. hostmaster.'+domain+'. (1 3600 900 1209600 60)\n'
+                        '@ IN NS ns.'+domain+'.\nns IN AAAA ::1\nprobe IN A 203.0.113.88\n'
+                        'probe IN AAAA 2001:db8::88\nbig IN TXT '+('"'+('x'*200)+'" ')*3+'\n')
+        queries=upstream/'queries.log'
+        uconf=upstream/'named.conf'
+        uconf.write_text('options { directory "'+str(upstream)+'"; listen-on { none; }; listen-on-v6 port '+str(uport)+
+                         ' { ::1; }; recursion no; dnssec-validation no; max-udp-size 512; querylog yes; pid-file "'+
+                         str(upstream/'named.pid')+'"; session-keyfile "'+str(upstream/'session.key')+'"; }; controls {}; '
+                         'logging { channel transport { file "'+str(queries)+'"; severity info; }; category queries { transport; }; }; '
+                         'zone "'+domain+'" { type master; file "'+str(zone)+'"; };')
+        remote.close()
+        local.close()
+        processes,logs=[],[]
+        try:
+            for path in (uconf,config):
+                log=(path.parent/'named.log').open('w+')
+                logs.append(log)
+                foreground='-f' if path==uconf else '-g'
+                processes.append(subprocess.Popen([str(self.named),foreground,'-c',str(path),'-n','1','-U','1'],stdout=log,stderr=log))
+            def query(name,kind='A',transport='+notcp',destination='127.0.0.1'):
+                return subprocess.run([str(self.bin_dir/'dig'),'@'+destination,'-p',str(port),
+                                       '+time=2','+tries=1','+short',transport,name,kind],
+                                      stdout=subprocess.PIPE,stderr=subprocess.STDOUT,universal_newlines=True)
+            for _ in range(50):
+                if any(process.poll() is not None for process in processes):
+                    raise AssertionError('IPv6 upstream/resolver failed to start')
+                answer=query('probe.'+domain)
+                if answer.returncode==0 and answer.stdout.strip()=='203.0.113.88':
+                    break
+                time.sleep(0.1)
+            else:
+                raise AssertionError('IPv4 client query did not reach the IPv6-only forwarder: '+answer.stdout)
+            answer=query('probe.'+domain,'AAAA','+tcp')
+            assert answer.returncode==0 and answer.stdout.strip()=='2001:db8::88',answer.stdout
+            answer=query('big.'+domain,'TXT')
+            assert answer.returncode==0 and answer.stdout.count('x')==600,answer.stdout
+            # The large RRset exceeds the upstream's UDP cap, forcing TCP over
+            # IPv6. Query log flags distinguish this from client-side TCP only.
+            for _ in range(20):
+                text=queries.read_text() if queries.exists() else ''
+                matches=re.findall(r'query: big\.'+re.escape(domain)+r' IN TXT (\S+)',text,re.I)
+                if any('T' in flags for flags in matches):
+                    break
+                time.sleep(0.1)
+            assert any('T' in flags for flags in matches),text
+            assert '::1#' in text and re.search(r'query: probe\.'+re.escape(domain)+r' IN A ',text,re.I),text
+            for transport in ('+notcp','+tcp'):
+                answer=query('probe.'+domain,transport=transport,destination='::1')
+                assert answer.returncode!=0,answer.stdout
+            return 7
+        except Exception:
+            for log in logs:
+                log.flush()
+                log.seek(0)
+                print(log.read())
+            raise
+        finally:
+            for process in processes:
+                process.terminate()
+            for process in processes:
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+            for log in logs:
+                log.close()
+
     def run(self):
         """Check all delivered hosts and prove native input files are untouched."""
         native = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in self.native_dir.iterdir() if p.is_file()}
@@ -465,7 +557,7 @@ class LoopbackIntegration:
                     for clients, internal in (([], []), (['192.0.2.10'], []), ([], ['10.30.1.20']), (['192.0.2.0/24'], ['10.30.1.20'])):
                         for auth, forward in ((True, True), (True, False), (False, True), (False, False)):
                             context = copy.deepcopy(original)
-                            context['bind_dnssec_enabled'] = validation
+                            context['bind_dnssec_active'] = validation
                             context['group_names'] = [role]
                             context['bind_cloud_clients'] = clients
                             context['bind_internal_clients'] = internal
@@ -484,8 +576,11 @@ class LoopbackIntegration:
             queries += self.exercise_replication(root / 'unrelated', unrelated)
             queries += self.exercise_replication(root / 'manual-validation', copy.deepcopy(context), validation=True)
             queries += self.exercise_replication(root / 'validation-disabled', copy.deepcopy(context), validation=False)
+            queries += self.exercise_ipv6_upstream(root / 'ipv6-upstream',context)
+            count += 1
         assert native == {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in self.native_dir.iterdir() if p.is_file()}
-        print(json.dumps({'configurations_loaded': count, 'dns_checks': queries, 'native_files_unchanged': True}))
+        print(json.dumps({'configurations_loaded': count, 'dns_checks': queries, 'native_files_unchanged': True,
+                          'ipv6_udp_tcp_forwarding':True,'ipv6_dns_listener_absent':True}))
 
 
 if __name__ == '__main__':

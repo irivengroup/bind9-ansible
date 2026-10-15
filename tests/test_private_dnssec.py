@@ -175,7 +175,7 @@ class TestPrivateDnssec:
 @pytest.mark.parametrize('clients', [['198.51.100.0/24'], ['192.0.2.10', '10.150.1.23']])
 def test_single_client_acl_preserves_dnssec_and_front_only_recursion(clients):
     """One source ACL must not broaden recursion onto BACK or weaken DNSSEC."""
-    context = dict(bind_dnssec_mode='auto', bind_tsig_key_name='test-transfer', bind_tsig_algorithm='hmac-sha256',
+    context = dict(bind_dnssec_active='auto', bind_tsig_key_name='test-transfer', bind_tsig_algorithm='hmac-sha256',
                    bind_tsig_secret='public-render-only', bind_front_ip='192.0.2.11', bind_back_ip='10.20.1.11',
                    group_names=['dns_primary'], bind_primary_host='p', bind_secondary_host='s',
                    hostvars={'p': {'bind_front_ip': '192.0.2.11', 'bind_back_ip': '10.20.1.11'},
@@ -204,7 +204,7 @@ def test_start_reload_timer_and_health_order_are_integrated():
     dropin = (ROLE / 'templates/named-dnssec-override.j2').read_text()
     assert 'ExecStartPost=' in dropin and 'ExecReload=' in dropin
     runtime = (ROLE / 'templates/named-runtime-override.j2').read_text()
-    assert 'ExecStart=/usr/sbin/named -4 -u named -c ${NAMEDCONF} $OPTIONS' in runtime
+    assert 'ExecStart=' not in runtime  # Inherit native IPv4/IPv6 startup.
     assert '|| true' not in dropin
     install = (ROLE / 'tasks/tasks.d/dnssec_install.yml').read_text()
     assert 'OnUnitActiveSec=1d' in install

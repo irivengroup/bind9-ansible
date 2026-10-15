@@ -1,7 +1,7 @@
 # Validation DNSSEC optionnelle
 
 ```yaml
-bind_dnssec_enabled: false
+bind_dnssec_active: false
 ```
 
 | Valeur | Directive BIND | Déploiement spécifique DNSSEC |
@@ -12,16 +12,27 @@ bind_dnssec_enabled: false
 
 Les booléens YAML et chaînes CLI exactes `true`/`false` sont acceptés, ainsi
 que la chaîne `auto`. Les autres chaînes, nombres et valeurs nulles sont
-refusés avant modification, pour tous les tags. Les faits internes emploient
-`enabled`/`disabled`/`auto`, car Ansible 2.9 transforme les faits texte nus
-`yes`/`no` en booléens. `bind_dnssec_active` est le booléen interne utilisé par
-les conditions ; l’entrée `bind_dnssec_enabled` conserve sa valeur d’origine.
-Ne pas surcharger les faits calculés.
+refusés avant modification, pour tous les tags. `bind_dnssec_active` est
+l’unique entrée de politique : aucun fait de mode ou d’activation n’est généré
+ou consommé. Les anciennes variables intermédiaires ne pilotent plus le rôle.
+La validation utilise `type_debug`, compatible avec Jinja 2.10 ; les tests
+`is boolean` et `is integer`, introduits dans Jinja 2.11, ne sont pas utilisés.
+
+Après cette validation stricte, les tâches s’activent avec :
+
+```yaml
+when: bind_dnssec_active == 'auto' or (bind_dnssec_active | bool)
+```
+
+Le cas `auto` est évalué explicitement. `| bool` seul ne valide pas une entrée
+et pourrait convertir une valeur incorrecte en désactivation silencieuse.
+Le template calcule localement la directive depuis cette même entrée publique,
+sans fait Ansible surchargeable. Voir [DURCISSEMENT_DNSSEC.md](DURCISSEMENT_DNSSEC.md).
 
 Le défaut désactivé de la livraison DNSSEC optionnelle est conservé. L’entrée
-publique s’appelle désormais `bind_dnssec_enabled` ; mettre à jour les inventaires
+publique s’appelle désormais `bind_dnssec_active` ; mettre à jour les inventaires
 et commandes. Pour activer le mode automatique, définir explicitement
-`bind_dnssec_enabled: auto`.
+`bind_dnssec_active: auto`.
 
 ## Ancres et exceptions privées
 
@@ -54,7 +65,7 @@ répertoire d’état privé n’est créé sur une cible neuve désactivée.
 
 ## Runtime indépendant et bascules
 
-`bind9-runtime.conf` conserve `named -4` et le reload RNDC dans tous les modes.
+`bind9-runtime.conf` conserve le lancement natif IPv4/IPv6 et le reload RNDC dans tous les modes. L’écoute DNS IPv6 est fermée uniquement dans `named.conf` ; voir [TRANSPORT_DNS.md](TRANSPORT_DNS.md).
 Le canal RNDC local et sa clé native servent aussi à l’administration BIND ;
 ce ne sont pas un déploiement DNSSEC. Les modes actifs ajoutent seulement le
 drop-in lexicalement ultérieur `bind9-z-dnssec.conf`, qui applique les exceptions
@@ -75,17 +86,18 @@ persistantes. Détails : [OPERATIONS.md](OPERATIONS.md).
 
 ## Contrôles et limites
 
-**EXÉCUTÉ** : BIND natif EL8 9.11.36 et BIND 9.18.24, chacun 108 configurations
-et 263 contrôles DNS : défaut désactivé, validation explicite et auto,
+**EXÉCUTÉ** : BIND natif EL8 9.11.36 et BIND 9.18.24, chacun 109 configurations
+et 270 contrôles DNS : défaut désactivé, validation explicite et auto,
 signatures valides/invalides, AD/CD, forwarding privé, NTA, réplication TSIG et
 zones natives inchangées. Une ancre signée temporaire de laboratoire rend les
 essais cryptographiques indépendants d’Internet ; elle n’est pas livrée en production.
 Les exceptions privées ne fournissent pas de garantie DNSSEC sur leurs suffixes.
 
-**EXÉCUTÉ** : normalisation des valeurs, rendu sans directives/markers privés
-en mode désactivé, flux Ansible avec opérations de fichiers réelles et double
-systemd : installation, deuxième passage, nettoyage, migration et rollback
-dans les deux directions. Nombres exacts et périmètre : `DELIVERY.json`.
+**EXÉCUTÉ** : tests des valeurs, rendu sans directives/markers privés en mode
+désactivé, anciens noms forcés à priorité extra-vars, typage Jinja classique et
+natif ; suite avec Jinja 2.10.3 et 3.0.3. Flux Ansible avec opérations de fichiers
+réelles et double systemd : installation, deuxième passage, nettoyage, migration
+et rollback dans les deux directions. Nombres exacts et périmètre : `DELIVERY.json`.
 
 **NON EXÉCUTÉ** : activation systemd et SELinux RHEL réels, boot, rotation RFC5011,
 chaînes des upstreams de production, renouvellement sur sept jours et restauration

@@ -2,7 +2,7 @@
 
 > Déployer et exploiter une paire BIND 9 par site, avec résolution privée, réplication TSIG, loopback natif RHEL et routes de retour FRONT ajoutées sans reconfigurer le réseau existant.
 
-Le point d'entrée est `playbooks/bind9-deploy.yml`. Le rôle produit `/etc/named.conf` depuis `roles/bind9/templates/named.conf.j2`, selon la structure native EL8 : **sans vues**, zones officielles chargées, **DNSSEC optionnel, désactivé par défaut** et processus `named -4`. Les entrées clientes sont **`bind_cloud_clients`** (FRONT) et **`bind_internal_clients`** (BACK). Leur fusion calculée **`bind_allowed_clients`** alimente l’ACL BIND **`allowed_clients`**. Une liste peut être vide, jamais les deux. Les routes retour ne concernent que les clients cloud. Seules les ACL consommées sont générées : FRONT local, deux pairs BACK et leur agrégat BACK, loopback et clients déclarés. NXDOMAIN hors périmètre est conservé. La gestion des routes reste **désactivée par défaut**. Quand DNSSEC est activé, les suffixes privés non signés explicitement déclarés utilisent une exception renouvelée via RNDC natif et systemd. En mode `false`, ces composants ne sont pas déployés. La qualification sur vos serveurs reste **NON TERMINÉE** ; voir [VALIDATION_RHEL8.md](docs/VALIDATION_RHEL8.md) et [DNSSEC.md](docs/DNSSEC.md).
+Le point d'entrée est `playbooks/bind9-deploy.yml`. Le rôle produit `/etc/named.conf` depuis `roles/bind9/templates/named.conf.j2`, selon la structure native EL8 : **sans vues**, zones officielles chargées, **DNSSEC optionnel, désactivé par défaut** et lancement natif de BIND, avec écoute DNS IPv4 uniquement et transport sortant IPv4/IPv6. Les entrées clientes sont **`bind_cloud_clients`** (FRONT) et **`bind_internal_clients`** (BACK). Leur fusion calculée **`bind_allowed_clients`** alimente l’ACL BIND **`allowed_clients`**. Une liste peut être vide, jamais les deux. Les routes retour ne concernent que les clients cloud. Seules les ACL consommées sont générées : FRONT local, deux pairs BACK et leur agrégat BACK, loopback et clients déclarés. NXDOMAIN hors périmètre est conservé. La gestion des routes reste **désactivée par défaut**. Quand DNSSEC est activé, les suffixes privés non signés explicitement déclarés utilisent une exception renouvelée via RNDC natif et systemd. En mode `false`, ces composants ne sont pas déployés. La qualification sur vos serveurs reste **NON TERMINÉE** ; voir [VALIDATION_RHEL8.md](docs/VALIDATION_RHEL8.md) et [DNSSEC.md](docs/DNSSEC.md).
 
 ## 📊 Matrice de compatibilité
 
@@ -11,10 +11,10 @@ Le point d'entrée est `playbooks/bind9-deploy.yml`. Le rôle produit `/etc/name
 | OS cible | **Red Hat Enterprise Linux 8**, demandé ; déploiement réel **NON EXÉCUTÉ**. Le garde du rôle accepte `RedHat` de version majeure ≥ 8 ; cela ne qualifie pas RHEL 9/10. Rocky, AlmaLinux et Ubuntu sont refusés par ce garde. |
 | Ansible | Ligne **2.9** demandée ; contrôles locaux : **EXÉCUTÉ**, avec **2.9.27**. Aucune affirmation sur tous les autres correctifs 2.9. |
 | Python cible | **3.6.8**, fourni par l'utilisateur ; **EXÉCUTÉ** sur l'interpréteur extrait EL8 : compilation des Python de production, contrôles des scripts Python DNS restants ; le routage ne contient plus de code Python personnalisé. Modules Ansible sur le serveur réel : **NON EXÉCUTÉ**. |
-| Contrôleur de test | Linux, Python **3.8.20**, Jinja2 **3.0.3**, Ansible **2.9.27**. |
-| BIND de laboratoire | **9.11.36-16.el8_10.16**, binaires natifs RPM AlmaLinux EL8 exécutés en laboratoire Linux isolé, et **9.18.24** : chacun 108 configurations chargées et 263 contrôles DNS, dont signatures valides/invalides. Ce n'est pas une recette système RHEL. |
+| Contrôleur de test | Linux, Python **3.8.20**, Jinja2 **2.10.3** et **3.0.3**, Ansible **2.9.27**. |
+| BIND de laboratoire | **9.11.36-16.el8_10.16**, binaires natifs RPM AlmaLinux EL8 exécutés en laboratoire Linux isolé, et **9.18.24** : chacun 109 configurations chargées et 270 contrôles DNS, dont signatures valides/invalides. Ce n'est pas une recette système RHEL. |
 | NetworkManager de laboratoire | **1.46.0** ; ajout natif, persistance et reprise exécutés. La version installée sur les cibles reste à qualifier. |
-| Transport DNS / routes | IPv4. Les enregistrements AAAA et PTR IPv6 sont possibles ; aucune écoute DNS IPv6 ni route de retour IPv6 n'est ajoutée. |
+| Transport DNS / routes | Écoute DNS IPv4 uniquement ; échanges sortants et forwarders IPv4/IPv6. Données AAAA/PTR IPv6 conservées ; routes retour gérées uniquement en IPv4. |
 
 La matrice GitHub Actions contient Ansible 2.9.27, 2.13.13, 2.14.18 et 2.16.14 avec plusieurs Python de contrôleur. Sa présence n'est pas une preuve d'exécution CI ni de compatibilité OS. Ces runtimes anciens imposés par le contexte demandent une maintenance contrôlée des dépendances.
 
@@ -27,7 +27,7 @@ Version minimale déclarée dans les métadonnées du rôle : **Ansible 2.9**. L
 - FRONT, BACK et ADM sont **déjà configurés**, avec des adresses distinctes. NetworkManager gère FRONT, son profil actif contient la passerelle IPv4 existante ; `nmcli` et `ip` avec sortie JSON sont présents. Le rôle n'installe ni ne reconfigure NetworkManager.
 - Réseau : SSH sur ADM ; DNS UDP/TCP 53 vers les interfaces et résolveurs autorisés ; TCP 53 entre les pairs BACK pour les transferts, UDP 53 pour NOTIFY. Le pare-feu, les IP et `/etc/resolv.conf` restent sous votre gestion.
 - Fichiers natifs du paquet présents : `/etc/named.rfc1912.zones`, `/var/named/named.localhost`, `named.loopback`, `named.empty`. Le rôle les vérifie sans les remplacer. L'include natif `/etc/crypto-policies/back-ends/bind.config` doit exister et résoudre vers un fichier régulier ; la politique cryptographique du système est conservée.
-- Administration native : `/usr/sbin/rndc`, systemd et `named-setup-rndc.service` dans tous les modes. DNSSEC activé seulement : `/etc/named.root.key` officiel actualisé et `/usr/bin/python3`. Le rôle démarre ce générateur pour disposer d'une clé d'administration `/etc/rndc.key` distincte de TSIG. Un `/etc/rndc.conf` personnalisé ne remplace pas cette exigence. RNDC écoute uniquement sur 127.0.0.1:953. Le processus `named -4` est imposé par le drop-in runtime commun, indépendant de DNSSEC ; conserver les autres options natives sans option IPv6 contradictoire et le chemin canonique `/etc/named.conf`.
+- Administration native : `/usr/sbin/rndc`, systemd et `named-setup-rndc.service` dans tous les modes. DNSSEC activé seulement : `/etc/named.root.key` officiel actualisé et `/usr/bin/python3`. Le rôle démarre ce générateur pour disposer d'une clé d'administration `/etc/rndc.key` distincte de TSIG. Un `/etc/rndc.conf` personnalisé ne remplace pas cette exigence. RNDC écoute uniquement sur 127.0.0.1:953. Le drop-in commun conserve le lancement natif IPv4/IPv6 et ne surcharge que le reload RNDC ; `listen-on-v6 { none; };` ferme l’écoute DNS IPv6. Vérifier l’absence d’options externes `-4`/`-6` contradictoires et conserver le chemin canonique `/etc/named.conf`. Voir [TRANSPORT_DNS.md](docs/TRANSPORT_DNS.md).
 - Un primaire et un secondaire par site. Déploiement primaire avant secondaire, via `dns_deployment_order`, `serial: 1`, `order: inventory`, `any_errors_fatal: true`.
 - Horloges des pairs synchronisées, notamment pour la fenêtre de validité TSIG. Le rôle ne configure pas le service de synchronisation horaire.
 - Espace disque pour les archives BIND ; sauvegardes protégées et exportées selon votre politique. Le rôle garde 30 jours d'archives, sans plafond en nombre.
@@ -40,7 +40,7 @@ Les valeurs ci-dessous correspondent aux fichiers inspectés. « Absente » sign
 
 | Variable | Type | Description | Valeur par défaut | Obligatoire ? |
 |---|---|---|---|---|
-| `bind_dnssec_enabled` | booléen ou chaîne `auto` | `false` → validation `no`, aucun déploiement DNSSEC ; `true` → `yes` avec ancres natives ; `auto` → validation automatique | `false` | Non |
+| `bind_dnssec_active` | booléen ou chaîne `auto` | `false` → validation `no`, aucun déploiement DNSSEC ; `true` → `yes` avec ancres natives ; `auto` → validation automatique | `false` | Non |
 | `bind_cloud_clients` | liste de chaînes | Clients arrivant par FRONT ; seules destinations candidates aux routes retour FRONT | `[]` | Oui si internes vides |
 | `bind_internal_clients` | liste de chaînes | Clients arrivant par BACK ; aucune route créée pour eux | `[]` | Oui si cloud vide |
 | `bind_allowed_clients` | liste de chaînes calculée | Fusion sans doublons des deux entrées ; ACL DNS commune, à ne pas surcharger | Fait calculé à chaque exécution | Non, ne pas déclarer |
@@ -90,8 +90,8 @@ Le loopback et les pairs BACK restent des ACL techniques distinctes. Voir
 - Zone autoritative : `domain`, `serial` obligatoires ; `ttl` vaut `300` par défaut ; `records` vaut `[]`. Serial entier positif ≤ 4294967295. Incrémenter le serial lors de toute modification des données autoritatives ou des délégations.
 - Record : `name`, `type`, `value`. Types admis : `A`, `AAAA`, `CNAME`, `TXT`, `MX`, `PTR`, `SRV`, `CAA`. Fournir le RDATA BIND complet, avec les guillemets TXT et noms absolus terminés par un point lorsque nécessaires. Les adresses et caractères de contrôle sont vérifiés ; BIND vérifie ensuite les fichiers générés.
 - Les records A génèrent des zones inverses `/24`, les AAAA des zones `/64`. Les champs `mask` par record sont refusés. Les PTR contradictoires sont refusés. Le serial inverse est conservé ou avancé selon les différences avec la sauvegarde réelle.
-- Zone forward : `domain`, `forwarders` non vides ; `policy: only` uniquement. Chaque serveur a `address` littérale unicast **IPv4** et `port`, entier ou chaîne numérique, défaut `53`, intervalle 1–65535. Une destination visant l'un des pairs DNS sur son port 53 est refusée pour éviter une boucle.
-- `dnssec_validate` : booléen par zone forward, défaut `true`. Ce champ n’a d’effet que lorsque `bind_dnssec_enabled` vaut `true` ou `auto`. `false` déclare alors un suffixe privé non signé et ses descendants ; le rôle gère une NTA native, valable sept jours et renouvelée quotidiennement. Avec la validation globale `false`, aucune exception n’est déployée et aucun marqueur privé n’est rendu. Les chaînes `"false"` dans ce champ par zone restent refusées. Voir [DNSSEC.md](docs/DNSSEC.md).
+- Zone forward : `domain`, `forwarders` non vides ; `policy: only` uniquement. Chaque serveur a `address` littérale unicast **IPv4 ou IPv6** et `port`, entier ou chaîne numérique, défaut `53`, intervalle 1–65535. Une destination visant l'un des pairs DNS sur son port 53 est refusée pour éviter une boucle.
+- `dnssec_validate` : booléen par zone forward, défaut `true`. Ce champ n’a d’effet que lorsque `bind_dnssec_active` vaut `true` ou `auto`. `false` déclare alors un suffixe privé non signé et ses descendants ; le rôle gère une NTA native, valable sept jours et renouvelée quotidiennement. Avec la validation globale `false`, aucune exception n’est déployée et aucun marqueur privé n’est rendu. Les chaînes `"false"` dans ce champ par zone restent refusées. Voir [DNSSEC.md](docs/DNSSEC.md).
 - Les zones natives sont réservées. Les doublons sans distinction de casse, forwards imbriqués, forwards englobant une autorité et données autoritatives cachées sous un suffixe forward sont refusés. Les enfants forwardés d'une autorité sont permis avec délégation NS/glue générée dans le parent le plus proche ; les autres ont une délégation dans la racine privée.
 - Limites de longueur dues aux noms NS générés : 249 caractères pour une autorité, 235 pour un suffixe forward. Les ACL `/0`, clients IPv6 et entrées ambiguës sont refusés.
 
@@ -186,13 +186,13 @@ Le rôle n'active pas les mises à jour dynamiques, masque la version annoncée,
 La validation est désactivée par défaut. En mode `auto`, le rôle utilise `bindkeys-file`; en mode `true`, il charge explicitement les ancres natives. Les modes actifs utilisent `/var/named/dynamic`, appartenant à named. Les données natives et la politique cryptographique EL8 ne sont pas modifiées. En mode actif, les exceptions ne concernent que les zones déclarées `dnssec_validate: false` et leurs descendants ; les signatures invalides d’une zone stricte restent rejetées. La racine privée bloque toujours la résolution Internet générale : le renouvellement RFC5011 des clés racine et les chaînes publiques ne sont pas garantis dans cette topologie cloisonnée. Une zone stricte exige une chaîne effectivement accessible ou une politique de confiance privée adaptée ; voir les limites dans [DNSSEC.md](docs/DNSSEC.md).
 
 TSIG et la clé RNDC HMAC-SHA256 restent distincts ; RNDC administratif reste
-sur 127.0.0.1 dans tous les modes. `bind_dnssec_enabled` accepte `false`
+sur 127.0.0.1 dans tous les modes. `bind_dnssec_active` accepte `false`
 (défaut), `true` et `auto`. Le rôle rend respectivement `no`, `yes` et `auto`.
 `false` n’installe aucun helper, hook ni unité DNSSEC ; une ancienne installation
 gérée est arrêtée et retirée. `true` charge explicitement les ancres natives
 RHEL ; `auto` utilise `bindkeys-file`. Les deux modes actifs gèrent les NTA
 privées et leur renouvellement. Le journal d’appartenance et les fichiers
-officiels sont conservés lors de la désactivation. Les réglages IPv4 et RNDC
+officiels sont conservés lors de la désactivation. L’écoute DNS IPv4 et le canal RNDC
 restent dans un drop-in commun, séparé des hooks DNSSEC. Une modification des
 drop-ins provoque un restart ; le reste utilise reload. Détails, migration et
 limites : [DNSSEC.md](docs/DNSSEC.md).
@@ -247,26 +247,28 @@ Adapter les valeurs d'exemple. Codes : 0 = refus DNS explicite dans les deux ess
 
 | État | Contrôles |
 |---|---|
-| **EXÉCUTÉ** | Routage natif sans netaddr ni filtre personnalisé : scénarios Ansible réels, tests d’expressions YAML, idempotence et reprise sélective ; résultats courants dans [CLIENTS_UNIQUES.md](docs/CLIENTS_UNIQUES.md) et DELIVERY.json. Couverture des quatre modules Python restants : 99 %, seuil 98 %. DNS natif EL8 et BIND 9.18 : chacun 108 configurations et 263 contrôles |
+| **EXÉCUTÉ** | Routage natif sans netaddr ni filtre personnalisé : scénarios Ansible réels, tests d’expressions YAML, idempotence et reprise sélective ; résultats courants dans [CLIENTS_UNIQUES.md](docs/CLIENTS_UNIQUES.md) et DELIVERY.json. Couverture des quatre modules Python restants : 99 %, seuil 98 %. DNS natif EL8 et BIND 9.18 : chacun 109 configurations et 270 contrôles |
 | **NON EXÉCUTÉ** | Déploiement RHEL 8 réel et modules Python/DNF, crypto-policy générée/FIPS, SELinux, pare-feu, activation réelle des overrides/timers, redémarrage serveur, renouvellement sur sept jours, RFC5011 et chaînes DNSSEC cibles, deuxième deploy complet, restauration opérationnelle, charge et CI distante |
 
-Les rapports fournissent pour chaque contrôle manquant la raison, les prérequis, la procédure, le résultat attendu et le risque restant. Les 108 configurations couvrent les branches du template ; elles ne prouvent pas toutes les combinaisons arbitraires d'inventaire ni tous les incidents réseau. La sauvegarde à chaud d'un secondaire ne garantit pas un instantané atomique de ses journaux BIND ; qualifier la restauration et votre RPO/RTO avant production.
+Les rapports fournissent pour chaque contrôle manquant la raison, les prérequis, la procédure, le résultat attendu et le risque restant. Les 109 configurations couvrent les branches du template ; elles ne prouvent pas toutes les combinaisons arbitraires d'inventaire ni tous les incidents réseau. La sauvegarde à chaud d'un secondaire ne garantit pas un instantané atomique de ses journaux BIND ; qualifier la restauration et votre RPO/RTO avant production.
 
 ## 📦 Livraison et traçabilité
 
-Cette adaptation part de `Bind9-Ansible-dnssec-optionnel.zip`, conservée intacte. Le fichier original sur D: n'a pas été relu. `DELIVERY.json` décrit provenance et différences ; `SOURCE-MANIFEST.sha256` décrit les fichiers ; le ZIP possède une empreinte SHA-256 externe. Caches, journaux, runtimes et secrets générés sont exclus. Le helper et les unités DNSSEC ne sont déployés que pour `true`/`auto` ; les transitions et leur rollback sont intégrés au parcours deploy ; le filtre Python de routage est supprimé également du contrôleur. Les scripts Python nécessaires au DNS restent distincts de cette évolution. Les tâches de migration et les fonctions optionnelles utilisées sont conservées. Les déclarations d’ACL sans consommateur sont retirées ; le contrat client distingue cloud et internes, avec fusion calculée pour DNS et routage exclusivement cloud.
+Cette adaptation part de `Bind9-Ansible-dnssec-enabled.zip`, conservée intacte. Le fichier original sur D: n'a pas été relu. `DELIVERY.json` décrit provenance et différences ; `SOURCE-MANIFEST.sha256` décrit les fichiers ; le ZIP possède une empreinte SHA-256 externe. Caches, journaux, runtimes et secrets générés sont exclus. Le helper et les unités DNSSEC ne sont déployés que pour `true`/`auto` ; les transitions et leur rollback sont intégrés au parcours deploy ; le filtre Python de routage est supprimé également du contrôleur. Les scripts Python nécessaires au DNS restent distincts de cette évolution. Les tâches de migration et les fonctions optionnelles utilisées sont conservées. Les déclarations d’ACL sans consommateur sont retirées ; le contrat client distingue cloud et internes, avec fusion calculée pour DNS et routage exclusivement cloud.
 
 Les tests sont fournis avec les sources. Le nom public du projet reste **Bind9-Ansible** et le playbook reste **bind9-deploy.yml**. Les métadonnées du rôle déclarent `license: proprietary` ; aucun texte de licence détaillant les droits n'est fourni dans cette archive.
 
-Cette révision renomme uniquement l’entrée publique en `bind_dnssec_enabled` :
+Cette révision durcit les décisions DNSSEC et utilise `bind_dnssec_active` comme unique entrée publique :
 les valeurs `false`, `true`, `auto` et le défaut `false` sont conservés.
 Mettre à jour vos inventaires et commandes avec ce nom. Pour activer le mode
-automatique, déclarer `bind_dnssec_enabled: auto`. Les six fichiers
+automatique, déclarer `bind_dnssec_active: auto`. Les six fichiers
 runtime gérés sont capturés en mémoire avant modification et restaurés par le
 rescue, avec le précédent état du timer. Cette capture ne remplace pas une
 sauvegarde persistante et ne survit pas à l’arrêt du contrôleur.
 
-Les preuves BIND, NetworkManager et de cycle de vie complètes proviennent de
-l’archive source précédente. Les contrôles exécutés pour ce renommage et les
-contrôles non réexécutés sont distingués dans `DELIVERY.json` et
+Les faits de mode et d’activation intermédiaires sont supprimés. Les contrôles
+de types sont compatibles avec Jinja 2.10 ; les décisions d’activation prennent
+explicitement en compte `auto`, après validation stricte. Les fichiers et blocs
+impactés sont détaillés dans [DURCISSEMENT_DNSSEC.md](docs/DURCISSEMENT_DNSSEC.md).
+Les preuves et limites sont distinguées dans `DELIVERY.json` et
 [VALIDATION_RHEL8.md](docs/VALIDATION_RHEL8.md).

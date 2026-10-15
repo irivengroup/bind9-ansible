@@ -86,7 +86,7 @@ class DnssecRuntimeSandbox:
 
     def run(self,mode,rollback=False):
         play=[{'hosts':'localhost','connection':'local','gather_facts':False,
-               'vars':{'ansible_python_interpreter':str(self.interpreter),'bind_dnssec_enabled':mode,
+               'vars':{'ansible_python_interpreter':str(self.interpreter),'bind_dnssec_active':mode,
                        'test_rollback':rollback,'bind_rollback':{'rc':0}},
                'tasks':[{'include_role':{'name':'bind9','tasks_from':'test_runtime.yml'}},
                         {'assert':{'that':['test_runtime_restored | default(false) == test_rollback']}}]}]

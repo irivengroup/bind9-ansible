@@ -1,5 +1,5 @@
 ---
-# RNDC administration and IPv4 transport are independent of DNSSEC validation.
+# Native transport and RNDC administration are independent of DNSSEC validation.
 - name: Prepare the native administrative RNDC key
   ansible.builtin.systemd:
     name: named-setup-rndc.service
@@ -27,7 +27,7 @@
     group: root
     mode: '0755'
 
-- name: Configure IPv4 transport and administrative reload independently of DNSSEC
+- name: Preserve native startup and configure administrative reload independently of DNSSEC
   ansible.builtin.template:
     src: named-runtime-override.j2
     dest: /etc/systemd/system/named.service.d/bind9-runtime.conf

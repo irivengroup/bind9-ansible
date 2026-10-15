@@ -1,4 +1,4 @@
-bind_dnssec_enabled: false
+bind_dnssec_active: false
 bind_cloud_clients:
 - 198.51.100.0/24
 bind_internal_clients: []
