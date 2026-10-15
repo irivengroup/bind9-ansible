@@ -1,0 +1,167 @@
+---
+# All calculations use standard Ansible/Jinja expressions; no custom filter or package.
+- name: Parse FRONT profile before planning additions
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_parse_profile.yml'
+  vars:
+    bind_front_routes_text: '{{ bind_front_profile.results[1].stdout }}'
+
+- name: Validate routing policy and typed client inputs before planning
+  ansible.builtin.assert:
+    that:
+      - bind_cloud_clients is sequence and bind_cloud_clients is not string and bind_cloud_clients is not mapping
+      - bind_front_route_metric is integer and bind_front_route_metric is not boolean
+      - bind_front_route_metric | int >= 1 and bind_front_route_metric | int <= 4294967295
+      - bind_front_profile.results[2].stdout | trim in ['0', '254']
+      - (bind_front_kernel.results[0].stdout | from_json) is sequence and (bind_front_kernel.results[0].stdout | from_json) is not mapping
+      - (bind_front_kernel.results[1].stdout | from_json | length) == 3
+      - (bind_front_kernel.results[1].stdout | from_json | map(attribute='priority') | list | sort) == [0, 32766, 32767]
+      - (bind_front_kernel.results[1].stdout | from_json | map(attribute='src') | unique | list) == ['all']
+    fail_msg: 'Only classic IPv4 main-table routing and an integer metric are supported.'
+
+- name: Require the three standard routing rules without alternate tables
+  ansible.builtin.assert:
+    that:
+      - (item.table | string) == ({0:'local', 32766:'main', 32767:'default'}[item.priority])
+  loop: '{{ bind_front_kernel.results[1].stdout | from_json }}'
+
+- name: Normalize the real SSH peer without a custom filter
+  ansible.builtin.set_fact:
+    bind_front_ssh_ipv4: >-
+      {%- set value = bind_front_ssh_client | lower -%}
+      {%- if '::ffff:' in value -%}
+        {%- set tail = value.split('::ffff:')[-1] -%}
+        {%- if '.' in tail -%}{{ tail }}
+        {%- elif tail is match('^[0-9a-f]{1,4}:[0-9a-f]{1,4}$') -%}
+          {%- set parts = tail.split(':') -%}
+          {%- set high = parts[0] | int(base=16) -%}{%- set low = parts[1] | int(base=16) -%}
+          {{ [high//256, high%256, low//256, low%256] | join('.') }}
+        {%- else -%}invalid-mapped-ssh-peer{%- endif -%}
+      {%- elif ':' in value -%}{{ '' }}
+      {%- else -%}{{ value }}{%- endif -%}
+
+- name: Normalize client networks, gateway, runtime and protected ranges
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
+  vars:
+    bind_front_ipv4_values: >-
+      {%- set ns = namespace(values=bind_cloud_clients + bind_front_interface.protected_networks +
+          [bind_front_interface.network, bind_front_profile.results[0].stdout | trim, ansible_host, bind_back_ip,
+           hostvars[bind_primary_host].bind_back_ip, hostvars[bind_secondary_host].bind_back_ip,
+           '0.0.0.0/8','127.0.0.0/8','169.254.0.0/16','224.0.0.0/4','240.0.0.0/4']) -%}
+      {%- if bind_front_ssh_ipv4 -%}{%- set ns.values = ns.values + [bind_front_ssh_ipv4] -%}{%- endif -%}
+      {%- for route in bind_front_kernel.results[0].stdout | from_json -%}
+        {%- set ns.values = ns.values + [route.get('dst','default') | replace('default','0.0.0.0/0')] -%}
+      {%- endfor -%}
+      {{ ns.values }}
+
+- name: Validate canonical external IPv4 networks
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - item is match('^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+(/[0-9]+)?$')
+      - ('/' not in item) or bind_front_ipv4_data[item].cidr == item
+      - bind_front_ipv4_data[item].prefix > 0
+    fail_msg: 'External destinations must be canonical IPv4 networks or individual IPv4 addresses.'
+  loop: '{{ bind_cloud_clients }}'
+
+- name: Calculate a typed additive plan with native Ansible filters
+  ansible.builtin.set_fact:
+    bind_front_plan_json: >-
+      {%- set ns = namespace(errors=[], wanted=[], probes=[], profile=[], runtime=[]) -%}
+      {%- set gateway = bind_front_profile.results[0].stdout | trim -%}
+      {%- set front = bind_front_interface.network -%}
+      {%- if '/' in gateway or not ((bind_front_ipv4_data[gateway].lo >= bind_front_ipv4_data[front].lo and bind_front_ipv4_data[gateway].hi <= bind_front_ipv4_data[front].hi)) or gateway in
+          [bind_front_ipv4_data[front].network, bind_front_ipv4_data[front].broadcast, bind_front_ip] -%}
+        {%- set ns.errors = ns.errors + ['FRONT gateway is missing, off-link or unusable'] -%}
+      {%- endif -%}
+      {%- set protected = bind_front_interface.protected_networks +
+          [ansible_host, bind_back_ip, hostvars[bind_primary_host].bind_back_ip, hostvars[bind_secondary_host].bind_back_ip] -%}
+      {%- if bind_front_ssh_ipv4 -%}{%- set protected = protected + [bind_front_ssh_ipv4] -%}{%- endif -%}
+      {%- for client in bind_cloud_clients -%}
+        {%- set network = bind_front_ipv4_data[client].cidr -%}
+        {%- for other in protected + ['0.0.0.0/8', '127.0.0.0/8', '169.254.0.0/16', '224.0.0.0/4', '240.0.0.0/4'] -%}
+          {%- if ((bind_front_ipv4_data[network].lo >= bind_front_ipv4_data[other].lo and bind_front_ipv4_data[network].hi <= bind_front_ipv4_data[other].hi)) or ((bind_front_ipv4_data[other].lo >= bind_front_ipv4_data[network].lo and bind_front_ipv4_data[other].hi <= bind_front_ipv4_data[network].hi)) -%}
+            {%- set ns.errors = ns.errors + ['Unsafe external network overlaps protected or reserved range: ' ~ network] -%}
+          {%- endif -%}
+        {%- endfor -%}
+        {%- if (bind_front_ipv4_data[network].lo >= bind_front_ipv4_data[front].lo and bind_front_ipv4_data[network].hi <= bind_front_ipv4_data[front].hi) -%}
+          {%- for route in bind_front_kernel.results[0].stdout | from_json -%}
+            {%- set destination = bind_front_ipv4_data[route.get('dst', 'default') | replace('default', '0.0.0.0/0')].cidr -%}
+            {%- if (bind_front_ipv4_data[destination].lo >= bind_front_ipv4_data[network].lo and bind_front_ipv4_data[destination].hi <= bind_front_ipv4_data[network].hi) and (route.get('dev') != bind_front_interface.device or route.get('gateway')) -%}
+              {%- set ns.errors = ns.errors + ['Conflicting route for directly connected FRONT client'] -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {%- set ns.probes = ns.probes + [{'address': bind_front_ipv4_data[network].probe, 'network': network, 'gateway': none}] -%}
+        {%- elif (bind_front_ipv4_data[front].lo >= bind_front_ipv4_data[network].lo and bind_front_ipv4_data[front].hi <= bind_front_ipv4_data[network].hi) -%}
+          {%- set ns.errors = ns.errors + ['External network encloses the directly connected FRONT subnet'] -%}
+        {%- else -%}{%- set ns.wanted = ns.wanted + [network] -%}{%- endif -%}
+      {%- endfor -%}
+      {# Merge contained/adjacent external CIDRs without a custom Python filter. #}
+      {%- set merged = namespace(stack=[]) -%}
+      {%- for spec in ns.wanted | unique | map('extract', bind_front_ipv4_data) | sort(attribute='prefix') | sort(attribute='lo') -%}
+        {%- if not merged.stack or spec.hi > merged.stack[-1].hi -%}
+          {%- set merged.stack = merged.stack + [spec] -%}
+          {# IPv4 has only 32 levels; this bounded fold replaces an unbounded loop. #}
+          {%- for level in range(32) -%}
+            {%- if merged.stack | length >= 2 -%}
+              {%- set left = merged.stack[-2] -%}{%- set right = merged.stack[-1] -%}
+              {%- if left.prefix == right.prefix and left.prefix > 0 and left.hi+1 == right.lo and left.lo % (2 ** (33-left.prefix)) == 0 -%}
+                {%- set prefix = left.prefix-1 -%}
+                {%- set address = [left.lo//16777216, (left.lo//65536)%256, (left.lo//256)%256, left.lo%256] | join('.') -%}
+                {%- set probe = left.lo+1 -%}
+                {%- set combined = {'lo':left.lo, 'hi':right.hi, 'prefix':prefix, 'cidr':address ~ '/' ~ prefix,
+                    'probe':[probe//16777216, (probe//65536)%256, (probe//256)%256, probe%256] | join('.')} -%}
+                {%- set merged.stack = merged.stack[:-2] + [combined] -%}
+              {%- endif -%}
+            {%- endif -%}
+          {%- endfor -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {%- for spec in merged.stack -%}
+        {%- set network = spec.cidr -%}
+        {%- set row = namespace(persisted=[], active=[]) -%}
+        {%- for route in bind_front_parsed_profile -%}
+          {%- if (bind_front_ipv4_data[route.network].lo >= spec.lo and bind_front_ipv4_data[route.network].hi <= spec.hi) -%}
+            {%- if route.gateway != gateway or route.attributes -%}
+              {%- set ns.errors = ns.errors + ['Conflicting or attributed persistent FRONT route: ' ~ route.network] -%}
+            {%- endif -%}
+            {%- if route.network == network -%}{%- set row.persisted = row.persisted + [route] -%}{%- endif -%}
+          {%- endif -%}
+        {%- endfor -%}
+        {%- for route in bind_front_kernel.results[0].stdout | from_json -%}
+          {%- set destination = bind_front_ipv4_data[route.get('dst', 'default') | replace('default', '0.0.0.0/0')].cidr -%}
+          {%- if not destination -%}{%- set ns.errors = ns.errors + ['Invalid runtime destination'] -%}
+          {%- elif (bind_front_ipv4_data[destination].lo >= spec.lo and bind_front_ipv4_data[destination].hi <= spec.hi) -%}
+            {%- if route.get('dev') != bind_front_interface.device or route.get('gateway') != gateway or route.get('type', 'unicast') != 'unicast' or 'nexthops' in route -%}
+              {%- set ns.errors = ns.errors + ['Conflicting active FRONT route: ' ~ destination] -%}
+            {%- endif -%}
+            {%- if destination == network -%}{%- set row.active = row.active + [route] -%}{%- endif -%}
+          {%- endif -%}
+        {%- endfor -%}
+        {%- if row.persisted | length > 1 or row.active | length > 1 -%}
+          {%- set ns.errors = ns.errors + ['Duplicate FRONT route: ' ~ network] -%}
+        {%- endif -%}
+        {%- if row.active and not row.persisted -%}{%- set ns.errors = ns.errors + ['Unowned runtime-only route: ' ~ network] -%}{%- endif -%}
+        {%- set metric = row.persisted[0].metric if row.persisted else bind_front_route_metric -%}
+        {%- set command_route = network ~ ' ' ~ gateway ~ ((' ' ~ metric) if metric | int >= 0 else '') -%}
+        {%- if not row.persisted -%}{%- set ns.profile = ns.profile + [command_route] -%}{%- endif -%}
+        {%- if not row.active -%}{%- set ns.runtime = ns.runtime + [command_route] -%}{%- endif -%}
+        {%- set ns.probes = ns.probes + [{'address': spec.probe, 'network': network, 'gateway': gateway}] -%}
+      {%- endfor -%}
+      {{ {'errors': ns.errors, 'plan': {'device': bind_front_interface.device, 'uuid': bind_front_uuid, 'gateway': gateway,
+          'profile_additions': ns.profile, 'runtime_additions': ns.runtime, 'probes': ns.probes,
+          'runtime_before': bind_front_kernel.results[0].stdout | from_json, 'profile_before': bind_front_parsed_profile,
+          'protected_ips': protected | reject('search', '/') | list}} | to_json }}
+
+- name: Reject an empty plan or any unsafe observation before writes
+  ansible.builtin.assert:
+    that:
+      - ((bind_front_plan_json | from_json if bind_front_plan_json is string else bind_front_plan_json)) is mapping
+      - ((bind_front_plan_json | from_json if bind_front_plan_json is string else bind_front_plan_json)).errors | length == 0
+    fail_msg: '{{ ((bind_front_plan_json | from_json if bind_front_plan_json is string else bind_front_plan_json)).errors | default("Invalid FRONT plan") }}'
+
+- name: Retain the native route plan as a dictionary
+  ansible.builtin.set_fact:
+    bind_front_plan: '{{ ((bind_front_plan_json | from_json if bind_front_plan_json is string else bind_front_plan_json)).plan }}'
+
+- name: Validate the recovery contract before any mutation
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_validate_journal.yml'

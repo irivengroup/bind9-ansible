@@ -21,3 +21,38 @@
   loop: '{{ bind_native_loopback_files.results }}'
   loop_control:
     label: '{{ item.item }}'
+
+- name: Inspect native system crypto-policy include
+  ansible.builtin.stat:
+    path: '{{ item }}'
+    # crypto-policies can install a symlink to the selected vendor policy.
+    follow: true
+  loop:
+    - /etc/crypto-policies/back-ends/bind.config
+  register: bind_native_security_files
+
+- name: Require native crypto-policy include
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg | default(false)
+    fail_msg: 'Required RHEL 8 security include is missing: {{ item.item }}. Repair the vendor package or crypto-policy; the role does not generate a fallback.'
+  loop: '{{ bind_native_security_files.results }}'
+  loop_control:
+    label: '{{ item.item }}'
+
+- name: Inspect the native trust anchor only when validation is enabled
+  ansible.builtin.stat:
+    path: /etc/named.root.key
+    follow: false
+  register: bind_native_trust_anchor
+  when: bind_dnssec_active
+
+- name: Require the native trust anchor for enabled DNSSEC modes
+  ansible.builtin.assert:
+    that:
+      - bind_native_trust_anchor.stat.exists
+      - bind_native_trust_anchor.stat.isreg | default(false)
+      - not (bind_native_trust_anchor.stat.islnk | default(false))
+    fail_msg: 'Enabled DNSSEC requires the native /etc/named.root.key file.'
+  when: bind_dnssec_active

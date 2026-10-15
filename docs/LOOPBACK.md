@@ -1,29 +1,20 @@
-# Loopback natif dans le template canonique
+# Loopback et zones natives EL8
 
-`roles/bind9/templates/named.conf.j2` produit `/etc/named.conf` et écoute sur 127.0.0.1, FRONT et BACK. L'ACL `local_loopback`, définie une fois avec exactement `127.0.0.1`, est utilisée dans l'écoute, le contrôle global `allow-query-on`, les permissions peer et les cinq règles de la vue `local`. Cette vue, après `peer`, exige une source ET une destination 127.0.0.1. Elle inclut uniquement `/etc/named.rfc1912.zones`, fourni par le paquet RHEL, et partage les zones métier via `in-view "peer"`. Les suffixes forwardés sont déclarés dans cette vue ; les autres noms restent bloqués par la racine privée. Détail et recette actuels : [ACL_SERVEURS.md](ACL_SERVEURS.md) ; première livraison du loopback : [ACL_LOOPBACK.md](ACL_LOOPBACK.md).
+Le template canonique écoute sur `local_loopback` (`127.0.0.1`) et les adresses FRONT/BACK locales. `/etc/named.rfc1912.zones` est inclus au niveau global, sans vues. Le rôle vérifie ce fichier ainsi que `/var/named/named.localhost`, `named.loopback`, `named.empty`, sans les réécrire ni accepter des liens symboliques pour ces quatre fichiers.
 
-Les fichiers natifs `named.localhost`, `named.loopback`, `named.empty` ne sont pas remplacés. Leur présence et l'absence de liens symboliques sont vérifiées après installation des paquets. L'écoute IPv6 reste désactivée ; une réponse AAAA `::1` est possible en transport IPv4. Le rôle ne modifie ni `/etc/resolv.conf` ni les adresses réseau.
+Le fichier natif EL8 inspecté déclare `localhost.localdomain`, `localhost`, la zone inverse IPv6 de `::1`, `1.0.0.127.in-addr.arpa` et `0.in-addr.arpa`. `empty-zones-enable yes` conserve aussi les zones vides automatiques BIND. L'écoute IPv6 est désactivée ; les données natives AAAA `::1` et PTR IPv6 restent consultables via IPv4. Le rôle ne modifie pas `/etc/resolv.conf`.
 
-Les permissions des zones partagées autorisent les clients prévus dans la vue peer d'origine ; la sélection des vues contrôle leurs sources et destinations. Les transferts primaires exigent le secondaire BACK et TSIG ; FRONT exclut les adresses BACK des pairs et leur clé. Voir [VALIDATION_NAMED.md](VALIDATION_NAMED.md) pour les corrections, les preuves et les limites de NOTIFY.
-
-## Contrôles du serveur
+La récursion locale permet les suffixes forwardés ; les autres noms suivent la racine privée NXDOMAIN, sauf les zones natives et autoritatives plus spécifiques. Les zones natives sont visibles à toutes les sources admises par `allow-query`, selon le modèle global sans vues. Les fichiers de données officiels ne sont pas personnalisés.
 
 ```bash
 sudo named-checkconf -z /etc/named.conf
-dig -b 127.0.0.1 @127.0.0.1 localhost A +norecurse
-dig -b 127.0.0.1 @127.0.0.1 localhost A +tcp +norecurse
-dig -b 127.0.0.1 @127.0.0.1 1.0.0.127.in-addr.arpa PTR +norecurse
-dig -b 127.0.0.1 @127.0.0.1 1.0.0.127.in-addr.arpa PTR +tcp +norecurse
+dig -4 -b 127.0.0.1 @127.0.0.1 localhost A +norecurse
+dig -4 -b 127.0.0.1 @127.0.0.1 localhost A +tcp +norecurse
+dig -4 -b 127.0.0.1 @127.0.0.1 1.0.0.127.in-addr.arpa PTR +norecurse
+dig -4 -b 127.0.0.1 @127.0.0.1 1.0.0.127.in-addr.arpa PTR +tcp +norecurse
+dig -4 -b 127.0.0.1 @127.0.0.1 localhost AAAA +norecurse
 ```
 
-Attendu : NOERROR, drapeau AA et A 127.0.0.1 ou PTR localhost. Le rôle vérifie ces quatre réponses, les SOA exacts des zones après réconciliation et les SOA des suffixes forwardés en UDP/TCP. Les applications locales voulant utiliser la vue récursive locale peuvent interroger explicitement 127.0.0.1.
+Attendu : NOERROR, AA, A `127.0.0.1`, PTR `localhost.` et AAAA `::1`. Le rôle contrôle automatiquement les quatre premières réponses locales, les SOA exacts des zones métier et les SOA forwardés en UDP/TCP. Le moniteur facultatif exécute ces contrôles via son timer systemd ; demander `bind_monitoring_enabled: true` et le tag `monitor`.
 
-Le moniteur facultatif ajoute ces contrôles natifs à son service/timer. Il faut `bind_monitoring_enabled: true` ET le tag `monitor` pour l'installer. Ses résultats sont dans le journal systemd.
-
-## Recette et statut
-
-**EXÉCUTÉ** : 44 configurations chargées et 107 contrôles DNS avec BIND 9.18.24 isolé, dont loopback, deux serveurs, forwarding et NOTIFY. Les fichiers natifs EL8 sont inchangés. Procédure et prérequis : [VALIDATION_NAMED.md](VALIDATION_NAMED.md).
-
-**NON EXÉCUTÉ** : déploiement et fonctionnement réels sur votre RHEL 8/Python 3.6.8, SELinux, pare-feu et services cibles. Le rapport précité précise pour chaque contrôle la raison, la procédure, les prérequis, le résultat attendu et le risque restant. La qualification de production est **NON TERMINÉE**.
-
-Les routes de retour et leur rollback sont décrits dans [FRONT_ROUTES.md](FRONT_ROUTES.md). Les preuves et le nettoyage de la livraison actuelle sont regroupés dans [VALIDATION_NETTOYAGE.md](VALIDATION_NETTOYAGE.md).
+**EXÉCUTÉ** : laboratoire BIND EL8 9.11.36 et BIND 9.18.24, chacun 108 configurations et 263 contrôles DNS, avec fichiers natifs inchangés. **NON EXÉCUTÉ** : recette sur votre système RHEL réel ; raisons, procédure et risques dans [VALIDATION_RHEL8.md](VALIDATION_RHEL8.md). Les modes DNSSEC `false`/`true`/`auto`, le canal RNDC uniquement IPv4 et les exceptions privées optionnelles sont décrits dans [DNSSEC.md](DNSSEC.md).

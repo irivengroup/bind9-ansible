@@ -1,4 +1,4 @@
-"""Validate literal IPv4/IPv6 addresses or canonical CIDR networks."""
+"""Validate IPv4 transport addresses and typed DNS record data."""
 import ipaddress
 
 
@@ -7,9 +7,9 @@ def valid_client_address(value):
         return False
     try:
         if "/" in value:
-            ipaddress.ip_network(value, strict=True)
+            ipaddress.IPv4Network(value, strict=True)
         else:
-            ipaddress.ip_address(value)
+            ipaddress.IPv4Address(value)
         return True
     except (ValueError, TypeError):
         return False
@@ -24,7 +24,7 @@ def valid_ip_address(value):
     if not isinstance(value, str) or value != value.strip():
         return False
     try:
-        ipaddress.ip_address(value)
+        ipaddress.IPv4Address(value)
         return True
     except ValueError:
         return False

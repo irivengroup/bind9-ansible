@@ -6,6 +6,9 @@
   ansible.builtin.set_fact:
     bind_front_route_rollback_attempted: true
 
+- name: Validate route journal before selecting owned removals
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_validate_journal.yml'
+
 - name: Inspect active FRONT identity before rollback
   ansible.builtin.command:
     argv: [nmcli, -g, GENERAL.CON-UUID, device, show, '{{ bind_front_plan.device }}']
@@ -21,15 +24,35 @@
   register: bind_front_rollback_profile
   changed_when: false
 
-- name: Select only present owned persistent additions
+- name: Parse persistent routes before selecting owned removals
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_parse_profile.yml'
+  vars:
+    bind_front_routes_text: '{{ bind_front_rollback_profile.stdout }}'
+
+- name: Select exact owned persistent additions with native expressions
   ansible.builtin.set_fact:
-    bind_front_profile_removals: '{{ bind_front_plan | front_owned_profile_routes(bind_front_rollback_profile.stdout) }}'
+    bind_front_profile_selection: >-
+      {%- set ns = namespace(routes=[], errors=[]) -%}
+      {%- for entry in bind_front_plan.profile_additions -%}
+        {%- set parts = entry.split() -%}
+        {%- set matching = bind_front_parsed_profile | selectattr('network', 'equalto', parts[0]) | list -%}
+        {%- set expected = {'network':parts[0], 'gateway':parts[1], 'metric':(parts[2] | int) if parts | length == 3 else -1, 'attributes':{}} -%}
+        {%- if matching and matching != [expected] -%}
+          {%- set ns.errors = ns.errors + ['Owned persistent route identity changed; manual recovery required'] -%}
+        {%- elif matching -%}{%- set ns.routes = ns.routes + [entry] -%}{%- endif -%}
+      {%- endfor -%}
+      {{ {'routes':ns.routes, 'errors':ns.errors} | to_json }}
+
+- name: Refuse removal of a modified persistent route
+  ansible.builtin.assert:
+    that: [((bind_front_profile_selection | from_json if bind_front_profile_selection is string else bind_front_profile_selection)).errors | length == 0]
+    fail_msg: '{{ ((bind_front_profile_selection | from_json if bind_front_profile_selection is string else bind_front_profile_selection)).errors }}'
 
 - name: Remove owned persistent additions
   ansible.builtin.command:
     argv: [nmcli, --wait, '10', connection, modify, uuid, '{{ bind_front_plan.uuid }}', -ipv4.routes, '{{ item }}']
   environment: {LC_ALL: C}
-  loop: '{{ bind_front_profile_removals }}'
+  loop: '{{ ((bind_front_profile_selection | from_json if bind_front_profile_selection is string else bind_front_profile_selection)).routes }}'
 
 - name: Read runtime routes available for selective rollback
   ansible.builtin.command:
@@ -37,15 +60,50 @@
   register: bind_front_rollback_kernel
   changed_when: false
 
-- name: Select only present owned active additions
+- name: Normalize active destinations being inspected
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
+  vars:
+    bind_front_ipv4_values: >-
+      {%- set ns = namespace(values=[]) -%}
+      {%- for route in bind_front_rollback_kernel.stdout | from_json -%}
+        {%- set ns.values = ns.values + [route.get('dst','default') | replace('default','0.0.0.0/0')] -%}
+      {%- endfor -%}
+      {{ ns.values }}
+
+- name: Select exact owned active additions with native expressions
   ansible.builtin.set_fact:
-    bind_front_runtime_removals: '{{ bind_front_plan | front_owned_runtime_routes(bind_front_rollback_kernel.stdout) }}'
+    bind_front_runtime_selection: >-
+      {%- set ns = namespace(routes=[], errors=[]) -%}
+      {%- for entry in bind_front_plan.runtime_additions -%}
+        {%- set parts = entry.split() -%}
+        {%- set row = namespace(matching=[]) -%}
+        {%- for route in bind_front_rollback_kernel.stdout | from_json -%}
+          {%- if (bind_front_ipv4_data[route.get('dst','default') | replace('default','0.0.0.0/0')].cidr) == parts[0] -%}
+            {%- set row.matching = row.matching + [route] -%}
+          {%- endif -%}
+        {%- endfor -%}
+        {%- if row.matching -%}
+          {%- if row.matching | length != 1 or row.matching[0].get('dev') != bind_front_plan.device or row.matching[0].get('gateway') != parts[1] or
+              row.matching[0].get('type','unicast') != 'unicast' or 'nexthops' in row.matching[0] or
+              (parts | length == 3 and row.matching[0].get('metric') != parts[2] | int) -%}
+            {%- set ns.errors = ns.errors + ['Owned active route identity changed; manual recovery required'] -%}
+          {%- else -%}{%- set ns.routes = ns.routes + [entry] -%}{%- endif -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ {'routes':ns.routes, 'errors':ns.errors} | to_json }}
+
+- name: Refuse removal of a modified active route
+  ansible.builtin.assert:
+    that: [((bind_front_runtime_selection | from_json if bind_front_runtime_selection is string else bind_front_runtime_selection)).errors | length == 0]
+    fail_msg: '{{ ((bind_front_runtime_selection | from_json if bind_front_runtime_selection is string else bind_front_runtime_selection)).errors }}'
 
 - name: Remove owned active additions
   ansible.builtin.command:
-    argv: [nmcli, --wait, '10', device, modify, '{{ bind_front_plan.device }}', -ipv4.routes, '{{ item }}']
+    argv: >-
+      {{ ['ip', '-4', 'route', 'del', item.split()[0], 'via', item.split()[1], 'dev', bind_front_plan.device] +
+         (['metric', item.split()[2]] if item.split() | length == 3 else []) + ['table', 'main'] }}
   environment: {LC_ALL: C}
-  loop: '{{ bind_front_runtime_removals }}'
+  loop: '{{ ((bind_front_runtime_selection | from_json if bind_front_runtime_selection is string else bind_front_runtime_selection)).routes }}'
 
 - name: Read restored profile and main table
   ansible.builtin.command:
@@ -58,10 +116,11 @@
   changed_when: false
 
 - name: Require the exact original routing state
-  ansible.builtin.assert:
-    that:
-      - bind_front_plan.profile_before | front_profile_unchanged(bind_front_restored.results[0].stdout, bind_front_plan, false)
-      - bind_front_plan.runtime_before | front_routes_unchanged(bind_front_restored.results[1].stdout, bind_front_plan, false)
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_compare.yml'
+  vars:
+    bind_front_compare_profile: '{{ bind_front_restored.results[0].stdout }}'
+    bind_front_compare_runtime: '{{ bind_front_restored.results[1].stdout }}'
+    bind_front_compare_applied: false
 
 - name: Remove the recovery journal after successful rollback
   ansible.builtin.file:

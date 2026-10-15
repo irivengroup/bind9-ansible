@@ -1,0 +1,5 @@
+# Bind9-Ansible: apply private suffix exceptions at start and reload.
+[Service]
+ExecStartPost=/usr/bin/python3 /usr/local/sbin/bind-private-dnssec
+# This lexically later drop-in appends after the common RNDC reload.
+ExecReload=/usr/bin/python3 /usr/local/sbin/bind-private-dnssec

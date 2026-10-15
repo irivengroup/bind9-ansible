@@ -1,6 +1,7 @@
 """Protect vendor-owned loopback integration and independent network recovery."""
 from pathlib import Path
 import ast
+import re
 
 from jinja2 import Environment, StrictUndefined
 import pytest
@@ -18,14 +19,30 @@ class TestNativeLoopback:
         source = ROLE / 'files/reverse-serial.py'
         ast.parse(source.read_text(), filename=str(source), feature_version=(3, 6))
 
+    def test_native_el8_paths_ipv4_and_automatic_dnssec_are_explicit(self):
+        template = (ROLE / 'templates/named.conf.j2').read_text()
+        assert 'dnssec-validation {{ dnssec_mode }};' in template
+        assert 'listen-on-v6 { none; };' in template
+        assert 'empty-zones-enable yes;' in template
+        assert 'include "/etc/named.rfc1912.zones";' in template
+        assert 'include "/etc/crypto-policies/back-ends/bind.config";' in template
+        assert 'validate-except' not in template
+        assert 'bindkeys-file "/etc/named.root.key";' in template
+        for path in ('/var/named/data/cache_dump.db', '/var/named/data/named_stats.txt',
+                     '/run/named/named.pid', '/run/named/session.key'):
+            assert path in template
+        directories = yaml.safe_load((ROLE / 'tasks/tasks.d/directories.yml').read_text())[0]['loop']
+        assert {'path': '/var/named/data', 'owner': 'named', 'mode': '0750'} in directories
+        assert yaml.safe_load((ROLE / 'defaults/main.yml').read_text())['bind_front_routes_enabled'] is False
+
     @pytest.mark.parametrize('role', ['dns_primary', 'dns_secondary'])
-    @pytest.mark.parametrize('front,back', [([], []), (['192.0.2.0/24'], []), ([], ['10.0.0.0/24']), (['192.0.2.0/24'], ['10.0.0.0/24'])])
-    def test_local_view_is_available_and_restricted_in_all_client_modes(self, role, front, back):
+    @pytest.mark.parametrize('clients,internal', [([], []), (['192.0.2.0/24'], []), ([], ['10.0.0.10']), (['192.0.2.0/24'], ['10.0.0.10'])])
+    def test_native_loopback_and_global_acls_are_available_for_each_client_combination(self, role, clients, internal):
         primary = role == 'dns_primary'
         context = dict(bind_tsig_key_name='test-transfer', bind_tsig_algorithm='hmac-sha256',
                        bind_tsig_secret='test-render-only', bind_front_ip='192.0.2.11' if primary else '192.0.2.12',
-                       bind_back_ip='10.0.0.11' if primary else '10.0.0.12', bind_frontend_clients=front,
-                       bind_backend_clients=back, group_names=[role],
+                       bind_back_ip='10.0.0.11' if primary else '10.0.0.12', bind_cloud_clients=clients, bind_internal_clients=internal,
+                       bind_allowed_clients=list(dict.fromkeys(clients + internal)), group_names=[role],
                        bind_primary_host='p', bind_secondary_host='s',
                        hostvars={'p': {'bind_back_ip': '10.0.0.11', 'bind_front_ip': '192.0.2.11'},
                                  's': {'bind_back_ip': '10.0.0.12', 'bind_front_ip': '192.0.2.12'}},
@@ -36,21 +53,30 @@ class TestNativeLoopback:
         # Use an exact literal rather than BIND's built-in localhost ACL,
         # whose membership also follows the server's interface addresses.
         assert 'acl "local_loopback" {\n    127.0.0.1;\n};' in rendered
-        assert rendered.count('127.0.0.1') == 1
+        assert rendered.count('127.0.0.1') == 2
+        assert 'inet 127.0.0.1 port 953 allow { local_loopback; }' in rendered
         assert rendered.index('acl "local_loopback"') < rendered.index('options {')
         prefix = 'bind_primary_' if primary else 'bind_secondary_'
         assert 'listen-on port 53 { local_loopback; ' + prefix + 'front_ip; ' + prefix + 'back_ip; };' in rendered
-        peer = rendered.split('view "peer" IN {', 1)[1].split('view "local" IN {', 1)[0]
-        assert 'allow-query {\n        local_loopback;' in peer
-        assert 'match-destinations { ' + prefix + 'back_ip; };' in peer
-        assert rendered.index('view "peer"') < rendered.index('view "local"') < rendered.index('view "deny"')
-        local = rendered.split('view "local" IN {', 1)[1].split('\nview "', 1)[0]
-        for directive in ('match-clients', 'match-destinations', 'allow-recursion', 'allow-query-cache', 'allow-query'):
-            assert directive + ' { local_loopback; };' in local
-        assert 'allow-transfer { none; };' in local
-        assert 'include "/etc/named.rfc1912.zones";' in local
-        assert 'zone "example.test" IN { in-view "peer"; };' in local
-        assert 'zone "corp.test" IN {' in local
+        destinations = re.search(r'allow-query-on\s*\{([^{}]*)\};', rendered).group(1).split()
+        assert destinations == ['local_loopback;', prefix + 'front_ip;', prefix + 'back_ip;']
+        for directive in ('allow-recursion-on', 'allow-query-cache-on'):
+            body = re.search(directive + r'\s*\{([^{}]*)\};', rendered).group(1).split()
+            expected = ['local_loopback;']
+            if clients:
+                expected.append(prefix + 'front_ip;')
+            if internal:
+                expected.append(prefix + 'back_ip;')
+            assert body == expected
+        for address in clients + internal:
+            assert address + ';' in rendered
+        assert 'view "' not in rendered and 'in-view' not in rendered
+        assert 'allow-query { dns_query_clients; };' in rendered
+        assert 'allow-recursion { dns_recursive_clients; };' in rendered
+        assert 'allow-query-cache { dns_recursive_clients; };' in rendered
+        assert 'allow-transfer { none; };' in rendered
+        assert rendered.count('zone "example.test" IN {') == 1
+        assert rendered.count('zone "corp.test" IN {') == 1
         assert rendered.count('include "/etc/named.rfc1912.zones";') == 1
         assert 'zone "localhost"' not in rendered  # Vendor definitions are not copied.
 

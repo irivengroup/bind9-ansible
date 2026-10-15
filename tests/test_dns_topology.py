@@ -1,4 +1,4 @@
-"""Regression coverage for authoritative cuts, private DNSSEC and unsafe inputs."""
+"""Regression coverage for authoritative cuts, IPv4 endpoints and unsafe inputs."""
 import base64
 import importlib.util
 import ipaddress
@@ -16,7 +16,9 @@ FilterModule = module.FilterModule
 
 
 def forwarding(domain='corp.example.test', **values):
-    return dict(domain=domain, forwarders=[{'address': '192.0.2.53'}, {'address': '2001:db8::53'}], **values)
+    result = dict(domain=domain, forwarders=[{'address': '192.0.2.53'}, {'address': '198.51.100.53'}])
+    result.update(values)
+    return result
 
 
 class TestDnsTopology:
@@ -33,7 +35,7 @@ class TestDnsTopology:
         assert planner.delegations('example.test') == []
         cut = planner.delegations('site.example.test')[0]
         assert cut['domain'] == 'corp.site.example.test.'
-        assert [server['type'] for server in cut['servers']] == ['A', 'AAAA']
+        assert [server['type'] for server in cut['servers']] == ['A', 'A']
 
     def test_unrelated_forwarding_gets_root_cut_and_empty_inputs_stay_empty(self):
         planner = DnsTopology([{'domain': 'example.test'}], [forwarding('corp.other.test')])
@@ -49,8 +51,9 @@ class TestDnsTopology:
         ([{'domain': 'in-addr.arpa'}], []),
         ([{'domain': 'example.test', 'records': [{'name': 'app.corp'}]}], [forwarding()]),
         ([{'domain': 'example.test', 'records': [{'name': 'corp'}]}], [forwarding()]),
+        ([], [forwarding(forwarders=[{'address': '2001:db8::53'}])]),
         ([], [forwarding(dnssec_validate='false')]),
-        ([], [forwarding(dnssec_validate=0)]),
+        ([], [forwarding(dnssec_validate=None)]),
     ])
     def test_ambiguous_hidden_native_or_weakly_typed_topology_is_rejected(self, authoritative, forwarded):
         with pytest.raises(ValueError):
@@ -66,7 +69,7 @@ class TestDnsTopology:
         auth = [{'domain': 'Example.test', 'records': [{'name': '@'}, {'name': 'app'}]}]
         filters = FilterModule().filters()
         assert filters['dns_topology_valid'](auth, [forwarding()]) is True
-        assert filters['forward_delegations']('example.test', auth, [forwarding(dnssec_validate=False)])
+        assert filters['forward_delegations']('example.test', auth, [forwarding()])
 
     def test_real_zone_templates_contain_the_dns_cut_regression(self):
         env = Environment(loader=FileSystemLoader(str(ROLE / 'templates')), undefined=StrictUndefined)
@@ -77,7 +80,7 @@ class TestDnsTopology:
                        hostvars={'p': {'bind_front_ip': '192.0.2.1'}, 's': {'bind_front_ip': '192.0.2.2'}})
         output = env.get_template('authoritative.zone.j2').render(**context)
         assert 'corp.example.test. IN NS bind-forwarder-1.corp.example.test.' in output
-        assert 'bind-forwarder-2.corp.example.test. IN AAAA 2001:db8::53' in output
+        assert 'bind-forwarder-2.corp.example.test. IN A 198.51.100.53' in output
         root = env.get_template('empty-root.zone.j2').render(**context)
         assert 'corp.example.test. IN NS' not in root
         context['bind_forward_zones'] = [forwarding('other.test')]
@@ -106,7 +109,7 @@ class TestDnsTopology:
         assert FilterModule().filters()['dns_client_safe'](client) is expected
 
     @pytest.mark.parametrize('server,expected', [({'address': '192.0.2.53'}, True),
-        ({'address': '2001:db8::53', 'port': '5353'}, True), ({'address': 'bad'}, False),
+        ({'address': '2001:db8::53', 'port': '5353'}, False), ({'address': 'bad'}, False),
         ({'address': '0.0.0.0'}, False), ({'address': '224.0.0.1'}, False),
         ({'address': '192.0.2.53', 'port': False}, False), ({'address': '192.0.2.53', 'port': 1.5}, False),
         ({'address': '192.0.2.53', 'port': 'bad;'}, False), ({'address': '192.0.2.53', 'port': 0}, False),

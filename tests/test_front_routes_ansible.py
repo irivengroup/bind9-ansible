@@ -63,19 +63,27 @@ class AnsibleRouteSandbox:
     def read(self):
         return json.loads(self.data_file.read_text())
 
-    def run(self, tasks_from='tasks.d/front_return_routes.yml', check=False, extra_vars=None, tags=None):
+    def run(self, tasks_from='tasks.d/front_return_routes.yml', check=False, extra_vars=None, tags=None, extra_cli_vars=None):
         variables = {'ansible_python_interpreter': str(self.interpreter),
                      'ansible_host': '192.0.2.2', 'ansible_env': {'SSH_CONNECTION': ''},
                      'bind_front_ip': '198.51.100.2', 'bind_back_ip': '10.0.0.2',
                      'bind_primary_host': 'localhost', 'bind_secondary_host': 'secondary',
-                     'bind_frontend_clients': ['203.0.113.0/24'], 'bind_front_route_metric': 100}
+                     'bind_cloud_clients': ['203.0.113.0/24'], 'bind_internal_clients': ['10.0.0.0/24','10.30.1.20'], 'bind_front_route_metric': 100,
+                     'bind_front_routes_enabled': True}
         variables.update(extra_vars or {})
         play = [{'hosts': 'localhost', 'gather_facts': False, 'vars': variables,
-                 'tasks': [{'name': 'Run actual route workflow', 'include_role': {
+                 # Dynamic includes need apply to reproduce the production
+                 # static import's tag inheritance on legacy Ansible 2.9.
+                 'tasks': [{'include_role': {'name': 'bind9', 'tasks_from': 'tasks.d/dnssec_settings.yml', 'apply': {'tags': ['always']}}, 'tags': ['always']},
+                           {'include_role': {'name': 'bind9', 'tasks_from': 'tasks.d/clients.yml',
+                                            'apply': {'tags': ['always']}}, 'tags': ['always']},
+                           {'name': 'Run actual route workflow', 'include_role': {
                      'name': 'bind9', 'tasks_from': tasks_from}, 'tags': ['always']}]}]
         playbook = self.folder / 'play.yml'
         playbook.write_text(yaml.safe_dump(play))
         command = ['ansible-playbook', '-i', str(self.inventory), str(playbook)]
+        if extra_cli_vars:
+            command.extend(['--extra-vars', json.dumps(extra_cli_vars)])
         if check:
             command.append('--check')
         if tags:
@@ -85,7 +93,45 @@ class AnsibleRouteSandbox:
 
 
 class TestAnsibleNativeFrontRoutes:
-    @pytest.mark.parametrize('failure_phase', [None, 'health', 'reload'])
+    def test_two_empty_lists_fail_before_route_commands_even_with_routes_tag(self, tmp_path):
+        sandbox = AnsibleRouteSandbox(tmp_path)
+        result = sandbox.run(tags='routes', extra_vars={'bind_cloud_clients': [], 'bind_internal_clients': []})
+        assert result.returncode != 0, result.stdout
+        assert 'cannot both be empty' in result.stdout
+        assert sandbox.read() == sandbox.data
+        assert not sandbox.state_root.exists()
+
+    def test_computed_union_cannot_be_replaced_by_extra_variables(self, tmp_path):
+        sandbox = AnsibleRouteSandbox(tmp_path)
+        result = sandbox.run(extra_cli_vars={'bind_allowed_clients': ['198.51.100.99']})
+        assert result.returncode != 0, result.stdout
+        assert 'Reject an override that bypasses the computed client union' in result.stdout
+        assert sandbox.read() == sandbox.data
+        assert not sandbox.state_root.exists()
+
+    def test_secondary_front_address_and_multiple_destinations(self, tmp_path):
+        """The selected address may be secondary; only its active profile changes."""
+        sandbox = AnsibleRouteSandbox(tmp_path)
+        sandbox.data['addresses'][0]['addr_info'].insert(0, {'family': 'inet', 'local': '198.51.100.10', 'prefixlen': 24})
+        sandbox.data['addresses'][0]['addr_info'][1]['secondary'] = True
+        sandbox.save()
+        result = sandbox.run(extra_vars={'bind_cloud_clients': ['203.0.113.0/24', '172.16.0.0/16']})
+        assert result.returncode == 0, result.stdout
+        data = sandbox.read()
+        assert len(data['persistent']) == 2 and len(data['runtime']) == len(BASE) + 2
+        assert all(row in data['runtime'] for row in BASE)
+        assert {row['network'] for row in data['persistent']} == {'203.0.113.0/24', '172.16.0.0/16'}
+
+    def test_missing_gateway_is_rejected_before_any_write(self, tmp_path):
+        sandbox = AnsibleRouteSandbox(tmp_path)
+        sandbox.data['gateway'] = ''
+        sandbox.save()
+        result = sandbox.run()
+        assert result.returncode != 0, result.stdout
+        assert sandbox.read() == sandbox.data
+        assert not sandbox.state_root.exists()
+
+    @pytest.mark.parametrize('failure_phase', [None, 'health', 'reload', 'disabled', 'internal-only'])
     def test_routes_commit_after_dns_health_or_are_removed_by_dns_rollback(self, tmp_path, failure_phase):
         """Execute the real deployment block with only DNS operations substituted.
 
@@ -129,10 +175,15 @@ class TestAnsibleNativeFrontRoutes:
         path = tmp_path / 'roles/bind9/tasks/tests_dns_rollback.yml'
         path.write_text(yaml.safe_dump([deployment]))
         result = sandbox.run('tests_dns_rollback.yml', tags='deploy', extra_vars={'bind_front_routes_defer_commit': True,
+                              'bind_front_routes_enabled': failure_phase != 'disabled',
+                              'bind_cloud_clients': [] if failure_phase == 'internal-only' else ['203.0.113.0/24'],
                               'bind_backup_root': '/unused', 'bind_recovery_archive': 'unused.tar.gz'})
-        assert (result.returncode != 0) == bool(failure_phase), result.stdout
+        assert (result.returncode != 0) == (failure_phase in ('health', 'reload')), result.stdout
         data = sandbox.read()
-        if failure_phase:
+        if failure_phase in ('disabled', 'internal-only'):
+            assert data == initial, result.stdout
+            assert not sandbox.state_root.exists()
+        elif failure_phase:
             assert data['persistent'] == initial['persistent'], result.stdout
             assert data['runtime'] == initial['runtime'], result.stdout
             assert 'Remove owned persistent additions' in result.stdout

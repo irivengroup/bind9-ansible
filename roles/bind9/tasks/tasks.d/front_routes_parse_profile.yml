@@ -1,0 +1,86 @@
+---
+# nmcli output is locale-bound and parsed only as observations, never shell code.
+- name: Parse native NetworkManager route observations
+  ansible.builtin.set_fact:
+    bind_front_parsed_profile_json: >-
+      {%- set ns = namespace(routes=[], errors=[]) -%}
+      {%- set text = bind_front_routes_text | trim -%}
+      {%- if text not in ['', '--'] -%}
+        {%- set braced = '{' in text or '}' in text -%}
+        {%- set entries = (text | regex_findall('[{]([^{}]+)[}]')) if braced else text.split(',') -%}
+        {%- if braced and (text | regex_replace('[{][^{}]+[}]', '') | regex_replace('[,;]', '') | trim) -%}
+          {%- set ns.errors = ns.errors + ['Unsupported nmcli route format'] -%}
+        {%- endif -%}
+        {%- for entry in entries -%}
+          {%- set row = namespace(fields={}) -%}
+          {%- if braced -%}
+            {%- for field in entry.split(',') -%}
+              {%- set pair = field.strip().split('=', 1) -%}
+              {%- if pair | length != 2 or pair[0] | trim in row.fields -%}
+                {%- set ns.errors = ns.errors + ['Malformed nmcli route fields'] -%}
+              {%- else -%}
+                {%- set row.fields = row.fields | combine({pair[0] | trim: pair[1] | trim}) -%}
+              {%- endif -%}
+            {%- endfor -%}
+          {%- else -%}
+            {%- set parts = entry.split() -%}
+            {%- if parts -%}
+              {%- set row.fields = {'ip': parts[0], 'nh': '0.0.0.0', 'mt': '-1'} -%}
+              {%- set rest = namespace(parts=parts[1:]) -%}
+              {%- if rest.parts and '.' in rest.parts[0] and '=' not in rest.parts[0] -%}
+                {%- set row.fields = row.fields | combine({'nh': rest.parts[0]}) -%}
+                {%- set rest.parts = rest.parts[1:] -%}
+              {%- endif -%}
+              {%- if rest.parts and rest.parts[0] is match('^-?[0-9]+$') -%}
+                {%- set row.fields = row.fields | combine({'mt': rest.parts[0]}) -%}
+                {%- set rest.parts = rest.parts[1:] -%}
+              {%- endif -%}
+              {%- for field in rest.parts -%}
+                {%- set pair = field.split('=', 1) -%}
+                {%- if pair | length != 2 or not pair[0] or not pair[1] or pair[0] in row.fields -%}
+                  {%- set ns.errors = ns.errors + ['Malformed terse route attributes'] -%}
+                {%- else -%}
+                  {%- set row.fields = row.fields | combine({pair[0]: pair[1]}) -%}
+                {%- endif -%}
+              {%- endfor -%}
+            {%- endif -%}
+          {%- endif -%}
+          {%- if not row.fields.get('ip') or not row.fields.get('nh') or not (row.fields.get('mt', '-1') is match('^-?[0-9]+$')) -%}
+            {%- set ns.errors = ns.errors + ['Invalid nmcli route destination/gateway/metric'] -%}
+          {%- else -%}
+            {%- set attrs = row.fields | dict2items | rejectattr('key', 'in', ['ip', 'nh', 'mt']) | list | items2dict -%}
+            {%- set ns.routes = ns.routes + [{'network': row.fields.ip, 'gateway': row.fields.nh,
+                'metric': row.fields.get('mt', '-1') | int, 'attributes': attrs}] -%}
+          {%- endif -%}
+        {%- endfor -%}
+        {%- if not entries -%}{%- set ns.errors = ns.errors + ['Empty nmcli route entries'] -%}{%- endif -%}
+      {%- endif -%}
+      {{ {'routes': ns.routes, 'errors': ns.errors} | to_json }}
+
+- name: Reject ambiguous persistent route observations
+  ansible.builtin.assert:
+    that: [((bind_front_parsed_profile_json | from_json if bind_front_parsed_profile_json is string else bind_front_parsed_profile_json)).errors | length == 0]
+    fail_msg: '{{ ((bind_front_parsed_profile_json | from_json if bind_front_parsed_profile_json is string else bind_front_parsed_profile_json)).errors }}'
+
+- name: Retain typed persistent route observations
+  ansible.builtin.set_fact:
+    bind_front_parsed_profile: '{{ ((bind_front_parsed_profile_json | from_json if bind_front_parsed_profile_json is string else bind_front_parsed_profile_json)).routes }}'
+
+- name: Normalize persistent route observations
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
+  vars:
+    bind_front_ipv4_values: >-
+      {%- set ns = namespace(values=[]) -%}
+      {%- for route in bind_front_parsed_profile -%}
+        {%- set ns.values = ns.values + [route.network, route.gateway] -%}
+      {%- endfor -%}
+      {{ ns.values }}
+
+- name: Retain canonical persistent destinations
+  ansible.builtin.set_fact:
+    bind_front_parsed_profile: >-
+      {%- set ns = namespace(routes=[]) -%}
+      {%- for route in bind_front_parsed_profile -%}
+        {%- set ns.routes = ns.routes + [route | combine({'network':bind_front_ipv4_data[route.network].cidr})] -%}
+      {%- endfor -%}
+      {{ ns.routes }}

@@ -37,7 +37,10 @@
 
 - name: Validate the interrupted plan on the controller
   ansible.builtin.set_fact:
-    bind_front_plan: '{{ bind_front_recovery_data.content | b64decode | from_json | front_route_journal }}'
+    bind_front_plan: '{{ bind_front_recovery_data.content | b64decode | from_json }}'
+
+- name: Validate the interrupted native route journal
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_validate_journal.yml'
 
 - name: Mark the interrupted route operation pending
   ansible.builtin.set_fact:

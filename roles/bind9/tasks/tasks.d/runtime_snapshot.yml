@@ -1,0 +1,65 @@
+---
+# These six role-owned assets are outside the existing BIND data backup.
+# Capture their exact pre-deployment state to make DNSSEC mode changes reversible.
+- name: Reset runtime snapshot readiness for this deployment
+  ansible.builtin.set_fact:
+    bind_runtime_snapshot_ready: false
+
+- name: Inspect named runtime files before changing optional DNSSEC
+  ansible.builtin.stat:
+    path: '{{ item }}'
+    follow: false
+  loop:
+    - /etc/systemd/system/named.service.d/bind9-runtime.conf
+    - /etc/systemd/system/named.service.d/bind9-dnssec.conf
+    - /etc/systemd/system/named.service.d/bind9-z-dnssec.conf
+    - /usr/local/sbin/bind-private-dnssec
+    - /etc/systemd/system/named-private-dnssec.service
+    - /etc/systemd/system/named-private-dnssec.timer
+  register: bind_runtime_files_before
+
+- name: Refuse unsafe managed runtime paths before making changes
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isreg | default(false))
+      - not (item.stat.islnk | default(false))
+      - not item.stat.exists or item.stat.uid == 0
+    fail_msg: 'Managed runtime paths must be absent or regular root-owned files.'
+  loop: '{{ bind_runtime_files_before.results }}'
+  loop_control:
+    label: '{{ item.item }}'
+
+- name: Preserve existing managed runtime contents for rollback
+  ansible.builtin.slurp:
+    src: '{{ item.item }}'
+  loop: '{{ bind_runtime_files_before.results }}'
+  when: item.stat.exists
+  register: bind_runtime_content_before
+  no_log: true
+
+- name: Record the private DNSSEC timer activity before deployment
+  ansible.builtin.command:
+    argv: [systemctl, is-active, named-private-dnssec.timer]
+  register: bind_dnssec_timer_active
+  changed_when: false
+  failed_when: bind_dnssec_timer_active.rc not in [0, 3, 4]
+  when: bind_runtime_files_before.results[-1].stat.exists
+
+- name: Record the private DNSSEC timer enablement before deployment
+  ansible.builtin.command:
+    argv: [systemctl, is-enabled, named-private-dnssec.timer]
+  register: bind_dnssec_timer_enabled_before
+  changed_when: false
+  failed_when: bind_dnssec_timer_enabled_before.rc not in [0, 1, 3, 4]
+  when: bind_runtime_files_before.results[-1].stat.exists
+
+- name: Require a recognizable managed timer state
+  ansible.builtin.assert:
+    that:
+      - bind_dnssec_timer_enabled_before.stdout | trim in ['enabled', 'disabled']
+    fail_msg: 'The managed DNSSEC timer has an unexpected enablement state.'
+  when: bind_runtime_files_before.results[-1].stat.exists
+
+- name: Mark the runtime snapshot ready for rollback
+  ansible.builtin.set_fact:
+    bind_runtime_snapshot_ready: true

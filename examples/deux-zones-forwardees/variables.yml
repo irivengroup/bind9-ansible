@@ -1,0 +1,22 @@
+bind_dnssec_enabled: false
+bind_cloud_clients:
+- 198.51.100.0/24
+bind_internal_clients: []
+bind_authoritative_zones: []
+bind_forward_zones:
+- domain: corp.example.test
+  policy: only
+  dnssec_validate: false
+  forwarders:
+  - address: 10.11.0.53
+    port: 53
+  - address: 10.11.0.54
+    port: 53
+- domain: services.example.test
+  policy: only
+  dnssec_validate: false
+  forwarders:
+  - address: 10.12.0.53
+    port: 53
+  - address: 10.12.0.54
+    port: 53

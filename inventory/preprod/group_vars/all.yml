@@ -1,3 +1,4 @@
 ---
 # Variables shared within this environment only.
 bind_environment: preprod
+bind_dnssec_enabled: false  # false, true ou auto

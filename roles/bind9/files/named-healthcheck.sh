@@ -3,7 +3,7 @@ set -Eeuo pipefail
 [[ $# -ge 1 ]] || { echo 'usage: named-healthcheck LOCAL_BACK_IP [ZONE...]' >&2; exit 2; }
 ip=$1; shift
 systemctl is-active --quiet named || { echo 'CRITICAL named inactive'; exit 2; }
-# Check the package-owned loopback data through the local-only BIND view.
+# Check the package-owned loopback data through the IPv4 local listener.
 check_loopback() {
   local transport=$1 name=$2 type=$3 expected=$4 result
   result=$(dig -b 127.0.0.1 @127.0.0.1 "$transport" +time=3 +tries=1 +norecurse +noall +comments +answer "$name" "$type") || {

@@ -27,6 +27,32 @@ def test_invalid_forwarder_and_record_rejected():
     assert not module.valid_dns_record({'type': 'TXT', 'value': 'foo\nbar'})
 
 
+def test_ipv4_transport_does_not_disable_ipv6_record_data():
+    """IPv6 endpoints are refused; native AAAA data still travels over IPv4."""
+    module = load('acl_ipv4', ROOT / 'filter_plugins/client_acl.py')
+    for value, expected in [('192.0.2.1', True), ('2001:db8::1', False),
+                            ('192.0.2.1/24', False), ('bad', False), (None, False),
+                            (' 192.0.2.1', False)]:
+        assert module.valid_ip_address(value) is expected
+    for value, expected in [('192.0.2.0/24', True), ('192.0.2.1', True),
+                            ('2001:db8::/64', False), ('2001:db8::1', False),
+                            ('192.0.2.1/24', False), (None, False), (' bad', False)]:
+        assert module.valid_client_address(value) is expected
+    assert module.valid_dns_record({'type': 'AAAA', 'value': '::1'})
+    exported = module.FilterModule().filters()
+    assert set(exported) == {'valid_client_address', 'valid_ip_address', 'valid_dns_record'}
+    assert exported['valid_ip_address']('2001:db8::1') is False
+
+
+def test_record_validator_rejects_invalid_shapes_empty_data_and_control_characters():
+    module = load('acl_records', ROOT / 'filter_plugins/client_acl.py')
+    for record in (None, {}, {'type': 'TXT', 'value': ''}, {'type': 'TXT', 'value': 42},
+                   {'type': 'TXT', 'value': ' trailing '}, {'type': 'TXT', 'value': '\x7f'},
+                   {'type': 'A', 'value': 'invalid'}):
+        assert module.valid_dns_record(record) is False
+    assert module.valid_dns_record({'type': 'TXT', 'value': '"private DNS"'})
+
+
 def test_bind_restore_is_independent_of_committed_native_network_routes():
     main = (ROOT / 'tasks/main.yml').read_text()
     assert 'tasks.d/front_return_routes.yml' in main

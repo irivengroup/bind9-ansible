@@ -1,0 +1,40 @@
+---
+# Fresh disabled installs create no DNSSEC assets. Existing role-owned assets
+# are retired; the ownership journal and vendor keys remain intact for reuse.
+- name: Inspect existing managed DNSSEC renewal units
+  ansible.builtin.stat:
+    path: '{{ item }}'
+    follow: false
+  loop:
+    - /etc/systemd/system/named-private-dnssec.timer
+    - /etc/systemd/system/named-private-dnssec.service
+  register: bind_dnssec_units_to_disable
+
+- name: Stop existing private DNSSEC renewal and disable its timer
+  ansible.builtin.systemd:
+    name: '{{ item.item | basename }}'
+    state: stopped
+    enabled: '{{ false if item.item.endswith(".timer") else omit }}'
+    daemon_reload: true
+  loop: '{{ bind_dnssec_units_to_disable.results }}'
+  when: item.stat.exists
+
+- name: Remove managed DNSSEC hook and renewal units when disabled
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: absent
+  loop:
+    - /etc/systemd/system/named.service.d/bind9-z-dnssec.conf
+    - /etc/systemd/system/named-private-dnssec.timer
+    - /etc/systemd/system/named-private-dnssec.service
+  register: bind_dnssec_removed
+  notify: Reload named configuration
+
+- name: Forget removed DNSSEC hooks before retiring their executable
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Retire the managed private DNSSEC helper when disabled
+  ansible.builtin.file:
+    path: /usr/local/sbin/bind-private-dnssec
+    state: absent

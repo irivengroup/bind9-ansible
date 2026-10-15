@@ -22,26 +22,37 @@ class TestServerAcls:
         context = dict(local, bind_primary_host='p', bind_secondary_host='s', hostvars=hosts,
                        group_names=[role], bind_tsig_key_name='site-transfer',
                        bind_tsig_algorithm='hmac-sha256', bind_tsig_secret='render-only',
-                       bind_frontend_clients=['192.0.2.0/24'], bind_backend_clients=['10.0.0.0/24'],
+                       bind_allowed_clients=['192.0.2.0/24', '10.0.0.0/24'],
                        bind_authoritative_zones=[{'domain': 'example.test'}], bind_forward_zones=[])
         output = Environment(undefined=StrictUndefined).from_string(TEMPLATE.read_text()).render(**context)
         definitions = dict(re.findall(r'acl "([^"]+)"\s*\{([^{}]+)\};', output))
         for peer, prefix in (('p', 'primary'), ('s', 'secondary')):
             for interface in ('front', 'back'):
                 name = 'bind_' + prefix + '_' + interface + '_ip'
+                if interface == 'front' and (peer == 'p') != primary:
+                    assert name not in output
+                    continue
                 assert definitions[name].strip() == hosts[peer]['bind_' + interface + '_ip'] + ';'
                 assert output.count('acl "' + name + '"') == 1
-        for interface in ('front', 'back'):
+        for interface in ('back',):
             name = 'bind_servers_' + interface + '_ip'
             assert definitions[name].split() == ['bind_primary_' + interface + '_ip;',
                                                   'bind_secondary_' + interface + '_ip;']
             assert output.count('acl "' + name + '"') == 1
+        assert 'bind_servers_front_ip' not in output
+        # A declaration must have a consumer in the generated configuration.
+        for name in definitions:
+            assert len(re.findall(r'\b' + re.escape(name) + r'\b', output)) > 1
         assert not any(address in output for address in hosts['other-site'].values())
         prefix = 'bind_primary_' if primary else 'bind_secondary_'
         assert 'listen-on port 53 { local_loopback; ' + prefix + 'front_ip; ' + prefix + 'back_ip; };' in output
-        assert 'allow-query-on { local_loopback; bind_servers_front_ip; bind_servers_back_ip; };' in output
-        assert 'match-clients { bind_servers_back_ip; key "site-transfer"; };' in output
-        assert 'match-clients { !bind_servers_back_ip; !key "site-transfer"; frontend_clients; };' in output
+        destinations = re.search(r'allow-query-on\s*\{([^{}]*)\};', output).group(1).split()
+        assert destinations == ['local_loopback;', prefix + 'front_ip;', prefix + 'back_ip;']
+        assert 'view "' not in output and 'in-view' not in output
+        assert 'allow-query { dns_query_clients; };' in output
+        assert 'allow-recursion { dns_recursive_clients; };' in output
+        recursive = re.sub(r'//[^\n]*', '', definitions['dns_recursive_clients']).split()
+        assert recursive[:3] == ['!bind_servers_back_ip;', '!key', '"site-transfer";']
         # Named ACLs must preserve address AND TSIG, never turn it into OR.
         if primary:
             assert 'allow-transfer { !{ !bind_secondary_back_ip; any; }; key "site-transfer"; };' in output

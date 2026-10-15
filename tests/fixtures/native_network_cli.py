@@ -22,6 +22,16 @@ class NativeNetworkDouble:
         self.path.write_text(json.dumps(self.state))
 
     def ip(self, args):
+        if args[:3] in (['-4', 'route', 'add'], ['-4', 'route', 'del']):
+            # Reuse only the fixture's state/failure machinery; the role's
+            # actual command is ip, not a NetworkManager device reactivation.
+            if args[4] != 'via' or args[6] != 'dev' or args[-2:] != ['table', 'main']:
+                raise ValueError('Unexpected ip mutation arguments')
+            text = args[3] + ' ' + args[5]
+            if 'metric' in args:
+                text += ' ' + args[args.index('metric') + 1]
+            return self.nmcli(['device', 'modify', args[7],
+                              '+ipv4.routes' if args[2] == 'add' else '-ipv4.routes', text])
         if args == ['-j', '-4', 'address', 'show']:
             return self.state['addresses']
         if args == ['-j', '-4', 'rule', 'show']:

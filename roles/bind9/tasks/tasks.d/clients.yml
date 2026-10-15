@@ -1,0 +1,36 @@
+---
+# Keep source authorization separate from FRONT route destinations. Validate
+# both inputs before concatenation, including when only a partial tag is used.
+- name: Validate the cloud and internal client list types
+  ansible.builtin.assert:
+    that:
+      - bind_cloud_clients is sequence and bind_cloud_clients is not string and bind_cloud_clients is not mapping
+      - bind_internal_clients is sequence and bind_internal_clients is not string and bind_internal_clients is not mapping
+    fail_msg: 'bind_cloud_clients and bind_internal_clients must be flat lists of IPv4 addresses or canonical CIDRs.'
+
+- name: Require at least one configured DNS client network
+  ansible.builtin.assert:
+    that:
+      - (bind_cloud_clients | length > 0) or (bind_internal_clients | length > 0)
+    fail_msg: 'bind_cloud_clients and bind_internal_clients cannot both be empty.'
+
+- name: Validate cloud and internal client IPv4 entries
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - item | valid_client_address
+      - item | dns_client_safe
+    fail_msg: 'Client entries must be safe unicast IPv4 addresses or canonical non-default IPv4 CIDRs.'
+  loop: '{{ bind_cloud_clients + bind_internal_clients }}'
+  loop_control:
+    label: '{{ item | string }}'
+
+- name: Compute the unique union used by DNS authorization
+  ansible.builtin.set_fact:
+    bind_allowed_clients: '{{ (bind_cloud_clients + bind_internal_clients) | unique | list }}'
+
+- name: Reject an override that bypasses the computed client union
+  ansible.builtin.assert:
+    that:
+      - bind_allowed_clients == ((bind_cloud_clients + bind_internal_clients) | unique | list)
+    fail_msg: 'bind_allowed_clients is computed from cloud and internal inputs and must not be overridden.'

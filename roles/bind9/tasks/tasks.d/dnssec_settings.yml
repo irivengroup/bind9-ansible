@@ -1,0 +1,24 @@
+---
+# Accept explicit YAML booleans and the equivalent CLI strings; reject truthy
+# numbers and unknown strings instead of silently enabling validation.
+- name: Validate the optional DNSSEC mode
+  ansible.builtin.assert:
+    that:
+      - (bind_dnssec_enabled is boolean) or (bind_dnssec_enabled is string and bind_dnssec_enabled in ['true', 'false', 'auto'])
+    fail_msg: 'bind_dnssec_enabled must be true, false or auto.'
+
+# Avoid bare yes/no facts: Ansible 2.9 set_fact converts those strings to booleans.
+- name: Normalize the BIND validation mode
+  ansible.builtin.set_fact:
+    bind_dnssec_mode: '{{ "auto" if bind_dnssec_enabled == "auto" else ("enabled" if (bind_dnssec_enabled == true or bind_dnssec_enabled == "true") else "disabled") }}'
+
+- name: Derive whether DNSSEC configuration is required
+  ansible.builtin.set_fact:
+    bind_dnssec_active: '{{ bind_dnssec_mode != "disabled" }}'
+
+- name: Reject a contradictory override of derived DNSSEC settings
+  ansible.builtin.assert:
+    that:
+      - bind_dnssec_mode == ('auto' if bind_dnssec_enabled == 'auto' else ('enabled' if (bind_dnssec_enabled == true or bind_dnssec_enabled == 'true') else 'disabled'))
+      - bind_dnssec_active == (bind_dnssec_mode != 'disabled')
+    fail_msg: 'bind_dnssec_mode and bind_dnssec_active are derived settings and must not be overridden.'

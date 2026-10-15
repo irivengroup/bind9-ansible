@@ -14,21 +14,18 @@
   register: bind_front_verified_profile
   changed_when: false
 
-- name: Require exact additive persistence
-  ansible.builtin.assert:
-    that:
-      - bind_front_plan.profile_before | front_profile_unchanged(bind_front_verified_profile.stdout, bind_front_plan)
-
 - name: Read the main table after the operation
   ansible.builtin.command:
     argv: [ip, -j, -4, route, show, table, main]
   register: bind_front_verified_kernel
   changed_when: false
 
-- name: Require all original routes and defaults to remain intact
-  ansible.builtin.assert:
-    that:
-      - bind_front_plan.runtime_before | front_routes_unchanged(bind_front_verified_kernel.stdout, bind_front_plan)
+- name: Require all original routes and intended additions to remain intact
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_compare.yml'
+  vars:
+    bind_front_compare_profile: '{{ bind_front_verified_profile.stdout }}'
+    bind_front_compare_runtime: '{{ bind_front_verified_kernel.stdout }}'
+    bind_front_compare_applied: true
 
 - name: Verify effective return routes using the FRONT source address
   ansible.builtin.command:
@@ -38,4 +35,6 @@
   changed_when: false
   failed_when: >-
     bind_front_verified_return.rc != 0 or
-    not (bind_front_verified_return.stdout | front_route_lookup(bind_front_plan.device, item.gateway))
+    (bind_front_verified_return.stdout | from_json | length) != 1 or
+    (bind_front_verified_return.stdout | from_json)[0].get('dev') != bind_front_plan.device or
+    (item.gateway is not none and (bind_front_verified_return.stdout | from_json)[0].get('gateway') != item.gateway)

@@ -1,4 +1,12 @@
 ---
+- name: Normalize optional DNSSEC configuration before any role changes
+  ansible.builtin.import_tasks: tasks.d/dnssec_settings.yml
+  tags: [always]
+
+- name: Validate client inputs and derive shared DNS authorization
+  ansible.builtin.import_tasks: tasks.d/clients.yml
+  tags: [always]
+
 - name: Derive local DNS peer addresses from inventory
   ansible.builtin.import_tasks: tasks.d/site_peers.yml
   tags: [always]
@@ -49,11 +57,24 @@
     bind_front_route_rollback_attempted: false
   tags: [deploy, routes]
 
+- name: Require explicit boolean route management setting
+  ansible.builtin.assert:
+    that: [bind_front_routes_enabled is boolean]
+    fail_msg: 'bind_front_routes_enabled must be a YAML boolean.'
+  tags: [always]
+
+- name: Report disabled FRONT route management
+  ansible.builtin.debug:
+    msg: 'FRONT route management is disabled. Set the YAML boolean bind_front_routes_enabled: true explicitly to enable it; interrupted operations can still be recovered with routes-recover.'
+  when: not bind_front_routes_enabled
+  tags: [deploy, routes]
+
 - name: Add only return routes when explicitly running the routes tag
   ansible.builtin.import_tasks: tasks.d/front_return_routes.yml
   tags: [deploy, routes]
   when:
-    - bind_frontend_clients | length > 0
+    - bind_front_routes_enabled
+    - bind_cloud_clients | length > 0
     - not (bind_front_routes_defer_commit | bool)
 
 - name: Back up full BIND configuration before changes
@@ -76,14 +97,34 @@
   when: "bind_primary_group in group_names"
   tags: [deploy]
 
+- name: Snapshot managed runtime files before deployment
+  # Read-only preconditions must fail before entering the modifying transaction.
+  ansible.builtin.import_tasks: tasks.d/runtime_snapshot.yml
+  tags: [deploy, configure]
+
 - name: Apply DNS changes with rollback on failure
   block:
     - name: Add return routes as part of the protected DNS deployment
       ansible.builtin.import_tasks: tasks.d/front_return_routes.yml
       tags: [deploy]
       when:
-        - bind_frontend_clients | length > 0
+        - bind_front_routes_enabled
+        - bind_cloud_clients | length > 0
         - bind_front_routes_defer_commit | default(false) | bool
+
+    - name: Prepare IPv4 transport and native administrative reload
+      ansible.builtin.import_tasks: tasks.d/named_runtime.yml
+      tags: [deploy, configure]
+
+    - name: Remove managed DNSSEC components when validation is disabled
+      ansible.builtin.import_tasks: tasks.d/dnssec_disable.yml
+      when: not bind_dnssec_active
+      tags: [deploy, configure]
+
+    - name: Prepare optional DNSSEC validation and scoped private exceptions
+      ansible.builtin.import_tasks: tasks.d/dnssec_install.yml
+      when: bind_dnssec_active
+      tags: [deploy, configure]
 
     - name: Install canonical named.conf
       ansible.builtin.import_tasks: tasks.d/configuration.yml
@@ -104,6 +145,11 @@
     - name: Start or reload BIND
       ansible.builtin.import_tasks: tasks.d/service.yml
       tags: [deploy, services]
+
+    - name: Activate scoped private DNSSEC exceptions before health checks
+      ansible.builtin.import_tasks: tasks.d/dnssec_activate.yml
+      when: bind_dnssec_active
+      tags: [deploy]
 
     - name: Verify DNS queries and SOA consistency
       ansible.builtin.import_tasks: tasks.d/health.yml
@@ -140,6 +186,37 @@
             bind_front_route_rollback_error: '{{ ansible_failed_result.msg | default("FRONT rollback failed; inspect the recovery journal") }}'
       tags: [deploy]
 
+    - name: Inspect managed renewal units before DNS restoration
+      ansible.builtin.stat:
+        path: '{{ item }}'
+        follow: false
+      loop:
+        - /etc/systemd/system/named-private-dnssec.timer
+        - /etc/systemd/system/named-private-dnssec.service
+      register: bind_dnssec_renewal_units
+      tags: [deploy]
+
+    - name: Pause private DNSSEC renewal during restoration
+      ansible.builtin.systemd:
+        name: '{{ item.item | basename }}'
+        state: stopped
+        enabled: '{{ false if item.item.endswith(".timer") else omit }}'
+        daemon_reload: true
+      loop: '{{ bind_dnssec_renewal_units.results }}'
+      when: item.stat.exists
+      tags: [deploy]
+
+    - name: Stop named before restoring files and journals
+      ansible.builtin.systemd:
+        name: named
+        state: stopped
+      tags: [deploy]
+
+    - name: Restore managed runtime files from before the failed deployment
+      ansible.builtin.import_tasks: tasks.d/runtime_restore.yml
+      when: bind_runtime_snapshot_ready | default(false) | bool
+      tags: [deploy]
+
     - name: Restore the pre-deployment BIND backup
       ansible.builtin.command:
         argv:
@@ -159,6 +236,15 @@
         state: restarted
         daemon_reload: true
       when: bind_rollback is succeeded
+      tags: [deploy]
+
+    - name: Resume previously active private DNSSEC renewal
+      ansible.builtin.systemd:
+        name: named-private-dnssec.timer
+        state: started
+      when:
+        - bind_rollback is succeeded
+        - (bind_dnssec_timer_active.rc | default(3)) == 0
       tags: [deploy]
 
     - name: Stop deployment after rollback

@@ -11,7 +11,7 @@ def test_environment_inventories_and_isolation():
         site = yaml.safe_load((base / 'group_vars/site1.yml').read_text())
         assert site['bind_site_name'] == 'site1'
         assert env in site['bind_tsig_secret_file']
-        assert site['bind_frontend_clients'] or site['bind_backend_clients']
+        assert site['bind_cloud_clients']
         assert site['bind_authoritative_zones'][0]['domain'].endswith(f'{env}.example.test')
 
 def test_peer_validation_checks_environment():

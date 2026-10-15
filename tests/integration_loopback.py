@@ -44,6 +44,7 @@ class LoopbackIntegration:
         spec.loader.exec_module(module)
         self.topology = module.DnsTopology
         self.jinja.filters.update(module.FilterModule().filters())
+        self.control_ports = {}
 
     @staticmethod
     def read_yaml(path):
@@ -82,6 +83,8 @@ class LoopbackIntegration:
         data = folder / 'named'
         (data / 'zones').mkdir(parents=True)
         (data / 'slaves').mkdir()
+        (data / 'data').mkdir()
+        (data / 'dynamic').mkdir()
         for name in ('named.localhost', 'named.loopback', 'named.empty'):
             shutil.copyfile(str(self.native_dir / name), str(data / name))
         native = folder / 'named.rfc1912.zones'
@@ -90,8 +93,18 @@ class LoopbackIntegration:
         for zone in context['bind_managed_zones']:
             template = 'reverse.zone.j2' if zone.get('reverse') else 'authoritative.zone.j2'
             (data / 'zones' / (zone['domain'] + '.zone')).write_text(self.jinja.get_template(template).render(auth_zone=zone, **context))
+        setting = context.get('bind_dnssec_enabled', False)
+        context['bind_dnssec_mode'] = 'auto' if setting == 'auto' else ('enabled' if setting is True else 'disabled')
+        context['bind_allowed_clients'] = list(dict.fromkeys(context.get('bind_cloud_clients', []) + context.get('bind_internal_clients', [])))
         config = self.jinja.get_template('named.conf.j2').render(**context)
         config = config.replace('/var/named', str(data)).replace('/etc/named.rfc1912.zones', str(native))
+        config = config.replace('/etc/crypto-policies/back-ends/bind.config', str(self.native_dir / 'bind.config'))
+        config = config.replace('/etc/named.root.key', str(self.native_dir / 'named.root.key'))
+        rndc_key = folder / 'rndc.key'
+        rndc_key.write_text('key "rndc-key" { algorithm hmac-sha256; secret "' +
+                            base64.b64encode(secrets.token_bytes(32)).decode('ascii') + '"; };\n')
+        rndc_key.chmod(0o600)
+        config = config.replace('/etc/rndc.key', str(rndc_key))
         path = folder / 'named.conf'
         path.write_text(config)
         result = subprocess.run([str(self.bin_dir / 'named-checkconf'), '-z', str(path)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
@@ -99,20 +112,72 @@ class LoopbackIntegration:
             raise AssertionError(result.stdout)
         return path
 
-    @staticmethod
-    def sandbox_config(path, port):
-        """Rebase listener and process files without changing view policies."""
+    def sandbox_config(self, path, port):
+        """Rebase listener and process files without changing access policies."""
         folder = path.parent
         config = path.read_text().replace('listen-on port 53', 'listen-on port ' + str(port))
-        config = config.replace('options {', 'controls { };\noptions {\n pid-file "' + str(folder / 'named.pid') + '";\n session-keyfile "' + str(folder / 'session.key') + '";\n managed-keys-directory "' + str(folder) + '";')
+        with socket.socket() as reservation:
+            reservation.bind(('127.0.0.1', 0))
+            self.control_ports[path] = reservation.getsockname()[1]
+        config = config.replace('inet 127.0.0.1 port 953', 'inet 127.0.0.1 port ' + str(self.control_ports[path]))
+        config = config.replace('/run/named/named.pid', str(folder / 'named.pid'))
+        config = config.replace('/run/named/session.key', str(folder / 'session.key'))
         path.write_text(config)
 
-    def exercise_replication(self, folder, original):
+    def private_exceptions(self, config):
+        """Apply the production helper through a real authenticated RNDC channel."""
+        for _ in range(100):
+            ready = subprocess.run([str(self.bin_dir / 'rndc'), '-s', '127.0.0.1',
+                                    '-p', str(self.control_ports[config]), '-k', str(config.parent / 'rndc.key'),
+                                    'status'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if ready.returncode == 0:
+                break
+            time.sleep(0.1)
+        result = subprocess.run([os.sys.executable, str(self.role / 'files/bind-private-dnssec.py'),
+                                 '--config', str(config), '--state', str(config.parent / 'state/owned.json'),
+                                 '--rndc', str(self.bin_dir / 'rndc'), '--key', str(config.parent / 'rndc.key'),
+                                 '--port', str(self.control_ports[config])],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        assert result.returncode == 0, result.stdout
+        return json.loads(result.stdout)
+
+    def signed_upstream(self, folder):
+        """Create a trusted signed fixture and corrupt one RRset after signing.
+
+        Its explicit test trust anchor makes genuine DNSSEC checks independent
+        of external root access and RFC5011 bootstrap. Private keys stay in the
+        temporary directory and are never included in a delivery.
+        """
+        folder.mkdir(parents=True, mode=0o700)
+        domain = 'signed-validation.example.com'
+        keys = []
+        for extra in ([], ['-f', 'KSK']):
+            result = subprocess.run([str(self.bin_dir / 'dnssec-keygen'), '-q', '-a', 'ECDSAP256SHA256',
+                                     '-n', 'ZONE'] + extra + [domain], cwd=str(folder),
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+            assert result.returncode == 0, result.stdout
+            keys.append(folder / (result.stdout.strip() + '.key'))
+        unsigned = folder / 'secure.zone'
+        unsigned.write_text('$TTL 300\n@ IN SOA ns.' + domain + '. hostmaster.' + domain +
+                            '. (1 3600 900 1209600 300)\n@ IN NS ns.' + domain +
+                            '.\nns IN A 127.0.0.6\ngood IN A 203.0.113.60\nbogus IN A 203.0.113.61\n')
+        result = subprocess.run([str(self.bin_dir / 'dnssec-signzone'), '-S', '-n', '1', '-o', domain,
+                                 str(unsigned)], cwd=str(folder), stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, universal_newlines=True)
+        assert result.returncode == 0, result.stdout
+        signed = folder / 'secure.zone.signed'
+        signed.write_text(signed.read_text().replace('203.0.113.61', '203.0.113.62'))
+        public = keys[1].read_text().split('DNSKEY', 1)[1].split(';', 1)[0].replace('(', ' ').replace(')', ' ').split()
+        assert public[:3] == ['257', '3', '13']
+        anchor = 'trusted-keys { "' + domain + '" 257 3 13 "' + ''.join(public[3:]) + '"; };\n'
+        return domain, signed, anchor
+
+    def exercise_replication(self, folder, original, validation='auto'):
         """Test initial TSIG transfer, signed NOTIFY convergence and forwarding."""
         primary = copy.deepcopy(original)
-        primary.update(bind_front_ip='127.0.0.2', bind_back_ip='127.0.0.3',
+        primary.update(bind_dnssec_enabled=validation, bind_front_ip='127.0.0.2', bind_back_ip='127.0.0.3',
                        group_names=[primary['bind_primary_group']],
-                       bind_frontend_clients=['127.0.0.10'], bind_backend_clients=['127.0.0.11'])
+                       bind_cloud_clients=['127.0.0.10'], bind_internal_clients=['127.0.0.11'])
         primary['hostvars'][primary['bind_primary_host']].update(bind_front_ip='127.0.0.2', bind_back_ip='127.0.0.3')
         primary['hostvars'][primary['bind_secondary_host']].update(bind_front_ip='127.0.0.4', bind_back_ip='127.0.0.5')
         # Reserve all ports together so the kernel cannot assign duplicates.
@@ -124,11 +189,16 @@ class LoopbackIntegration:
         pport, sport, uport = [x.getsockname()[1] for x in reservations]
         for zone in primary['bind_forward_zones']:
             zone['forwarders'] = [{'address': '127.0.0.6', 'port': uport}]
+        secure_domain, secure_file, secure_anchor = self.signed_upstream(folder / 'signed')
+        primary['bind_forward_zones'].append({'domain': secure_domain, 'dnssec_validate': True,
+                                              'forwarders': [{'address': '127.0.0.6', 'port': uport}]})
         secondary = copy.deepcopy(primary)
         secondary.update(bind_front_ip='127.0.0.4', bind_back_ip='127.0.0.5',
                          group_names=[primary['bind_secondary_group']])
         pconf = self.render(folder / 'primary', primary)
         sconf = self.render(folder / 'secondary', secondary)
+        for config in (pconf, sconf):
+            config.write_text(config.read_text() + '\n' + secure_anchor)
         self.sandbox_config(pconf, pport)
         self.sandbox_config(sconf, sport)
         # Production uses port 53; only fixture peer endpoints use reserved ports.
@@ -138,9 +208,9 @@ class LoopbackIntegration:
         upstream.mkdir()
         forward_domain = primary['bind_forward_zones'][0]['domain']
         zonefile = upstream / 'forward.zone'
-        zonefile.write_text('$TTL 300\n@ IN SOA ns.' + forward_domain + '. hostmaster.' + forward_domain + '. (1 3600 900 1209600 300)\n@ IN NS ns.' + forward_domain + '.\nns IN A 127.0.0.6\nprobe IN A 203.0.113.55\n')
+        zonefile.write_text('$TTL 300\n@ IN SOA ns.' + forward_domain + '. hostmaster.' + forward_domain + '. (1 3600 900 1209600 300)\n@ IN NS ns.' + forward_domain + '.\nns IN A 127.0.0.6\nprobe IN A 203.0.113.55\nstrict IN A 203.0.113.56\n')
         uconf = upstream / 'named.conf'
-        uconf.write_text('options { directory "' + str(upstream) + '"; listen-on port ' + str(uport) + ' { 127.0.0.6; }; listen-on-v6 { none; }; recursion no; dnssec-validation no; pid-file "' + str(upstream / 'named.pid') + '"; }; controls { }; zone "' + forward_domain + '" { type master; file "' + str(zonefile) + '"; };')
+        uconf.write_text('options { directory "' + str(upstream) + '"; listen-on port ' + str(uport) + ' { 127.0.0.6; }; listen-on-v6 { none; }; recursion no; dnssec-validation no; pid-file "' + str(upstream / 'named.pid') + '"; }; controls { }; zone "' + forward_domain + '" { type master; file "' + str(zonefile) + '"; }; zone "' + secure_domain + '" { type master; file "' + str(secure_file) + '"; };')
         for reservation in reservations:
             reservation.close()
         processes, logs = [], []
@@ -148,15 +218,17 @@ class LoopbackIntegration:
             for config in (uconf, pconf, sconf):
                 log = (config.parent / 'named.log').open('w+')
                 logs.append(log)
-                processes.append(subprocess.Popen([str(self.named), '-g', '-c', str(config), '-n', '1', '-U', '1'], stdout=log, stderr=log))
+                processes.append(subprocess.Popen([str(self.named), '-4', '-g', '-c', str(config), '-n', '1', '-U', '1'], stdout=log, stderr=log))
             zone = primary['bind_authoritative_zones'][0]
             record = next(x for x in zone['records'] if x['type'] == 'A')
             query = record['name'] + '.' + zone['domain']
-            def dig(destination, port, source, name, kind='A', transport='+notcp', short=True, timeout=1):
+            def dig(destination, port, source, name, kind='A', transport='+notcp', short=True, timeout=1, cd=False):
                 argv = [str(self.bin_dir / 'dig'), '@' + destination, '-p', str(port), '-b', source,
                         transport, '+time=' + str(timeout), '+tries=1', name, kind]
                 if short:
                     argv.append('+short')
+                if cd:
+                    argv.append('+cdflag')
                 result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
                 return result.stdout.strip()
             for attempt in range(100):
@@ -168,6 +240,44 @@ class LoopbackIntegration:
             else:
                 raise AssertionError('Initial signed zone transfer did not converge')
             checks = 1
+            if validation is not False:
+                good = dig('127.0.0.1', pport, '127.0.0.1', 'good.' + secure_domain, short=False)
+                assert 'status: NOERROR' in good and ' ad;' in good and '203.0.113.60' in good, good
+                bogus = dig('127.0.0.1', pport, '127.0.0.1', 'bogus.' + secure_domain, short=False)
+                assert 'status: SERVFAIL' in bogus, bogus
+                assert dig('127.0.0.1', pport, '127.0.0.1', 'bogus.' + secure_domain, cd=True) == '203.0.113.62'
+                checks += 3
+                for config in (pconf, sconf):
+                    assert self.private_exceptions(config)['renewed'] == sorted(zone['domain'] for zone in primary['bind_forward_zones'] if not zone.get('dnssec_validate', True))
+                    checks += 1
+                # Removal of a private marker drops only the corresponding owned NTA.
+                # Unsigned data may legitimately be insecure; strict validation must
+                # reject bogus signatures, not every unsigned DNS response.
+                saved = pconf.read_text()
+                pconf.write_text(saved.replace('// Bind9-Ansible DNSSEC-PRIVATE ' + forward_domain, '// Strict validation requested'))
+                assert self.private_exceptions(pconf)['removed'] == [forward_domain]
+                checks += 1
+                pconf.write_text(saved)
+                assert self.private_exceptions(pconf)['renewed'] == [forward_domain]
+                assert dig('127.0.0.1', pport, '127.0.0.1', 'strict.' + forward_domain) == '203.0.113.56'
+                checks += 2
+                for destination, port in (('127.0.0.1', pport), ('127.0.0.1', sport)):
+                    good = dig(destination, port, '127.0.0.1', 'good.' + secure_domain, short=False)
+                    bogus = dig(destination, port, '127.0.0.1', 'bogus.' + secure_domain, short=False)
+                    assert 'status: NOERROR' in good and ' ad;' in good, good
+                    assert 'status: SERVFAIL' in bogus, bogus
+                    checks += 2
+            else:
+                for config in (pconf, sconf):
+                    assert 'DNSSEC-PRIVATE' not in config.read_text()
+                    assert 'managed-keys-directory' not in config.read_text()
+                    checks += 1
+                for destination, port in (('127.0.0.1', pport), ('127.0.0.1', sport)):
+                    good = dig(destination, port, '127.0.0.1', 'good.' + secure_domain, short=False)
+                    bogus = dig(destination, port, '127.0.0.1', 'bogus.' + secure_domain, short=False)
+                    assert 'status: NOERROR' in good and ' ad;' not in good, good
+                    assert 'status: NOERROR' in bogus and '203.0.113.62' in bogus and ' ad;' not in bogus, bogus
+                    checks += 2
             for source, destination in (('127.0.0.1', '127.0.0.1'), ('127.0.0.10', '127.0.0.4'), ('127.0.0.11', '127.0.0.5')):
                 for transport in ('+notcp', '+tcp'):
                     assert dig(destination, sport, source, query, transport=transport) == record['value']
@@ -186,6 +296,15 @@ class LoopbackIntegration:
                         unknown = dig(destination, port, source, 'undeclared.internet.invalid', transport=transport, short=False)
                         assert 'status: NXDOMAIN' in unknown and ' aa' in unknown, unknown
                         checks += 2
+            # Both input lists feed shared source authorization. Without views,
+            # activating both destinations also permits cross-interface queries.
+            for port, front, back in ((pport, '127.0.0.2', '127.0.0.3'), (sport, '127.0.0.4', '127.0.0.5')):
+                for source, destination in (('127.0.0.10', back), ('127.0.0.11', front)):
+                    for transport in ('+notcp', '+tcp'):
+                        answer = dig(destination, port, source, 'probe.' + forward_domain,
+                                     transport=transport, short=False)
+                        assert 'status: NOERROR' in answer and '203.0.113.55' in answer, answer
+                        checks += 1
             serial = int(zone['serial']) + 1
             record['value'] = '203.0.113.77'
             zone['serial'] = serial
@@ -235,19 +354,16 @@ class LoopbackIntegration:
         context['group_names'] = [context['bind_primary_group']]
         context['hostvars'][context['bind_primary_host']].update(bind_front_ip='127.0.0.2', bind_back_ip='127.0.0.3')
         context['hostvars'][context['bind_secondary_host']].update(bind_front_ip='127.0.0.4', bind_back_ip='127.0.0.5')
-        context['bind_frontend_clients'], context['bind_backend_clients'] = ['127.0.0.10'], ['127.0.0.11']
+        context['bind_cloud_clients'], context['bind_internal_clients'] = ['127.0.0.10'], ['127.0.0.11']
         for zone in context['bind_forward_zones']:
             zone['forwarders'] = [{'address': '127.0.0.6', 'port': 65534}]
         path = self.render(folder, context)
         with socket.socket() as reservation:
             reservation.bind(('127.0.0.1', 0))
             port = reservation.getsockname()[1]
-        config = path.read_text().replace('listen-on port 53', 'listen-on port ' + str(port))
-        # Only sandbox process settings differ; views and ACLs stay unchanged.
-        config = config.replace('options {', 'controls { };\noptions {\n pid-file "' + str(folder / 'named.pid') + '";\n session-keyfile "' + str(folder / 'session.key') + '";\n managed-keys-directory "' + str(folder) + '";')
-        path.write_text(config)
+        self.sandbox_config(path, port)
         with (folder / 'named.log').open('w+') as log:
-            process = subprocess.Popen([str(self.named), '-g', '-c', str(path), '-n', '1', '-U', '1'], stdout=log, stderr=log)
+            process = subprocess.Popen([str(self.named), '-4', '-g', '-c', str(path), '-n', '1', '-U', '1'], stdout=log, stderr=log)
             try:
                 for attempt in range(50):
                     if process.poll() is not None:
@@ -281,7 +397,12 @@ class LoopbackIntegration:
                         answer = subprocess.check_output([str(self.bin_dir / 'dig'), '@' + destination, '-b', source, '-p', str(port), transport, '+short', query, 'A'], universal_newlines=True).strip()
                         assert answer == record['value'], (source, destination, query, answer)
                         checks += 1
-                for source, destination in (('127.0.0.9', '127.0.0.2'), ('127.0.0.10', '127.0.0.3'), ('127.0.0.11', '127.0.0.2')):
+                # One namespace: declared sources now work on both interfaces.
+                for source, destination in (('127.0.0.10', '127.0.0.3'), ('127.0.0.11', '127.0.0.2')):
+                    answer = subprocess.check_output([str(self.bin_dir / 'dig'), '@' + destination, '-b', source, '-p', str(port), '+short', query, 'A'], universal_newlines=True).strip()
+                    assert answer == record['value'], (source, destination, answer)
+                    checks += 1
+                for source, destination in (('127.0.0.9', '127.0.0.2'),):
                     denied = subprocess.check_output([str(self.bin_dir / 'dig'), '@' + destination, '-b', source, '-p', str(port), '+time=2', '+tries=1', query, 'A'], universal_newlines=True)
                     assert 'status: REFUSED' in denied, (source, destination, denied)
                     checks += 1
@@ -292,7 +413,8 @@ class LoopbackIntegration:
                     ('127.0.0.5', '127.0.0.3', True, True),
                     ('127.0.0.5', '127.0.0.3', False, False),
                     ('127.0.0.10', '127.0.0.2', True, False),
-                    ('127.0.0.5', '127.0.0.2', True, False),
+                    # allow-transfer matches source/key, not destination IP.
+                    ('127.0.0.5', '127.0.0.2', True, True),
                     ('127.0.0.1', '127.0.0.1', True, False),
                 ):
                     command = [str(self.bin_dir / 'dig'), '@' + destination, '-b', source, '-p', str(port), '+yaml', '+time=2', '+tries=1', zone['domain'], 'AXFR']
@@ -302,8 +424,7 @@ class LoopbackIntegration:
                     transferred = 'status: NOERROR' in result.stdout and result.stdout.count(' IN SOA ') == 2
                     assert transferred == allowed, (source, destination, signed, result.stdout)
                     if not allowed:
-                        # An excluded transfer key reaches the deny view, which
-                        # has no copy of the zone and may answer NOTAUTH.
+                        # Only explicit DNS denial is proof of a refused transfer.
                         assert any('status: ' + status in result.stdout for status in ('REFUSED', 'NOTAUTH')), result.stdout
                     checks += 1
                 # Only rebase the port for the real diagnostic CLI. DNS status
@@ -329,7 +450,7 @@ class LoopbackIntegration:
 
     def run(self):
         """Check all delivered hosts and prove native input files are untouched."""
-        native = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in self.native_dir.glob('named.*')}
+        native = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in self.native_dir.iterdir() if p.is_file()}
         with tempfile.TemporaryDirectory(prefix='bind9-loopback-') as temp:
             root = Path(temp)
             count = 0
@@ -337,33 +458,33 @@ class LoopbackIntegration:
                 self.render(root / name, context)
                 count += 1
             _, original = next(self.contexts())
-            # Exercise all template branches: primary/secondary, client views,
-            # presence/absence of authority and forwarding (32 combinations).
-            for role in ('dns_primary', 'dns_secondary'):
-                for front, back in ((True, False), (False, True), (True, True), (False, False)):
-                    for auth, forward in ((True, True), (True, False), (False, True), (False, False)):
-                        context = copy.deepcopy(original)
-                        context['group_names'] = [role]
-                        if not front:
-                            context['bind_frontend_clients'] = []
-                        if back:
-                            context['bind_backend_clients'] = ['192.0.2.0/24']
-                        else:
-                            context['bind_backend_clients'] = []
-                        if not auth:
-                            context['bind_authoritative_zones'] = []
-                            context['bind_managed_zones'] = []
-                        if not forward:
-                            context['bind_forward_zones'] = []
-                        self.render(root / ('matrix-' + str(count)), context)
-                        count += 1
+            # Cover both roles, empty/cloud/internal/mixed client lists, and
+            # presence/absence of authority/forwarding (32 combinations).
+            for validation in (False, True, 'auto'):
+                for role in ('dns_primary', 'dns_secondary'):
+                    for clients, internal in (([], []), (['192.0.2.10'], []), ([], ['10.30.1.20']), (['192.0.2.0/24'], ['10.30.1.20'])):
+                        for auth, forward in ((True, True), (True, False), (False, True), (False, False)):
+                            context = copy.deepcopy(original)
+                            context['bind_dnssec_enabled'] = validation
+                            context['group_names'] = [role]
+                            context['bind_cloud_clients'] = clients
+                            context['bind_internal_clients'] = internal
+                            if not auth:
+                                context['bind_authoritative_zones'] = []
+                                context['bind_managed_zones'] = []
+                            if not forward:
+                                context['bind_forward_zones'] = []
+                            self.render(root / ('matrix-' + str(count)), context)
+                            count += 1
             _, context = next(self.contexts())
             queries = self.exercise(root / 'live', copy.deepcopy(context))
             queries += self.exercise_replication(root / 'replication', context)
             unrelated = copy.deepcopy(context)
             unrelated['bind_forward_zones'][0]['domain'] = 'remote.other.test'
             queries += self.exercise_replication(root / 'unrelated', unrelated)
-        assert native == {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in self.native_dir.glob('named.*')}
+            queries += self.exercise_replication(root / 'manual-validation', copy.deepcopy(context), validation=True)
+            queries += self.exercise_replication(root / 'validation-disabled', copy.deepcopy(context), validation=False)
+        assert native == {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in self.native_dir.iterdir() if p.is_file()}
         print(json.dumps({'configurations_loaded': count, 'dns_checks': queries, 'native_files_unchanged': True}))
 
 

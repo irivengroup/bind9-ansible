@@ -4,8 +4,7 @@
     that:
       - bind_authoritative_zones is not defined or (bind_authoritative_zones is sequence and bind_authoritative_zones is not string and bind_authoritative_zones is not mapping)
       - bind_forward_zones is not defined or (bind_forward_zones is sequence and bind_forward_zones is not string and bind_forward_zones is not mapping)
-      - bind_frontend_clients is not defined or (bind_frontend_clients is sequence and bind_frontend_clients is not string and bind_frontend_clients is not mapping)
-      - bind_backend_clients is not defined or (bind_backend_clients is sequence and bind_backend_clients is not string and bind_backend_clients is not mapping)
+      - bind_allowed_clients is sequence and bind_allowed_clients is not string and bind_allowed_clients is not mapping
       - bind_tsig_key_name is defined and (bind_tsig_key_name | default('') | string | trim | length > 0)
       - bind_tsig_algorithm is defined and (bind_tsig_algorithm | default('') | string | trim | length > 0)
       - bind_tsig_secret is defined and (bind_tsig_secret | default('') | string | trim | length >= 32)
@@ -14,34 +13,12 @@
     fail_msg: 'Template inputs must be correctly typed and mandatory DNS/TSIG values must be nonempty.'
   no_log: true
 
-- name: Require at least one configured DNS client network
-  ansible.builtin.assert:
-    that:
-      - (bind_frontend_clients | length > 0) or (bind_backend_clients | length > 0)
-    fail_msg: 'At least one of bind_frontend_clients or bind_backend_clients must be nonempty.'
-
 - name: Validate literal service addresses and TSIG material before interpolation
   ansible.builtin.assert:
     that:
       - bind_front_ip | dns_identity_valid(bind_back_ip, bind_tsig_key_name, bind_tsig_algorithm, bind_tsig_secret)
     fail_msg: 'FRONT/BACK must be distinct unicast IPv4 addresses; TSIG requires a safe name, SHA-256 algorithm and a canonical secret of at least 256 bits.'
   no_log: true
-
-- name: Validate individual client ACL entries
-  ansible.builtin.assert:
-    that:
-      - item is string
-      - item | trim | length > 0
-      - item | valid_client_address
-      - item | dns_client_safe
-      - "'\\n' not in item"
-      - "';' not in item"
-      - "'{' not in item"
-      - "'}' not in item"
-    fail_msg: 'Client ACL entries must be nonempty valid IP addresses or canonical CIDR networks, without BIND metacharacters.'
-  loop: "{{ (bind_frontend_clients | default([])) + (bind_backend_clients | default([])) }}"
-  loop_control:
-    label: "{{ item | string }}"
 
 - name: Validate supported platform and mandatory inputs
   ansible.builtin.assert:
@@ -56,8 +33,7 @@
       - ansible_host != bind_front_ip
       - bind_front_ip != bind_back_ip
       - bind_tsig_secret | length >= 32
-      - bind_frontend_clients is sequence
-      - bind_backend_clients is sequence
+      - bind_allowed_clients is sequence
       - bind_forward_zones is sequence
       - bind_authoritative_zones is sequence
       - hostvars[bind_primary_host].bind_back_ip != hostvars[bind_secondary_host].bind_back_ip
@@ -65,6 +41,10 @@
       - ((bind_managed_zones) | map(attribute='domain') | list | intersect(bind_forward_zones | map(attribute='domain') | list) | length) == 0
       - hostvars[bind_primary_host].bind_front_ip is defined
       - hostvars[bind_secondary_host].bind_front_ip is defined
+      - hostvars[bind_primary_host].bind_front_ip | valid_ip_address
+      - hostvars[bind_secondary_host].bind_front_ip | valid_ip_address
+      - hostvars[bind_primary_host].bind_back_ip | valid_ip_address
+      - hostvars[bind_secondary_host].bind_back_ip | valid_ip_address
       - (bind_forward_zones | map(attribute='domain') | list | unique | length) == (bind_forward_zones | length)
     fail_msg: 'Invalid RHEL 8+ BIND settings, zone overlap or TSIG secret.'
   no_log: true
@@ -73,6 +53,11 @@
     that:
       - ((bind_primary_group in group_names) and bind_back_ip == hostvars[bind_primary_host].bind_back_ip) or ((bind_secondary_group in group_names) and bind_back_ip == hostvars[bind_secondary_host].bind_back_ip)
     fail_msg: 'Local back address does not match declared DNS role.'
+
+- name: Keep the administrative RNDC key separate from site transfers
+  ansible.builtin.assert:
+    that: [bind_tsig_key_name | lower != 'rndc-key']
+    fail_msg: 'bind_tsig_key_name must not reuse the vendor administrative rndc-key name.'
 
 - name: Validate each conditional forwarding zone
   ansible.builtin.assert:

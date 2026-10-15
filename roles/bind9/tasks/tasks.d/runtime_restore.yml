@@ -1,0 +1,31 @@
+---
+# named and the private renewal units are stopped by the parent rescue first.
+- name: Remove runtime files that were absent before the failed deployment
+  ansible.builtin.file:
+    path: '{{ item.item }}'
+    state: absent
+  loop: '{{ (bind_runtime_files_before | default({})).get("results", []) }}'
+  when: not item.stat.exists
+
+- name: Restore the exact pre-deployment runtime files and permissions
+  ansible.builtin.copy:
+    dest: '{{ item.item.item }}'
+    content: '{{ item.content | b64decode }}'
+    owner: '{{ item.item.stat.uid }}'
+    group: '{{ item.item.stat.gid }}'
+    mode: '{{ item.item.stat.mode }}'
+  loop: '{{ (bind_runtime_content_before | default({})).get("results", []) }}'
+  when: not (item.skipped | default(false))
+  no_log: true
+
+- name: Reload the restored named runtime definitions
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restore the previous DNSSEC timer enablement
+  ansible.builtin.systemd:
+    name: named-private-dnssec.timer
+    enabled: '{{ bind_dnssec_timer_enabled_before.stdout | trim == "enabled" }}'
+  when:
+    - (bind_runtime_files_before | default({})).get('results', []) | length > 0
+    - bind_runtime_files_before.results[-1].stat.exists

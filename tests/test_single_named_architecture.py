@@ -12,36 +12,34 @@ TEMPLATE = ROLE / 'templates/named.conf.j2'
 def test_exactly_one_named_configuration_template():
     assert sorted(p.name for p in (ROLE / 'templates').glob('*.conf.j2')) == ['named.conf.j2']
     # Only distribution-owned native zones may be included; no custom fragments.
-    assert TEMPLATE.read_text().count('include "') == 1
+    assert TEMPLATE.read_text().count('include "') == 4
     assert 'include "/etc/named.rfc1912.zones";' in TEMPLATE.read_text()
 
 
-def test_single_template_contains_all_views_and_security_controls():
+def test_single_template_contains_standard_global_zones_and_security_controls():
     s = TEMPLATE.read_text()
-    for part in ('options {', 'view "peer"', 'view "external"', 'view "internal"', 'view "deny"',
-                 'recursion no;', 'allow-transfer { none; };', 'dnssec-validation auto;',
+    for part in ('options {', 'recursion yes;', 'allow-recursion { dns_recursive_clients; };',
+                 'allow-transfer { none; };', 'dnssec-validation {{ dnssec_mode }};',
                  'type master;', 'type slave;', 'allow-notify { !{ !', 'allow-transfer { !{ !'):
         assert part in s
-    assert s.index('view "peer"') < s.index('view "external"') < s.index('view "internal"') < s.index('view "deny"')
+    assert 'view "' not in s and 'in-view' not in s
+    assert s.index('options {') < s.index('include "/etc/named.rfc1912.zones";') < s.index('zone "{{ auth_zone.domain }}"')
 
 
-def test_peer_source_only_in_peer():
+def test_peer_transport_sources_are_configured_globally_once():
     s = TEMPLATE.read_text()
-    before, after = s.split('view "peer"', 1)
-    peer, after = after.split('view "external"', 1)
-    assert 'transfer-source {{ bind_back_ip }};' in peer
-    assert 'notify-source {{ bind_back_ip }};' in peer
-    assert 'transfer-source' not in before + after
-    assert 'notify-source' not in before + after
+    options = s.split('options {', 1)[1].split('include "/etc/named.rfc1912.zones";', 1)[0]
+    assert 'transfer-source {{ bind_back_ip }};' in options
+    assert 'notify-source {{ bind_back_ip }};' in options
+    assert s.count('transfer-source') == 1 and s.count('notify-source') == 1
     assert 'query-source' not in s
 
 
-def test_named_conf_render_with_both_client_views():
+def test_named_conf_render_with_one_client_acl():
     context = {
         'bind_tsig_key_name': 'site-transfer', 'bind_tsig_algorithm': 'hmac-sha256',
         'bind_tsig_secret': 'base64fake=', 'bind_front_ip': '192.0.2.10',
-        'bind_back_ip': '10.10.0.10', 'bind_frontend_clients': ['192.0.2.0/24'],
-        'bind_backend_clients': ['10.10.0.0/24'],
+        'bind_back_ip': '10.10.0.10', 'bind_allowed_clients': ['192.0.2.0/24', '10.10.0.0/24'],
         'bind_primary_group': 'dns_primary', 'group_names': ['dns_primary'],
         'bind_primary_host': 'p', 'bind_secondary_host': 's',
         'hostvars': {'p': {'bind_back_ip': '10.10.0.10', 'bind_front_ip': '192.0.2.10'},
@@ -50,12 +48,14 @@ def test_named_conf_render_with_both_client_views():
         'bind_forward_zones': [{'domain': 'corp.example.test', 'forwarders': [{'address': '10.20.0.53'}]}],
     }
     out = Environment(undefined=StrictUndefined).from_string(TEMPLATE.read_text()).render(**context)
-    assert 'view "external"' in out and 'view "internal"' in out
+    assert 'acl "allowed_clients"' in out
+    assert '192.0.2.0/24;' in out and '10.10.0.0/24;' in out
+    assert 'view "' not in out and 'in-view' not in out
     assert 'zone "prod.example.test" IN' in out
     assert 'zone "corp.example.test" IN' in out
     assert 'masters {' not in out
     assert 'allow-transfer { !{ !bind_secondary_back_ip; any; }; key "site-transfer"; };' in out
-    assert out.count('include "') == 1
+    assert out.count('include "') == 3
     assert 'include "/etc/named.rfc1912.zones";' in out
     assert 'secret "base64fake=";' in out
 
@@ -64,15 +64,14 @@ def test_named_conf_render_secondary_front_only():
     context = {
         'bind_tsig_key_name': 'site-transfer', 'bind_tsig_algorithm': 'hmac-sha256',
         'bind_tsig_secret': 'base64fake=', 'bind_front_ip': '192.0.2.11',
-        'bind_back_ip': '10.10.0.11', 'bind_frontend_clients': ['192.0.2.0/24'],
-        'bind_backend_clients': [], 'bind_primary_group': 'dns_primary',
+        'bind_back_ip': '10.10.0.11', 'bind_allowed_clients': ['192.0.2.0/24'],
+        'bind_primary_group': 'dns_primary',
         'group_names': ['dns_secondary'], 'bind_primary_host': 'p', 'bind_secondary_host': 's',
         'hostvars': {'p': {'bind_back_ip': '10.10.0.10', 'bind_front_ip': '192.0.2.10'},
                      's': {'bind_back_ip': '10.10.0.11', 'bind_front_ip': '192.0.2.11'}},
         'bind_authoritative_zones': [{'domain': 'prod.example.test'}], 'bind_forward_zones': [],
     }
     out = Environment(undefined=StrictUndefined).from_string(TEMPLATE.read_text()).render(**context)
-    assert 'view "internal"' not in out
     assert 'type slave;' in out and 'masters { 10.10.0.10 key "site-transfer"; };' in out
     assert 'allow-notify { !{ !bind_primary_back_ip; any; }; key "site-transfer"; };' in out
 

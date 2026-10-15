@@ -90,7 +90,7 @@
     bind_soa_checks.rc != 0 or
     not (bind_soa_checks.stdout | soa_matches(item.domain, bind_expected_soa_serials[item.domain]))
 
-- name: Verify each conditional forward zone through the native local view
+- name: Verify each conditional forward zone through IPv4 loopback
   ansible.builtin.command:
     argv: [dig, '{{ item.1 }}', +time=3, +tries=1, +noall, +comments, +answer,
            -b, 127.0.0.1, '@127.0.0.1', '{{ item.0.domain }}', SOA]

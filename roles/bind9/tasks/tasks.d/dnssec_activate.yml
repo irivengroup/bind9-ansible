@@ -1,0 +1,12 @@
+---
+- name: Reconcile private DNSSEC suffix exceptions before DNS health checks
+  ansible.builtin.systemd:
+    name: named-private-dnssec.service
+    state: started
+    daemon_reload: true
+
+- name: Keep private DNSSEC suffix exceptions renewed
+  ansible.builtin.systemd:
+    name: named-private-dnssec.timer
+    enabled: true
+    state: started

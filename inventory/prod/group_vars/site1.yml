@@ -4,14 +4,13 @@ bind_tsig_key_name: prod-site1-transfer
 bind_tsig_algorithm: hmac-sha256
 bind_tsig_secret_file: "{{ lookup('env', 'HOME') }}/.local/share/bind9-ansible/tsig/prod/site1.key"
 
-bind_frontend_clients:
+bind_internal_clients: []
+bind_cloud_clients:
   - 198.51.100.0/24
-bind_backend_clients: []
 
 bind_forward_zones:
   - domain: corp.site1.prod.example.test
     policy: only
-    # Confirmed private unsigned suffix; exception is restricted to this domain.
     dnssec_validate: false
     forwarders:
       - address: 10.11.0.53

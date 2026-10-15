@@ -2,4 +2,11 @@
 - name: Reload named configuration
   ansible.builtin.systemd:
     name: named
-    state: reloaded
+    # A reload cannot apply a changed ExecStart (notably the IPv4-only -4 flag).
+    state: >-
+      {{ "restarted" if
+         ((bind_named_runtime_override | default({})).get("changed", false) or
+          (bind_named_override | default({})).get("changed", false) or
+          (bind_legacy_named_override | default({})).get("changed", false) or
+          (bind_dnssec_removed | default({})).get("changed", false))
+         else "reloaded" }}

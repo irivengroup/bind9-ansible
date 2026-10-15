@@ -1,5 +1,5 @@
 ---
-# All parsing/planning runs on the controller. Target commands are native CLI.
+# Native tasks select the address-bearing FRONT device, including secondary addresses.
 - name: Initialize ownership of this route operation
   ansible.builtin.set_fact:
     bind_front_route_transaction_pending: false
@@ -12,9 +12,53 @@
   changed_when: false
   check_mode: false
 
-- name: Identify the isolated FRONT device from its configured address
+- name: Normalize live primary and secondary IPv4 addresses
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
+  vars:
+    bind_front_ipv4_values: >-
+      {%- set ns = namespace(values=[bind_front_ip, bind_back_ip, ansible_host]) -%}
+      {%- for iface in bind_front_addresses.stdout | from_json -%}
+        {%- for address in iface.get('addr_info', []) if address.get('family') == 'inet' -%}
+          {%- set ns.values = ns.values + [address.local ~ '/' ~ address.prefixlen] -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ ns.values }}
+
+- name: Match FRONT and protected subnets from current primary or secondary IPv4 addresses
   ansible.builtin.set_fact:
-    bind_front_interface: '{{ bind_front_addresses.stdout | front_interface(bind_front_ip, bind_back_ip, ansible_host) }}'
+    bind_front_interface_json: >-
+      {%- set ns = namespace(found=[], present=[], protected=[]) -%}
+      {%- for iface in bind_front_addresses.stdout | from_json -%}
+        {%- set row = namespace(front=[], protected=false) -%}
+        {%- for address in iface.get('addr_info', []) if address.get('family') == 'inet' -%}
+          {%- set ns.present = ns.present + [address.local] -%}
+          {%- if address.local in [bind_back_ip, ansible_host] -%}
+            {%- set ns.protected = ns.protected + [bind_front_ipv4_data[address.local ~ '/' ~ address.prefixlen].cidr] -%}
+            {%- set row.protected = true -%}
+          {%- endif -%}
+          {%- if address.local == bind_front_ip -%}
+            {%- set row.front = row.front + [bind_front_ipv4_data[address.local ~ '/' ~ address.prefixlen].cidr] -%}
+          {%- endif -%}
+        {%- endfor -%}
+        {%- if row.front | length == 1 and not row.protected and 'master' not in iface and
+            (iface.get('operstate') == 'UP' or (iface.get('operstate') == 'UNKNOWN' and 'UP' in iface.get('flags', []))) -%}
+          {%- set ns.found = ns.found + [{'device':iface.ifname, 'address':bind_front_ip, 'network':row.front[0]}] -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ {'found':ns.found, 'present':ns.present, 'protected':ns.protected | unique | list} | to_json }}
+
+- name: Require one UP FRONT device distinct from present BACK and ADM addresses
+  ansible.builtin.assert:
+    that:
+      - ((bind_front_interface_json | from_json if bind_front_interface_json is string else bind_front_interface_json)).found | length == 1
+      - bind_back_ip in ((bind_front_interface_json | from_json if bind_front_interface_json is string else bind_front_interface_json)).present
+      - ansible_host in ((bind_front_interface_json | from_json if bind_front_interface_json is string else bind_front_interface_json)).present
+      - bind_front_ip != bind_back_ip and bind_front_ip != ansible_host and bind_back_ip != ansible_host
+    fail_msg: 'FRONT is missing, ambiguous, down, enslaved or shares BACK/ADM; no routes modified.'
+
+- name: Retain the uniquely identified FRONT device
+  ansible.builtin.set_fact:
+    bind_front_interface: '{{ ((bind_front_interface_json | from_json if bind_front_interface_json is string else bind_front_interface_json)).found[0] | combine({"protected_networks": ((bind_front_interface_json | from_json if bind_front_interface_json is string else bind_front_interface_json)).protected}) }}'
 
 - name: Discover the active NetworkManager profile UUID
   ansible.builtin.command:
@@ -26,7 +70,7 @@
 
 - name: Validate active FRONT profile identity
   ansible.builtin.set_fact:
-    bind_front_uuid: '{{ bind_front_active_profile.stdout | front_profile_uuid }}'
+    bind_front_uuid: '{{ bind_front_active_profile.stdout | trim | lower }}'
 
 - name: Read existing FRONT gateway and persistent routes
   ansible.builtin.command:
@@ -65,17 +109,17 @@
       {{ bind_front_ssh_session.stdout.split()[0]
       if (ansible_connection | default('ssh')) != 'local' else '' }}
 
-- name: Plan safe additive FRONT routes on the controller
-  ansible.builtin.set_fact:
-    bind_front_plan: >-
-      {{ bind_front_interface | front_route_plan(
-      bind_frontend_clients, bind_front_profile.results[0].stdout,
-      bind_front_profile.results[1].stdout, bind_front_kernel.results[0].stdout,
-      bind_front_kernel.results[1].stdout, bind_front_profile.results[2].stdout,
-      bind_front_uuid, bind_front_route_metric,
-      [ansible_host, bind_back_ip, hostvars[bind_primary_host].bind_back_ip,
-      hostvars[bind_secondary_host].bind_back_ip] +
-      (bind_front_ssh_client | front_ssh_ipv4_guard)) | front_route_journal }}
+- name: Build and validate the route plan using native Ansible tasks
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_plan.yml'
+
+- name: Show calculated FRONT route plan with verbose diagnostics
+  ansible.builtin.debug:
+    verbosity: 1
+    msg:
+      device: '{{ bind_front_plan.device }}'
+      gateway: '{{ bind_front_plan.gateway }}'
+      profile_additions: '{{ bind_front_plan.profile_additions }}'
+      runtime_additions: '{{ bind_front_plan.runtime_additions }}'
 
 - name: Inspect routing journal parent before creating any files
   ansible.builtin.stat:
@@ -158,11 +202,12 @@
       environment: {LC_ALL: C}
       loop: '{{ bind_front_plan.profile_additions }}'
 
-    # device modify touches only applied route settings, unlike reapply of a
-    # profile that could contain unrelated pending configuration changes.
+    # Change only exact kernel routes; never reactivate/reapply the connection.
     - name: Add only missing routes to the active FRONT device
       ansible.builtin.command:
-        argv: [nmcli, --wait, '10', device, modify, '{{ bind_front_plan.device }}', +ipv4.routes, '{{ item }}']
+        argv: >-
+          {{ ['ip', '-4', 'route', 'add', item.split()[0], 'via', item.split()[1], 'dev', bind_front_plan.device] +
+             (['metric', item.split()[2]] if item.split() | length == 3 else []) + ['table', 'main'] }}
       environment: {LC_ALL: C}
       loop: '{{ bind_front_plan.runtime_additions }}'
 

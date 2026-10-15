@@ -1,6 +1,8 @@
 ---
-bind_frontend_clients: []
-bind_backend_clients: []
+bind_cloud_clients: []
+bind_internal_clients: []
+# YAML true/false or auto. false deploys no DNSSEC-specific runtime assets.
+bind_dnssec_enabled: false
 bind_forward_zones: []
 bind_authoritative_zones: []
 bind_backup_root: /var/backups/Bind9-Ansible/bind
@@ -8,6 +10,8 @@ bind_monitoring_enabled: false
 
 # Metric for newly added specific FRONT routes; existing routes keep theirs.
 bind_front_route_metric: 100
+# Keep routing disabled until explicitly enabled in the isolated environment.
+bind_front_routes_enabled: false
 
 # Inventory role group names are configurable for reuse across projects.
 bind_primary_group: dns_primary

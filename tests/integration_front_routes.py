@@ -4,7 +4,6 @@ The caller must provide disposable front0/back0/adm0 profiles, a private system
 bus and isolated /var/lib. Never run this against an operational server.
 """
 import argparse
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -20,24 +19,20 @@ class NativeRouteIntegration:
     def __init__(self, workarea):
         self.root = Path(__file__).resolve().parents[1]
         self.workarea = workarea
-        spec = importlib.util.spec_from_file_location('front_route_planner', self.root / 'roles/bind9/filter_plugins/front_routes.py')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        self.planner = module.FrontRoutePlanner
         interpreter = workarea / 'python-test'
         interpreter.symlink_to(sys.executable)
         self.variables = {'ansible_python_interpreter': str(interpreter),
                           'ansible_host': '192.0.2.2', 'ansible_env': {'SSH_CONNECTION': ''},
                           'bind_front_ip': '198.51.100.2', 'bind_back_ip': '10.0.0.2',
                           'bind_primary_host': 'localhost', 'bind_secondary_host': 'secondary',
-                          'bind_frontend_clients': ['203.0.113.0/24'], 'bind_front_route_metric': 100}
+                          'bind_cloud_clients': ['203.0.113.0/24'], 'bind_front_route_metric': 100}
         inventory = workarea / 'hosts.ini'
         inventory.write_text('[dns_primary]\nlocalhost ansible_connection=local bind_back_ip=10.0.0.2\n'
                              '[dns_secondary]\nsecondary bind_back_ip=10.0.0.3\n')
         self.inventory = inventory
         config = workarea / 'ansible.cfg'
         config.write_text('[defaults]\nretry_files_enabled=False\n')
-        self.env = dict(os.environ, ANSIBLE_CONFIG=str(config), ANSIBLE_ROLES_PATH=str(self.root / 'roles'))
+        self.env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK='json', ANSIBLE_CONFIG=str(config), ANSIBLE_ROLES_PATH=str(self.root / 'roles'))
 
     @staticmethod
     def command(*argv):
@@ -52,7 +47,13 @@ class NativeRouteIntegration:
             env=self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, timeout=180)
         if result.returncode:
             raise AssertionError(result.stdout)
-        return result.stdout
+        output = json.JSONDecoder().raw_decode(result.stdout[result.stdout.index('{'):])[0]
+        for play in output['plays']:
+            for task in play['tasks']:
+                facts = task.get('hosts', {}).get('localhost', {}).get('ansible_facts', {})
+                if 'bind_front_plan' in facts:
+                    self.last_plan = facts['bind_front_plan']
+        return output
 
     def routes(self):
         return self.command('ip', '-j', '-4', 'route', 'show', 'table', 'main')
@@ -68,17 +69,12 @@ class NativeRouteIntegration:
         profile_before = self.command('nmcli', '-g', 'ipv4.routes', 'connection', 'show', 'front')
         active_dns = self.command('nmcli', '-g', 'IP4.DNS', 'device', 'show', 'front0')
         self.command('nmcli', 'connection', 'modify', 'front', 'ipv4.dns', '198.51.100.53')
-        addresses = self.command('ip', '-j', '-4', 'address', 'show')
-        interface = self.planner.interface(addresses, '198.51.100.2', '10.0.0.2', '192.0.2.2')
-        uuid = self.command('nmcli', '-g', 'GENERAL.CON-UUID', 'device', 'show', 'front0')
-        plan = self.planner.plan(interface, ['203.0.113.0/24'], '198.51.100.1', profile_before,
-            runtime_before, self.command('ip', '-j', '-4', 'rule', 'show'), '0', uuid, 100,
-            ['192.0.2.2', '10.0.0.2', '10.0.0.3'])
         self.role()
-        assert self.planner.unchanged_routes(runtime_before, self.routes(), plan)
+        assert all(row in json.loads(self.routes()) for row in json.loads(runtime_before))
         assert active_dns == self.command('nmcli', '-g', 'IP4.DNS', 'device', 'show', 'front0')
         assert protected == {name: self.profile(name) for name in protected}
-        assert 'changed=0' in self.role()
+        plan = self.last_plan
+        assert self.role()['stats']['localhost']['changed'] == 0
         # Recreate the original operation's durable journal to test recovery.
         journal = Path('/var/lib/Bind9-Ansible/front-routes.lock')
         journal.mkdir(mode=0o700)
@@ -86,7 +82,7 @@ class NativeRouteIntegration:
         file.write_text(json.dumps(plan))
         file.chmod(0o600)
         self.role('tasks.d/front_routes_recover.yml')
-        assert self.planner.unchanged_routes(runtime_before, self.routes(), plan, applied=False)
+        assert json.loads(runtime_before) == json.loads(self.routes())
         assert profile_before == self.command('nmcli', '-g', 'ipv4.routes', 'connection', 'show', 'front')
         assert not journal.exists()
         self.role()
@@ -95,7 +91,7 @@ class NativeRouteIntegration:
         self.command('nmcli', 'connection', 'reload')
         self.command('nmcli', 'connection', 'down', 'front')
         self.command('nmcli', 'connection', 'up', 'front')
-        assert self.planner.unchanged_routes(runtime_before, self.routes(), plan)
+        assert all(row in json.loads(self.routes()) for row in json.loads(runtime_before))
         assert protected == {name: self.profile(name) for name in protected}
         result = json.loads(self.command('ip', '-j', '-4', 'route', 'get', '203.0.113.1', 'from', '198.51.100.2'))
         assert result[0]['dev'] == 'front0' and result[0]['gateway'] == '198.51.100.1'

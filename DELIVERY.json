@@ -1,44 +1,201 @@
 {
   "project": "Bind9-Ansible",
-  "release": "2026.10.14-acl-serveurs",
-  "source_archive": "Bind9-Ansible-acl-loopback.zip",
-  "source_sha256": "4fbec03083aa49fc31663f5a49c942dba73e99cc4c71025fd862112d2d2b5108",
+  "release": "2026.10.15-dnssec-enabled",
+  "source_archive": "Bind9-Ansible-dnssec-optionnel.zip",
+  "source_sha256": "81955c7fffba917c6dafb980c96520406945b5391b350d81610cb857d4c025ea",
   "playbook": "playbooks/bind9-deploy.yml",
   "changes": {
     "modified": [
       "README.md",
-      "docs/ACL_LOOPBACK.md",
-      "docs/LOOPBACK.md",
-      "roles/bind9/templates/named.conf.j2",
-      "tests/test_native_loopback.py",
-      "tests/test_single_named_architecture.py"
+      "docs/DNSSEC.md",
+      "docs/OPERATIONS.md",
+      "docs/VALIDATION_RHEL8.md",
+      "examples/deux-zones-forwardees/README.md",
+      "examples/deux-zones-forwardees/variables.yml",
+      "roles/bind9/defaults/main.yml",
+      "roles/bind9/tasks/main.yml",
+      "roles/bind9/tasks/tasks.d/directories.yml",
+      "roles/bind9/tasks/tasks.d/dnssec_settings.yml",
+      "roles/bind9/tasks/tasks.d/native_loopback.yml",
+      "tests/integration_loopback.py",
+      "tests/test_dnssec_workflows.py",
+      "tests/test_optional_dnssec.py"
     ],
-    "added": [
-      "docs/ACL_SERVEURS.md",
-      "tests/test_server_acls.py"
-    ],
-    "unchanged_files": 94,
+    "added": [],
     "removed": [],
+    "unchanged_files": 118,
     "regenerated_metadata": [
       "DELIVERY.json",
       "SOURCE-MANIFEST.sha256"
     ]
   },
-  "checks": {
-    "rerun_unit_and_regression_tests": 201,
-    "dns": {
-      "configurations_loaded": 44,
-      "dns_checks": 107,
-      "native_files_unchanged": true
+  "dnssec_contract": {
+    "variable": "bind_dnssec_enabled",
+    "default": false,
+    "accepted": [
+      false,
+      true,
+      "auto",
+      "false",
+      "true"
+    ],
+    "bind_directives": {
+      "false": "no",
+      "true": "yes",
+      "auto": "auto"
     },
-    "route_workflows_rerun": false,
-    "previous_delivery_checks": "See preserved VALIDATION_NETTOYAGE.md; not rerun for ACL change",
-    "pyflakes": "EXÉCUTÉ: no findings",
+    "disabled_assets_deployed": false,
+    "previous_owned_dnssec_assets_removed_when_disabled": true,
+    "runtime_ipv4_and_rndc_independent": true,
+    "runtime_rollback": "Six root-owned regular files and prior timer state, captured in controller memory",
+    "persistent_runtime_backup_in_bind_archive": false,
+    "derived_boolean_fact": "bind_dnssec_active"
+  },
+  "client_contract": {
+    "inputs": [
+      "bind_cloud_clients",
+      "bind_internal_clients"
+    ],
+    "type": "flat lists of IPv4 addresses or canonical CIDRs",
+    "constraint": "Either list may be empty, never both, before any role tag changes the server",
+    "computed_union": "bind_allowed_clients",
+    "deduplication": "identical entries, cloud then internal",
+    "front_route_input": "bind_cloud_clients only",
+    "internal_routes_created": false,
+    "strict_source_destination_isolation": false,
+    "isolation_limit": "Without views, source and destination ACLs are independent; existing network must enforce arrival path"
+  },
+  "migration": "Use bind_dnssec_enabled in inventories and extra vars; no compatibility alias.",
+  "checks": {
+    "status": "EXÉCUTÉ",
+    "pytest_tests": 311,
+    "fast_suite_tests": 308,
+    "fresh_mode_and_file_idempotence_workflows": 3,
+    "runtime_workflow_scope": "Real Ansible and file operations; systemd contract double only",
     "ansible": "2.9.27",
-    "controller_python": "3.8.20",
-    "bind_lab": "9.18.24",
-    "target_rhel8_python368": "NON EXÉCUTÉ",
-    "remote_ci": "NON EXÉCUTÉ",
-    "production_qualification": "NON TERMINÉE"
+    "syntax_inventories": 3,
+    "input_workflows": {
+      "accepted_input_workflows": 6,
+      "default_is_disabled": true,
+      "real_ansible_runner": true,
+      "target_writes": false
+    },
+    "preflight": {
+      "inventories": 3,
+      "hosts": 12,
+      "real_preflight_assertions": true,
+      "target_facts_simulated": true
+    },
+    "pyflakes": "EXÉCUTÉ",
+    "executable_sources_identifier_only": "EXÉCUTÉ",
+    "old_identifier_absent": "EXÉCUTÉ",
+    "full_runtime_and_network_integrations": "NON EXÉCUTÉ",
+    "rhel8_actual_system_deployment": "NON EXÉCUTÉ",
+    "production_qualification": "NON TERMINÉE",
+    "missing_check_procedures": "docs/VALIDATION_RHEL8.md"
+  },
+  "baseline_checks": {
+    "scope": "Executed on the preceding source archive only",
+    "source_sha256": "81955c7fffba917c6dafb980c96520406945b5391b350d81610cb857d4c025ea",
+    "results": {
+      "status": "EXÉCUTÉ",
+      "distinct_tests_executed": 330,
+      "core_suite_tests": 322,
+      "optional_dnssec_contract_tests": 23,
+      "dnssec_runtime_workflows": 8,
+      "runtime_workflow_scope": "Real Ansible and filesystem operations; systemd contract double only",
+      "native_route_expression_tests": 77,
+      "ansible_route_workflows": 14,
+      "ansible": "2.9.27",
+      "controller_python": "3.8.20",
+      "syntax_inventories": 3,
+      "coverage": {
+        "modules": 4,
+        "statements": 277,
+        "missed": 1,
+        "rounded_percent": 99,
+        "threshold": 98,
+        "scope": "Selected remaining production Python; YAML checked by task scenarios"
+      },
+      "preflight": {
+        "inventories": 3,
+        "hosts": 12,
+        "real_preflight_assertions": true,
+        "target_facts_simulated": true
+      },
+      "dns": {
+        "el8-dns": {
+          "configurations_loaded": 108,
+          "dns_checks": 263,
+          "native_files_unchanged": true
+        },
+        "dns-integration": {
+          "configurations_loaded": 108,
+          "dns_checks": 263,
+          "native_files_unchanged": true
+        }
+      },
+      "networkmanager": {
+        "networkmanager": "1.46.0",
+        "ansible_workflows": 4,
+        "idempotence": true,
+        "selective_recovery": true,
+        "profile_reload_persistence": true,
+        "pending_dns_unapplied": true,
+        "original_routes_back_adm_and_default_preserved": true
+      },
+      "python36_isolated_checks": {
+        "private_dnssec_reconciles": true,
+        "python": "3.6.8",
+        "all_production_python_compiles": true,
+        "routing_python_absent": true
+      },
+      "dnssec_default_regression": {
+        "baseline_default_always_auto": true,
+        "baseline_deployed_private_markers": true,
+        "current_default_is_false": true,
+        "current_default_renders_no": true,
+        "current_default_omits_anchors": true,
+        "current_default_omits_private_markers": true
+      },
+      "example": {
+        "two_forward_zones": true,
+        "client_acl_present": true,
+        "single_client_acl": true,
+        "dnssec_disabled_default": true,
+        "local_destination_acls_for_both_roles": true,
+        "native_el8_checkconf_z_exits": [
+          0,
+          0
+        ]
+      },
+      "source_audit": {
+        "assets_referenced": 12,
+        "task_files_referenced": 34,
+        "handlers_notified": 1,
+        "defaults_consumed": 11,
+        "filters_consumed": 11,
+        "yaml_files_parsed": 62,
+        "restorecon_baseline_exit": 1,
+        "restorecon_current_exit": 0
+      },
+      "dependencies_added": [],
+      "pyflakes_bandit_compilation_shell": "EXÉCUTÉ",
+      "rhel8_actual_system_deployment": "NON EXÉCUTÉ",
+      "actual_systemd_selinux_reboot_weeklong_renewal": "NON EXÉCUTÉ",
+      "complete_operational_restore": "NON EXÉCUTÉ",
+      "load_test": "NON EXÉCUTÉ",
+      "remote_ci": "NON EXÉCUTÉ",
+      "production_qualification": "NON TERMINÉE",
+      "missing_check_procedures": "docs/VALIDATION_RHEL8.md"
+    }
+  },
+  "archive_checks": {
+    "status": "EXÉCUTÉ",
+    "manifest": true,
+    "crc": true,
+    "markdown_links": true,
+    "source_only": true,
+    "same_runtime_reproducibility": true
   }
 }

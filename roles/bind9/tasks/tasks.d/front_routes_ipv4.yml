@@ -1,0 +1,41 @@
+---
+# Standard Jinja integer arithmetic avoids controller packages and custom filters.
+# Inclusive numeric intervals make CIDR containment exact, including host routes.
+- name: Validate and normalize IPv4 observations using native task expressions
+  ansible.builtin.set_fact:
+    bind_front_ipv4_json: >-
+      {%- set ns = namespace(data={}, errors=[]) -%}
+      {%- for value in bind_front_ipv4_values | unique | list -%}
+        {%- if value is not string or not (value is match('^(0|[1-9][0-9]{0,2})[.](0|[1-9][0-9]{0,2})[.](0|[1-9][0-9]{0,2})[.](0|[1-9][0-9]{0,2})(/[0-9]{1,2})?$')) -%}
+          {%- set ns.errors = ns.errors + ['Invalid IPv4 value: ' ~ value | string] -%}
+        {%- else -%}
+          {%- set address = value.split('/')[0] -%}
+          {%- set octets = address.split('.') | map('int') | list -%}
+          {%- set prefix = value.split('/')[1] | int if '/' in value else 32 -%}
+          {%- if octets | max > 255 or prefix < 0 or prefix > 32 -%}
+            {%- set ns.errors = ns.errors + ['IPv4 octet or prefix out of bounds: ' ~ value] -%}
+          {%- else -%}
+            {%- set number = octets[0]*16777216 + octets[1]*65536 + octets[2]*256 + octets[3] -%}
+            {%- set size = 2 ** (32-prefix) -%}
+            {%- set low = (number // size) * size -%}
+            {%- set high = low + size - 1 -%}
+            {%- set network = [low//16777216, (low//65536)%256, (low//256)%256, low%256] | join('.') -%}
+            {%- set broadcast = [high//16777216, (high//65536)%256, (high//256)%256, high%256] | join('.') -%}
+            {%- set probe = low if prefix == 32 else low+1 -%}
+            {%- set ns.data = ns.data | combine({value: {'prefix':prefix,
+                'lo':low, 'hi':high, 'network':network, 'broadcast':broadcast, 'cidr':network ~ '/' ~ prefix,
+                'probe': [probe//16777216, (probe//65536)%256, (probe//256)%256, probe%256] | join('.')}}) -%}
+            {%- set ns.data = ns.data | combine({network ~ '/' ~ prefix: ns.data[value]}) -%}
+          {%- endif -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ {'data':ns.data, 'errors':ns.errors} | to_json }}
+
+- name: Reject invalid IPv4 observations before any routing write
+  ansible.builtin.assert:
+    that: [((bind_front_ipv4_json | from_json if bind_front_ipv4_json is string else bind_front_ipv4_json)).errors | length == 0]
+    fail_msg: '{{ ((bind_front_ipv4_json | from_json if bind_front_ipv4_json is string else bind_front_ipv4_json)).errors }}'
+
+- name: Retain typed IPv4 intervals for the route operation
+  ansible.builtin.set_fact:
+    bind_front_ipv4_data: '{{ (bind_front_ipv4_data | default({})) | combine(((bind_front_ipv4_json | from_json if bind_front_ipv4_json is string else bind_front_ipv4_json)).data) }}'

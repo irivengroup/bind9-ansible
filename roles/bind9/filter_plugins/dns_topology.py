@@ -35,8 +35,10 @@ class DnsTopology:
             if any(other != name and self.within(other, name) for other in self.forward_names):
                 raise ValueError('Nested forwarding zones require explicit DNS design: ' + name)
         for zone in forwarded:
-            if not isinstance(zone.get('dnssec_validate', True), bool):
+            if 'dnssec_validate' in zone and not isinstance(zone['dnssec_validate'], bool):
                 raise ValueError('dnssec_validate must be a YAML boolean')
+            if any(not FilterModule.forwarder(server) for server in zone['forwarders']):
+                raise ValueError('Forwarders must be valid unicast IPv4 endpoints')
         # Data at/below a delegation cut would be hidden by forwarding. Reject
         # it instead of silently changing authoritative answers on deployment.
         for zone, parent in zip(authoritative, self.auth_names):
@@ -72,9 +74,9 @@ class DnsTopology:
                 continue
             servers = []
             for number, server in enumerate(zone['forwarders'], 1):
-                address = ipaddress.ip_address(server['address'])
+                address = ipaddress.IPv4Address(server['address'])
                 servers.append({'name': 'bind-forwarder-' + str(number) + '.' + child + '.',
-                                'type': 'A' if address.version == 4 else 'AAAA', 'address': str(address)})
+                                'type': 'A', 'address': str(address)})
             output.append({'domain': child + '.', 'servers': servers})
         return output
 
@@ -89,14 +91,14 @@ class FilterModule:
 
     @staticmethod
     def forwarder(server):
-        """Require a unicast endpoint and a strictly typed decimal service port."""
+        """Require a unicast IPv4 endpoint and a strictly typed decimal port."""
         port = server.get('port', 53)
         if isinstance(port, bool) or not isinstance(port, (int, str)):
             return False
         if not re.fullmatch(r'[0-9]{1,5}', str(port)) or not 1 <= int(port) <= 65535:
             return False
         try:
-            address = ipaddress.ip_address(server['address'])
+            address = ipaddress.IPv4Address(server['address'])
             return not (address.is_unspecified or address.is_multicast or address.is_link_local or
                         str(address) == '255.255.255.255')
         except (ValueError, TypeError, KeyError):

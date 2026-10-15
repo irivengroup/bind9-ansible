@@ -1,7 +1,7 @@
 # Ajouter les seules routes de retour FRONT
 
 Le réseau du serveur est déjà configuré. Le rôle complète les routes IPv4 vers
-`bind_frontend_clients` avec les outils natifs `ip` et `nmcli`. Il découvre le
+`bind_cloud_clients` avec les outils natifs `ip` et `nmcli`. Il découvre le
 profil NetworkManager actif par UUID, puis lit sa propriété `ipv4.gateway`.
 Aucune variable de passerelle ou d'interface supplémentaire n'est nécessaire.
 
@@ -11,15 +11,17 @@ Une adresse de client sans préfixe est normalisée en `/32`.
 
 ## Configuration et commande
 
+La gestion est **désactivée par défaut**, conformément à l'état demandé après le problème de plan vide. Définir le booléen YAML `bind_front_routes_enabled: true` pour l'activer. La reprise `routes-recover` reste disponible lorsque la gestion est désactivée. Une liste cloud vide ne déclenche aucun ajout ; dans ce cas, la liste interne doit être non vide. Deux listes vides sont refusées avant toute commande réseau.
+
 Les réseaux des clients sont déjà déclarés dans les `group_vars` du site :
 
 ```yaml
-bind_frontend_clients:
+bind_cloud_clients:
   - 198.51.100.0/24
   - 203.0.113.25
 ```
 
-Ces adresses sont des exemples de documentation, pas les réseaux de production.
+Ces adresses sont des exemples de documentation, pas les réseaux de production. `bind_internal_clients` ne fournit aucune destination de route : le réseau BACK existant est conservé. La fusion `bind_allowed_clients` sert exclusivement aux autorisations DNS.
 `bind_front_route_metric` est un entier optionnel, par défaut `100`, appliqué
 uniquement aux nouvelles routes spécifiques. Une route existante conserve sa
 métrique. Les adresses FRONT, BACK et ADM restent celles de l'inventaire.
@@ -27,19 +29,21 @@ métrique. Les adresses FRONT, BACK et ADM restent celles de l'inventaire.
 Depuis la racine du projet, exécuter uniquement les tâches de routage :
 
 ```bash
-ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --tags routes
+ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --tags routes \
+  -e '{"bind_front_routes_enabled": true}'
 ```
 
 Pour un seul serveur, ajouter `--limit` avec son nom d'inventaire. Les groupes
 du site et les variables des deux pairs doivent rester présents dans l'inventaire.
 Le tag `routes` n'installe pas de paquet et ne déploie pas de configuration DNS.
 Les tâches existantes marquées `always` dérivent seulement les faits du rôle.
-Les routes sont aussi incluses dans le tag `deploy` du déploiement complet.
+Les routes sont aussi incluses dans le tag `deploy` du déploiement complet lorsque ce booléen est activé. Éviter `-e bind_front_routes_enabled=true`, qui produit une chaîne avec Ansible 2.9 ; le rôle exige un véritable booléen.
 
 Prévisualisation sans mutation du réseau ni création du journal :
 
 ```bash
-ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --tags routes --check
+ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --tags routes --check -v \
+  -e '{"bind_front_routes_enabled": true}'
 ```
 
 Les observations natives sont réellement lues en mode simulation ; les ajouts
@@ -49,8 +53,9 @@ du déploiement DNS en mode simulation.
 ## Prérequis précis
 
 - RHEL 8, Ansible 2.9 et Python 3.6.8 côté serveur constituent la cible demandée.
-  Les filtres Python s'exécutent sur le contrôleur, et les modules Ansible sur
-  le serveur ; aucun script Python de routage n'est installé sur les cibles.
+  Les modules Ansible standard s’exécutent sur le serveur. Aucun script ou filtre
+  Python de routage personnalisé n’est fourni, aucun paquet contrôleur supplémentaire
+  n’est nécessaire ; `netaddr` et les collections réseau ne sont pas requis.
 - SSH ADM et `become: true` ; `ip` et `nmcli` déjà disponibles ; NetworkManager
   déjà actif avec un profil FRONT et une passerelle IPv4 configurée, sur le lien.
 - FRONT, BACK et ADM sont des interfaces distinctes avec les adresses IPv4
@@ -70,8 +75,8 @@ du déploiement DNS en mode simulation.
 ## Opération additive
 
 Une route manquante est ajoutée avec l'opérateur `+ipv4.routes` dans le profil,
-puis sur l'interface active avec `nmcli device modify`.
-La seconde commande ne réactive pas la connexion et ne réapplique pas les
+puis dans la table principale du noyau avec `ip -4 route add ... via ... dev ...`, en conservant la métrique retenue.
+La commande noyau ne réactive pas la connexion et ne réapplique pas les
 autres modifications éventuelles en attente dans le profil. Les paramètres
 d'adressage, de passerelle, de DNS, de MTU et les profils BACK/ADM ne sont pas
 écrits par ces tâches. Il n'y a aucun appel `connection up/down` dans le rôle.
@@ -95,10 +100,16 @@ ancienne route quand un client disparaît de la liste.
 
 ## Échec, interruption et reprise
 
+Le plan est construit par les tâches natives : expressions Jinja standard, validation IPv4 stricte et comparaison d’intervalles numériques pour les réseaux. Les adresses primaires et secondaires sont observées avec `ip -j -4 address show`. Les références de réseaux sont comparées exactement, jamais par sous-chaîne. La déduplication et l’agrégation des préfixes adjacents/inclus restent identiques à la livraison source.
+
+Les faits JSON sont acceptés sous leur forme sérialisée ou sous la forme de dictionnaire/liste déjà convertie par Ansible 2.9 ; ils sont ensuite contrôlés avant emploi. Une sortie vide ou malformée provoque un échec explicite. Les commandes de mutation peuvent réussir sans stdout : seul leur résultat d’exécution puis les observations réseau déterminent la réussite. Aucune erreur d’ajout ou de suppression n’est masquée par `failed_when: false`.
+
+`-v` affiche périphérique, passerelle et ajouts proposés. La route persistante et la route active sont contrôlées séparément : une route correctement persistée mais absente du noyau est réinstallée à chaud. Une route contradictoire existante n’est pas supprimée automatiquement : le réseau préexistant reste sous la responsabilité de son gestionnaire.
+
 Avant la première modification, le plan est enregistré dans
 `/var/lib/Bind9-Ansible/front-routes.lock/plan.json` : répertoire root `0700`,
 fichier root `0600`. Le journal est borné en taille. En cas d'échec, le rôle
-retire seulement ses ajouts qui sont encore présents avec la même identité,
+retire seulement ses ajouts qui sont encore présents avec la même identité (préfixe, passerelle, interface et métrique),
 puis exige le retour à l'état initial. Une erreur de rollback est explicite
 et laisse le journal disponible ; elle n'est pas ignorée.
 
@@ -144,3 +155,5 @@ Le lanceur crée les espaces réseau, processus et montages isolés AVANT le
 démarrage du service de test. Les commandes de réactivation dans ce laboratoire
 servent uniquement à prouver la persistance ; elles ne figurent pas dans les
 tâches déployées. Aucun paquet n'est installé par ce test.
+
+Adaptation du playbook fourni et résultats actuels : [VALIDATION_ROUTES_NATIVES.md](VALIDATION_ROUTES_NATIVES.md).

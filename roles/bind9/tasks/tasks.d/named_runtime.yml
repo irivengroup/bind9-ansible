@@ -1,0 +1,45 @@
+---
+# RNDC administration and IPv4 transport are independent of DNSSEC validation.
+- name: Prepare the native administrative RNDC key
+  ansible.builtin.systemd:
+    name: named-setup-rndc.service
+    state: started
+
+- name: Inspect the administrative RNDC key
+  ansible.builtin.stat:
+    path: /etc/rndc.key
+    follow: false
+  register: bind_rndc_key_file
+
+- name: Require the native regular administrative RNDC key
+  ansible.builtin.assert:
+    that:
+      - bind_rndc_key_file.stat.exists
+      - bind_rndc_key_file.stat.isreg | default(false)
+      - not (bind_rndc_key_file.stat.islnk | default(false))
+    fail_msg: 'The native named-setup-rndc service must provide /etc/rndc.key.'
+
+- name: Prepare the named runtime override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/named.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Configure IPv4 transport and administrative reload independently of DNSSEC
+  ansible.builtin.template:
+    src: named-runtime-override.j2
+    dest: /etc/systemd/system/named.service.d/bind9-runtime.conf
+    owner: root
+    group: root
+    mode: '0644'
+  register: bind_named_runtime_override
+  notify: Reload named configuration
+
+- name: Retire the legacy combined runtime and DNSSEC drop-in
+  ansible.builtin.file:
+    path: /etc/systemd/system/named.service.d/bind9-dnssec.conf
+    state: absent
+  register: bind_legacy_named_override
+  notify: Reload named configuration

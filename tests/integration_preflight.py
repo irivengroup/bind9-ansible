@@ -29,6 +29,8 @@ class InventoryPreflight:
                               'ansible_distribution_major_version': '8',
                               'bind_tsig_secret': base64.b64encode(secrets.token_bytes(32)).decode('ascii')},
                      'tasks': [
+                         {'include_role': {'name': 'bind9', 'tasks_from': 'tasks.d/dnssec_settings.yml'}},
+                         {'include_role': {'name': 'bind9', 'tasks_from': 'tasks.d/clients.yml'}},
                          {'include_role': {'name': 'bind9', 'tasks_from': 'tasks.d/site_peers.yml'}},
                          {'set_fact': {'bind_managed_zones': '{{ bind_authoritative_zones + (bind_authoritative_zones | automatic_reverse_zones) }}'}},
                          {'include_role': {'name': 'bind9', 'tasks_from': 'tasks.d/validate.yml'}}]}]
