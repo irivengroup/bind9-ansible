@@ -34,8 +34,9 @@
   delegate_to: "{{ inventory_hostname }}"
   register: bind_primary_soa
   changed_when: false
+  # Keep AA token matching free of Jinja's backspace escape (see health.yml).
   failed_when: >-
     bind_primary_soa.rc != 0 or
     ('status: NOERROR' not in bind_primary_soa.stdout) or
-    (bind_primary_soa.stdout is not search('flags:.*\baa\b')) or
+    (bind_primary_soa.stdout is not search('(?m)^;; flags: (?:[a-z]+ )*aa(?: |;)')) or
     (bind_primary_soa.stdout is not search('(?m)^' ~ (item.domain | regex_escape) ~ '\.?\s+\d+\s+IN\s+SOA\s+'))

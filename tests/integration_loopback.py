@@ -140,6 +140,64 @@ class LoopbackIntegration:
         assert result.returncode == 0, result.stdout
         return json.loads(result.stdout)
 
+    def ansible_loopback_health(self, folder, binaries, context):
+        """Run the delivered task unchanged; the dig wrapper rebases only its port.
+
+        Direct DNS queries alone missed Jinja's interpretation of the task's
+        regular expression. Exercise the actual runner in both typing modes.
+        """
+        task = yaml.safe_load((self.role / 'tasks/tasks.d/health.yml').read_text())[0]
+        readiness = yaml.safe_load((self.role / 'tasks/tasks.d/primary_readiness.yml').read_text())[1]
+        verification = yaml.safe_load((self.role / 'tasks/tasks.d/verify.yml').read_text())
+        # Rebase only tool/file locations. Preserve deployed verification logic.
+        for check in verification:
+            if 'ansible.builtin.command' in check:
+                argv = check['ansible.builtin.command']['argv']
+                argv[0] = str(self.bin_dir / Path(argv[0]).name)
+                check['ansible.builtin.command']['argv'] = [
+                    value.replace('/etc/named.conf', str(folder / 'named.conf'))
+                         .replace('/var/named', str(folder / 'named')) for value in argv]
+        unsafe = folder / 'unsafe-transfer.conf'
+        unsafe.write_text('options { allow-transfer { any; }; }; controls {};\n')
+        formatted = subprocess.check_output([str(self.bin_dir / 'named-checkconf'), '-p', str(unsafe)],
+                                            universal_newlines=True)
+        transfer_assertion = next(t for t in verification if 'ansible.builtin.assert' in t)
+        # Ansible 2.9 module shebangs need a path without spaces in this lab.
+        interpreter = folder / 'python-controller'
+        interpreter.symlink_to(os.sys.executable)
+        play = [{'hosts': 'localhost', 'connection': 'local', 'gather_facts': False,
+                 'vars': {'ansible_python_interpreter': str(interpreter),
+                          'bind_back_ip': '127.0.0.3', 'bind_primary_host': 'localhost',
+                          'bind_primary_group': 'dns_primary',
+                          'bind_managed_zones': context['bind_managed_zones']},
+                 'tasks': verification + [{'set_fact': {'bind_back_ip': '127.0.0.3'}}, task, {'assert': {'that': [
+                     'bind_loopback_check.results | length == 4',
+                     'not bind_loopback_check.changed',
+                     'bind_loopback_check.results | map(attribute="attempts") | list == [1, 1, 1, 1]',
+                     'bind_loopback_check.results | map(attribute="rc") | list == [0, 0, 0, 0]']}},
+                           readiness, {'assert': {'that': [
+                               'not bind_primary_soa.changed',
+                               'bind_primary_soa.results | length == bind_managed_zones | length',
+                               'bind_primary_soa.results | selectattr("failed", "equalto", true) | list | length == 0']}},
+                           {'set_fact': {'bind_checked_configuration': {'stdout': formatted}, 'unsafe_rejected': False},
+                            'no_log': True},
+                           {'block': [transfer_assertion], 'rescue': [{'set_fact': {'unsafe_rejected': True}}]},
+                           {'assert': {'that': ['unsafe_rejected']}}]}]
+        path = folder / 'ansible-health.yml'
+        path.write_text(yaml.safe_dump(play, sort_keys=False))
+        inventory = folder / 'health-hosts.ini'
+        inventory.write_text('[dns_primary]\nlocalhost ansible_connection=local\n')
+        for native in ('false', 'true'):
+            environment = dict(os.environ, ANSIBLE_CONFIG=str(self.root / 'ansible.cfg'),
+                               ANSIBLE_JINJA2_NATIVE=native,
+                               PATH=str(binaries) + os.pathsep + os.environ['PATH'])
+            result = subprocess.run(['ansible-playbook', '-i', str(inventory), str(path)],
+                                    env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    universal_newlines=True, timeout=90)
+            assert result.returncode == 0, result.stdout
+            (folder / ('ansible-health-native-' + native + '.log')).write_text(result.stdout)
+        return 2 * (4 + len(context['bind_managed_zones']))
+
     def signed_upstream(self, folder):
         """Create a trusted signed fixture and corrupt one RRset after signing.
 
@@ -433,6 +491,7 @@ class LoopbackIntegration:
                 wrapper = binaries / 'dig'
                 wrapper.write_text('#!/usr/bin/env bash\nexec ' + shlex.quote(str(self.bin_dir / 'dig')) + ' -p ' + str(port) + ' "$@"\n')
                 wrapper.chmod(0o755)
+                checks += self.ansible_loopback_health(folder, binaries, context)
                 result = subprocess.run(['bash', str(self.role / 'files/bind-configtool.sh'), 'check-front-axfr',
                                          '127.0.0.2', zone['domain'], '127.0.0.10', str(keyfile)],
                                         env=dict(os.environ, PATH=str(binaries) + os.pathsep + os.environ['PATH']),
@@ -580,7 +639,11 @@ class LoopbackIntegration:
             count += 1
         assert native == {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in self.native_dir.iterdir() if p.is_file()}
         print(json.dumps({'configurations_loaded': count, 'dns_checks': queries, 'native_files_unchanged': True,
-                          'ipv6_udp_tcp_forwarding':True,'ipv6_dns_listener_absent':True}))
+                          'ipv6_udp_tcp_forwarding':True,'ipv6_dns_listener_absent':True,
+                          'ansible_loopback_checks': 8,
+                          'ansible_primary_soa_checks': 2 * len(context['bind_managed_zones']),
+                          'ansible_deployed_configuration_checked': True,
+                          'direct_wildcard_transfer_rejected': True}))
 
 
 if __name__ == '__main__':

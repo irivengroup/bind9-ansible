@@ -12,7 +12,7 @@ Le point d'entrée est `playbooks/bind9-deploy.yml`. Le rôle produit `/etc/name
 | Ansible | Ligne **2.9** demandée ; contrôles locaux : **EXÉCUTÉ**, avec **2.9.27**. Aucune affirmation sur tous les autres correctifs 2.9. |
 | Python cible | **3.6.8**, fourni par l'utilisateur ; **EXÉCUTÉ** sur l'interpréteur extrait EL8 : compilation des Python de production, contrôles des scripts Python DNS restants ; le routage ne contient plus de code Python personnalisé. Modules Ansible sur le serveur réel : **NON EXÉCUTÉ**. |
 | Contrôleur de test | Linux, Python **3.8.20**, Jinja2 **2.10.3** et **3.0.3**, Ansible **2.9.27**. |
-| BIND de laboratoire | **9.11.36-16.el8_10.16**, binaires natifs RPM AlmaLinux EL8 exécutés en laboratoire Linux isolé, et **9.18.24** : chacun 109 configurations chargées et 270 contrôles DNS, dont signatures valides/invalides. Ce n'est pas une recette système RHEL. |
+| BIND de laboratoire | **9.11.36-16.el8_10.16**, binaires natifs RPM AlmaLinux EL8 exécutés en laboratoire Linux isolé, et **9.18.24** : chacun 109 configurations chargées et 282 contrôles DNS, dont signatures valides/invalides. Ce n'est pas une recette système RHEL. |
 | NetworkManager de laboratoire | **1.46.0** ; ajout natif, persistance et reprise exécutés. La version installée sur les cibles reste à qualifier. |
 | Transport DNS / routes | Écoute DNS IPv4 uniquement ; échanges sortants et forwarders IPv4/IPv6. Données AAAA/PTR IPv6 conservées ; routes retour gérées uniquement en IPv4. |
 
@@ -247,14 +247,14 @@ Adapter les valeurs d'exemple. Codes : 0 = refus DNS explicite dans les deux ess
 
 | État | Contrôles |
 |---|---|
-| **EXÉCUTÉ** | Routage natif sans netaddr ni filtre personnalisé : scénarios Ansible réels, tests d’expressions YAML, idempotence et reprise sélective ; résultats courants dans [CLIENTS_UNIQUES.md](docs/CLIENTS_UNIQUES.md) et DELIVERY.json. Couverture des quatre modules Python restants : 99 %, seuil 98 %. DNS natif EL8 et BIND 9.18 : chacun 109 configurations et 270 contrôles |
+| **EXÉCUTÉ** | Routage natif sans netaddr ni filtre personnalisé : scénarios Ansible réels, tests d’expressions YAML, idempotence et reprise sélective ; résultats courants dans [CLIENTS_UNIQUES.md](docs/CLIENTS_UNIQUES.md) et DELIVERY.json. Couverture des quatre modules Python restants : 99 %, seuil 98 %. DNS natif EL8 et BIND 9.18 : chacun 109 configurations et 282 contrôles |
 | **NON EXÉCUTÉ** | Déploiement RHEL 8 réel et modules Python/DNF, crypto-policy générée/FIPS, SELinux, pare-feu, activation réelle des overrides/timers, redémarrage serveur, renouvellement sur sept jours, RFC5011 et chaînes DNSSEC cibles, deuxième deploy complet, restauration opérationnelle, charge et CI distante |
 
 Les rapports fournissent pour chaque contrôle manquant la raison, les prérequis, la procédure, le résultat attendu et le risque restant. Les 109 configurations couvrent les branches du template ; elles ne prouvent pas toutes les combinaisons arbitraires d'inventaire ni tous les incidents réseau. La sauvegarde à chaud d'un secondaire ne garantit pas un instantané atomique de ses journaux BIND ; qualifier la restauration et votre RPO/RTO avant production.
 
 ## 📦 Livraison et traçabilité
 
-Cette adaptation part de `Bind9-Ansible-dnssec-enabled.zip`, conservée intacte. Le fichier original sur D: n'a pas été relu. `DELIVERY.json` décrit provenance et différences ; `SOURCE-MANIFEST.sha256` décrit les fichiers ; le ZIP possède une empreinte SHA-256 externe. Caches, journaux, runtimes et secrets générés sont exclus. Le helper et les unités DNSSEC ne sont déployés que pour `true`/`auto` ; les transitions et leur rollback sont intégrés au parcours deploy ; le filtre Python de routage est supprimé également du contrôleur. Les scripts Python nécessaires au DNS restent distincts de cette évolution. Les tâches de migration et les fonctions optionnelles utilisées sont conservées. Les déclarations d’ACL sans consommateur sont retirées ; le contrat client distingue cloud et internes, avec fusion calculée pour DNS et routage exclusivement cloud.
+Cette correction part de `Bind9-Ansible-consolide-dnssec-transport.zip`, conservée intacte. Le fichier original sur D: n'a pas été relu. `DELIVERY.json` décrit provenance et différences ; `SOURCE-MANIFEST.sha256` décrit les fichiers ; le ZIP possède une empreinte SHA-256 externe. Caches, journaux, runtimes et secrets générés sont exclus. Le helper et les unités DNSSEC ne sont déployés que pour `true`/`auto` ; les transitions et leur rollback sont intégrés au parcours deploy ; le filtre Python de routage est supprimé également du contrôleur. Les scripts Python nécessaires au DNS restent distincts de cette évolution. Les tâches de migration et les fonctions optionnelles utilisées sont conservées. Les déclarations d’ACL sans consommateur sont retirées ; le contrat client distingue cloud et internes, avec fusion calculée pour DNS et routage exclusivement cloud.
 
 Les tests sont fournis avec les sources. Le nom public du projet reste **Bind9-Ansible** et le playbook reste **bind9-deploy.yml**. Les métadonnées du rôle déclarent `license: proprietary` ; aucun texte de licence détaillant les droits n'est fourni dans cette archive.
 
@@ -272,3 +272,5 @@ explicitement en compte `auto`, après validation stricte. Les fichiers et blocs
 impactés sont détaillés dans [DURCISSEMENT_DNSSEC.md](docs/DURCISSEMENT_DNSSEC.md).
 Les preuves et limites sont distinguées dans `DELIVERY.json` et
 [VALIDATION_RHEL8.md](docs/VALIDATION_RHEL8.md).
+
+La correction des conditions de santé et du contrôle de la configuration, les parties du code impactées et les preuves courantes figurent dans [CORRECTION_CONTROLES_DNS.md](docs/CORRECTION_CONTROLES_DNS.md). Elle corrige les faux refus dus à Jinja sans désactiver les contrôles DNS. Le fichier réellement présent sur votre serveur reste à vérifier selon la procédure fournie.

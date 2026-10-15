@@ -26,15 +26,17 @@
   changed_when: false
   retries: 3
   delay: 2
+  # Avoid \b: Jinja interprets it as backspace in an Ansible 2.9 condition.
+  # Match the AA token only inside dig's header flags, never in answer data.
   until: >-
     bind_loopback_check.rc == 0 and
     'status: NOERROR' in bind_loopback_check.stdout and
-    bind_loopback_check.stdout is search('flags:.*\baa\b') and
+    bind_loopback_check.stdout is search('(?m)^;; flags: (?:[a-z]+ )*aa(?: |;)') and
     bind_loopback_check.stdout is search('(?m)^' ~ (item.name | regex_escape) ~ '[.]?\s+\d+\s+IN\s+' ~ item.type ~ '\s+' ~ item.answer ~ '\s*$')
   failed_when: >-
     bind_loopback_check.rc != 0 or
     'status: NOERROR' not in bind_loopback_check.stdout or
-    bind_loopback_check.stdout is not search('flags:.*\baa\b') or
+    bind_loopback_check.stdout is not search('(?m)^;; flags: (?:[a-z]+ )*aa(?: |;)') or
     bind_loopback_check.stdout is not search('(?m)^' ~ (item.name | regex_escape) ~ '[.]?\s+\d+\s+IN\s+' ~ item.type ~ '\s+' ~ item.answer ~ '\s*$')
 
 - name: Read actual reconciled SOA serials from primary zone files

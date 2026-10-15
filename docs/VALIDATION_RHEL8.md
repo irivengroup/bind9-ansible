@@ -1,6 +1,6 @@
 # Compatibilité et vérification — 15 octobre 2026
 
-Projet **Bind9-Ansible**, playbook `playbooks/bind9-deploy.yml`, cible RHEL 8, Ansible 2.9 et Python serveur 3.6.8. Source conservée : `Bind9-Ansible-dnssec-enabled.zip`, SHA-256 `c4768f9f8c6538ea043b1eea1c74d1686a527f78b6743e2120b8b39ee607dfd3`. Le fichier original sur D: n’a pas été relu. Différences et preuves exactes : `DELIVERY.json` ; contenu : `SOURCE-MANIFEST.sha256`.
+Projet **Bind9-Ansible**, playbook `playbooks/bind9-deploy.yml`, cible RHEL 8, Ansible 2.9 et Python serveur 3.6.8. Source de cette correction : `Bind9-Ansible-consolide-dnssec-transport.zip`, SHA-256 `49723fe241d7d02c0a1115c902ed49f9780907e9745dcb1f2136cd1107167efd`. Le fichier original sur D: n’a pas été relu. Différences et preuves exactes : `DELIVERY.json` ; contenu : `SOURCE-MANIFEST.sha256`.
 
 Le routage a été remplacé par des tâches Ansible natives sans dépendance ajoutée. Le filtre Python correspondant a été supprimé ; les scripts nécessaires au DNS restent présents. Structure BIND sans vues, ACL techniques, zones natives et tags sont conservés ; DNSSEC devient optionnel, défaut `false` ; les inventaires déclarent deux listes plates IPv4 ; `bind_allowed_clients` est leur fusion calculée, jamais une troisième entrée. Les corrections de cycle de vie de la livraison précédente restent couvertes. Voir [VALIDATION_ROUTES_NATIVES.md](VALIDATION_ROUTES_NATIVES.md) et [VERIFICATION_GLOBALE.md](VERIFICATION_GLOBALE.md).
 
@@ -33,7 +33,7 @@ Les dépréciations du vieux runtime sont affichées, pas masquées.
 | Dépendances | **EXÉCUTÉ** | netaddr absent du contrôleur de recette, aucun filtre réseau externe ni Python personnalisé de routage dans le rôle |
 | Couverture Python restante | **EXÉCUTÉ** | Quatre modules, 286 instructions, deux non couvertes, 99 % arrondi ; seuil 98 % conservé. La logique YAML est testée par scénarios, elle ne contribue pas à cette mesure Python |
 | Préflight | **EXÉCUTÉ** | Trois inventaires, 12 hôtes, vraies assertions et faits cibles simulés ; syntaxe Ansible 2.9.27 |
-| BIND EL8 / 9.18.24 | **EXÉCUTÉ** | Chacun 109 configurations chargées et 270 contrôles DNS réels, fichiers natifs inchangés, tests cryptographiques DNSSEC avec ancre temporaire |
+| BIND EL8 / 9.18.24 | **EXÉCUTÉ** | Chacun 109 configurations chargées et 282 contrôles DNS réels, fichiers natifs inchangés, tests cryptographiques DNSSEC avec ancre temporaire |
 | Python 3.6.8 extrait EL8 | **EXÉCUTÉ** | Compilation de tous les Python de production restants et réconciliation DNSSEC isolée ; aucun module Ansible/DNF exécuté sur un serveur RHEL |
 | Qualité | **EXÉCUTÉ** | Pyflakes, Bandit, compilation, syntaxe shell ; 62 YAML, 34 fichiers de tâches accessibles, 12 assets, un handler, onze variables par défaut et 11 filtres restants référencés |
 | IPv6 sortant / écoute | **EXÉCUTÉ** | Client IPv4 vers upstream IPv6, UDP et repli TCP prouvés par le journal upstream ; absence de listener DNS IPv6 en UDP/TCP, processus sans famille forcée |
@@ -100,3 +100,7 @@ Toutes les lignes ci-dessous sont **NON EXÉCUTÉ**, pour la raison indiquée. L
 | CI distante/autres matrices : pas de déclenchement distant | Exécuter tous les jobs du workflow, y compris coverage root et seuil 98 % | Tous les jobs applicables réussissent ; présence du YAML ne prouve pas les autres versions |
 
 Déployer un environnement à la fois, primaire avant secondaire, valider avant reload, appliquer les exceptions puis santé. Une erreur d'exception n'est pas ignorée. Arrêter en cas de refus AXFR inconclusif, SOA divergent, changement réseau inattendu ou erreur de service. Rollback local à l'hôte, pas une transaction distribuée de la paire. Voir [DNSSEC.md](DNSSEC.md), [OPERATIONS.md](OPERATIONS.md), [FRONT_ROUTES.md](FRONT_ROUTES.md) et [TESTS_FONCTIONNELS.md](TESTS_FONCTIONNELS.md).
+
+## Correction des contrôles de santé et de configuration
+
+Les preuves, les régressions et la procédure de vérification du serveur sont détaillées dans [CORRECTION_CONTROLES_DNS.md](CORRECTION_CONTROLES_DNS.md). Les essais BIND exécutent maintenant aussi les vraies tâches Ansible ; les chemins et ports sont adaptés uniquement au laboratoire. La couverture Python et le laboratoire NetworkManager cités ci-dessus proviennent de la livraison précédente, dont ces sources sont inchangées ; les workflows Ansible de routage et DNSSEC ont été rejoués pour cette correction.
