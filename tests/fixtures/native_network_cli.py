@@ -57,6 +57,11 @@ class NativeNetworkDouble:
             return self.state['uuid']
         if args[:1] == ['-g'] and args[2:6] == ['connection', 'show', 'uuid', self.state['uuid']]:
             if args[1] == 'ipv4.gateway':
+                if self.state.get('drift_gateway_on_second_read'):
+                    self.state['gateway_reads'] = self.state.get('gateway_reads', 0) + 1
+                    if self.state['gateway_reads'] == 2:
+                        self.state['gateway'] = '198.51.100.254'
+                    self.save()
                 return self.state['gateway']
             if args[1] == 'ipv4.route-table':
                 return '0'

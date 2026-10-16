@@ -14,6 +14,25 @@
   register: bind_front_verified_profile
   changed_when: false
 
+- name: Verify FRONT gateway still matches the planned profile before commit
+  ansible.builtin.command:
+    argv: [nmcli, -g, ipv4.gateway, connection, show, uuid, '{{ bind_front_plan.uuid }}']
+  environment: {LC_ALL: C}
+  register: bind_front_verified_gateway
+  changed_when: false
+  failed_when: bind_front_verified_gateway.rc != 0 or bind_front_verified_gateway.stdout | trim != bind_front_plan.gateway
+
+- name: Read IPv4 policy after the route operation
+  ansible.builtin.command:
+    argv: [ip, -j, -4, rule, show]
+  register: bind_front_verified_rules
+  changed_when: false
+
+- name: Require the unchanged classic policy before FRONT commit
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_policy.yml'
+  vars:
+    bind_front_rule_observation: '{{ bind_front_verified_rules.stdout }}'
+
 - name: Read the main table after the operation
   ansible.builtin.command:
     argv: [ip, -j, -4, route, show, table, main]

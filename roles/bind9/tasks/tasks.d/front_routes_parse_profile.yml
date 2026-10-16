@@ -69,12 +69,13 @@
 - name: Normalize persistent route observations
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
   vars:
+    bind_front_ipv4_context: 'nmcli ipv4.routes on the selected FRONT profile'
     bind_front_ipv4_values: >-
       {%- set ns = namespace(values=[]) -%}
       {%- for route in bind_front_parsed_profile -%}
         {%- set ns.values = ns.values + [route.network, route.gateway] -%}
       {%- endfor -%}
-      {{ ns.values }}
+      {{ ns.values | to_json }}
 
 - name: Retain canonical persistent destinations
   ansible.builtin.set_fact:

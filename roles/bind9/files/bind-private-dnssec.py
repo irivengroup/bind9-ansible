@@ -43,9 +43,10 @@ class PrivateDnssec:
     @classmethod
     def read(cls, path):
         """Read a bounded regular root-owned file without following a symlink."""
-        with os.fdopen(os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW), 'r') as stream:
+        # A FIFO blocks at open() before fstat unless O_NONBLOCK is specified.
+        with os.fdopen(os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC), 'r') as stream:
             info = os.fstat(stream.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022 or info.st_nlink != 1:
                 raise ValueError('Unsafe DNSSEC policy/state permissions: ' + str(path))
             content = stream.read(cls.LIMIT + 1)
         if len(content) > cls.LIMIT:

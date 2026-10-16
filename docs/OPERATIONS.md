@@ -1,6 +1,14 @@
 # Opérations BIND 9 (RHEL 8+)
 
 Le rôle déploie **un seul fichier de configuration** : `/etc/named.conf`.
+
+Les préconditions renforcées des secrets, archives, chemins et reprises FRONT
+figurent dans [DURCISSEMENT_SECURITE.md](DURCISSEMENT_SECURITE.md).
+La restauration refuse désormais un `named` actif, les destinations contenant
+des liens/fichiers spéciaux et les erreurs SELinux. Si la récupération de sécurité
+échoue, son archive privée est conservée avec un message explicite. Une racine de
+backup existante doit déjà être root `0700` : aucune correction aveugle des droits
+d’un répertoire fourni par erreur n’est faite par le rôle.
 Les fichiers de données des zones primaires restent dans `/var/named/zones/` et les zones secondaires dans `/var/named/slaves/`.
 Aucun include de configuration `/etc/named/*.conf` n'est créé.
 La configuration globale sans vues inclut `/etc/named.rfc1912.zones` du paquet RHEL,

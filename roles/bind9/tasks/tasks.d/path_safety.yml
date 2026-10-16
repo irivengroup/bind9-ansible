@@ -5,9 +5,15 @@
     follow: false
   loop:
     - /etc/named.conf
+    - /etc/named
+    - /etc/named/zones
+    - /etc/systemd/system/named.service.d
+    - /usr/local/sbin
     - /var/named
     - /var/named/zones
     - /var/named/slaves
+    - /var/named/data
+    - /var/named/dynamic
     - /var/log/named
     - /var/log/named/default.log
     - /var/log/named/security.log
@@ -19,8 +25,16 @@
   ansible.builtin.assert:
     that:
       - not item.stat.islnk | default(false)
-      - not item.stat.exists or item.stat.isreg | default(false) or item.stat.isdir | default(false)
+      # A directory at a file path must not reach template/chown/touch tasks.
+      - not item.stat.exists or ((item.item in bind_managed_file_paths) and (item.stat.isreg | default(false))) or ((item.item not in bind_managed_file_paths) and (item.stat.isdir | default(false)))
+      - not item.stat.exists or item.item not in bind_managed_file_paths or (item.stat.nlink | default(0) | int) == 1
     fail_msg: "Unsafe BIND managed path: {{ item.item }}"
   loop: "{{ bind_managed_paths.results }}"
   loop_control:
     label: "{{ item.item }}"
+  vars:
+    bind_managed_file_paths:
+      - /etc/named.conf
+      - /var/log/named/default.log
+      - /var/log/named/security.log
+      - /var/log/named/xfer.log

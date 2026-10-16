@@ -4,6 +4,7 @@
   ansible.builtin.set_fact:
     bind_front_route_transaction_pending: false
     bind_front_route_rollback_attempted: false
+    bind_front_lock_acquired: {failed: true}
 
 - name: Discover current IPv4 interfaces
   ansible.builtin.command:
@@ -15,6 +16,7 @@
 - name: Normalize live primary and secondary IPv4 addresses
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
   vars:
+    bind_front_ipv4_context: 'ip -j -4 address show and inventory FRONT/BACK/ADM'
     bind_front_ipv4_values: >-
       {%- set ns = namespace(values=[bind_front_ip, bind_back_ip, ansible_host]) -%}
       {%- for iface in bind_front_addresses.stdout | from_json -%}
@@ -22,7 +24,7 @@
           {%- set ns.values = ns.values + [address.local ~ '/' ~ address.prefixlen] -%}
         {%- endfor -%}
       {%- endfor -%}
-      {{ ns.values }}
+      {{ ns.values | to_json }}
 
 - name: Match FRONT and protected subnets from current primary or secondary IPv4 addresses
   ansible.builtin.set_fact:
@@ -192,6 +194,10 @@
         owner: root
         group: root
 
+    - name: Revalidate the route baseline while holding the operation lock
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_before_write.yml'
+      environment: {LC_ALL: C}
+
     - name: Mark route additions pending until their owning operation succeeds
       ansible.builtin.set_fact:
         bind_front_route_transaction_pending: true
@@ -221,7 +227,18 @@
   rescue:
     - name: Roll back owned route additions while preserving the original failure
       ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_rollback.yml'
-      when: bind_front_lock_acquired is defined and bind_front_lock_acquired is succeeded
+      when:
+        - bind_front_lock_acquired is defined and bind_front_lock_acquired is succeeded
+        - bind_front_route_transaction_pending | default(false) | bool
+
+    - name: Release only our unused lock after a pre-mutation refusal
+      ansible.builtin.file:
+        path: /var/lib/Bind9-Ansible/front-routes.lock
+        state: absent
+      when:
+        - bind_front_lock_acquired is defined and bind_front_lock_acquired is succeeded
+        - not (bind_front_route_transaction_pending | default(false) | bool)
+        - not (bind_front_route_rollback_attempted | default(false) | bool)
 
     - name: Stop after native route operation failure
       ansible.builtin.fail:

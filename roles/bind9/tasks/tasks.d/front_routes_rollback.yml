@@ -17,6 +17,60 @@
   changed_when: false
   failed_when: bind_front_rollback_uuid.rc != 0 or (bind_front_rollback_uuid.stdout | trim) != bind_front_plan.uuid
 
+- name: Read the existing FRONT gateway before any rollback mutation
+  ansible.builtin.command:
+    argv: [nmcli, -g, ipv4.gateway, connection, show, uuid, '{{ bind_front_plan.uuid }}']
+  environment: {LC_ALL: C}
+  register: bind_front_rollback_gateway
+  changed_when: false
+  failed_when: bind_front_rollback_gateway.rc != 0 or bind_front_rollback_gateway.stdout | trim != bind_front_plan.gateway
+
+- name: Read current policy rules before any rollback mutation
+  ansible.builtin.command:
+    argv: [ip, -j, -4, rule, show]
+  register: bind_front_rollback_rules
+  changed_when: false
+
+- name: Refuse policy drift before removing any FRONT route
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_policy.yml'
+  vars:
+    bind_front_rule_observation: '{{ bind_front_rollback_rules.stdout }}'
+
+- name: Read the actual SSH peer before route recovery
+  ansible.builtin.command:
+    argv: [printenv, SSH_CONNECTION]
+  become: false
+  register: bind_front_recovery_ssh
+  changed_when: false
+  failed_when: bind_front_recovery_ssh.rc != 0 or (bind_front_recovery_ssh.stdout.split() | length) != 4
+  when: ansible_connection | default('ssh') != 'local'
+
+- name: Record the current SSH source for recovery protection
+  ansible.builtin.set_fact:
+    bind_front_ssh_client: '{{ bind_front_recovery_ssh.stdout.split()[0] if ansible_connection | default("ssh") != "local" else "" }}'
+
+- name: Normalize the current SSH peer before owned route removal
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ssh_normalize.yml'
+
+- name: Normalize current inventory and SSH addresses for recovery protection
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
+  vars:
+    bind_front_ipv4_context: 'current inventory and SSH source during FRONT rollback'
+    bind_front_ipv4_values: >-
+      {{ ([ansible_host, bind_front_ip, bind_back_ip,
+          hostvars[bind_primary_host].bind_back_ip, hostvars[bind_secondary_host].bind_back_ip] +
+         ([bind_front_ssh_ipv4] if bind_front_ssh_ipv4 else [])) | to_json }}
+
+- name: Refuse owned routes that cover current administrative or DNS addresses
+  ansible.builtin.assert:
+    that:
+      - not (bind_front_ipv4_data[item.1].lo <= bind_front_ipv4_data[item.0.split()[0]].hi and bind_front_ipv4_data[item.1].hi >= bind_front_ipv4_data[item.0.split()[0]].lo)
+    fail_msg: 'Recovery would affect a current ADM, FRONT, BACK or SSH address; no route removals were started.'
+  loop: >-
+    {{ (bind_front_plan.profile_additions + bind_front_plan.runtime_additions) | product(
+       [ansible_host, bind_front_ip, bind_back_ip, hostvars[bind_primary_host].bind_back_ip,
+        hostvars[bind_secondary_host].bind_back_ip] + ([bind_front_ssh_ipv4] if bind_front_ssh_ipv4 else [])) | list }}
+
 - name: Read persistent routes available for selective rollback
   ansible.builtin.command:
     argv: [nmcli, -g, ipv4.routes, connection, show, uuid, '{{ bind_front_plan.uuid }}']
@@ -48,12 +102,6 @@
     that: [((bind_front_profile_selection | from_json if bind_front_profile_selection is string else bind_front_profile_selection)).errors | length == 0]
     fail_msg: '{{ ((bind_front_profile_selection | from_json if bind_front_profile_selection is string else bind_front_profile_selection)).errors }}'
 
-- name: Remove owned persistent additions
-  ansible.builtin.command:
-    argv: [nmcli, --wait, '10', connection, modify, uuid, '{{ bind_front_plan.uuid }}', -ipv4.routes, '{{ item }}']
-  environment: {LC_ALL: C}
-  loop: '{{ ((bind_front_profile_selection | from_json if bind_front_profile_selection is string else bind_front_profile_selection)).routes }}'
-
 - name: Read runtime routes available for selective rollback
   ansible.builtin.command:
     argv: [ip, -j, -4, route, show, table, main]
@@ -63,12 +111,13 @@
 - name: Normalize active destinations being inspected
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
   vars:
+    bind_front_ipv4_context: 'ip -j -4 route show table main during rollback'
     bind_front_ipv4_values: >-
       {%- set ns = namespace(values=[]) -%}
       {%- for route in bind_front_rollback_kernel.stdout | from_json -%}
         {%- set ns.values = ns.values + [route.get('dst','default') | replace('default','0.0.0.0/0')] -%}
       {%- endfor -%}
-      {{ ns.values }}
+      {{ ns.values | to_json }}
 
 - name: Select exact owned active additions with native expressions
   ansible.builtin.set_fact:
@@ -84,8 +133,12 @@
         {%- endfor -%}
         {%- if row.matching -%}
           {%- if row.matching | length != 1 or row.matching[0].get('dev') != bind_front_plan.device or row.matching[0].get('gateway') != parts[1] or
-              row.matching[0].get('type','unicast') != 'unicast' or 'nexthops' in row.matching[0] or
-              (parts | length == 3 and row.matching[0].get('metric') != parts[2] | int) -%}
+              row.matching[0].get('type','unicast') != 'unicast' or
+              (row.matching[0].keys() | list | difference(['dst','gateway','dev','metric','protocol','scope','flags','type','table'])) or
+              row.matching[0].get('flags',[]) != [] or row.matching[0].get('table','main') not in ['main',254,'254'] or
+              row.matching[0].get('protocol','boot') not in ['boot','static',3,4] or
+              row.matching[0].get('scope','global') not in ['global','universe',0] or
+              row.matching[0].get('metric',0) != ((parts[2] | int) if parts | length == 3 else 0) -%}
             {%- set ns.errors = ns.errors + ['Owned active route identity changed; manual recovery required'] -%}
           {%- else -%}{%- set ns.routes = ns.routes + [entry] -%}{%- endif -%}
         {%- endif -%}
@@ -96,6 +149,12 @@
   ansible.builtin.assert:
     that: [((bind_front_runtime_selection | from_json if bind_front_runtime_selection is string else bind_front_runtime_selection)).errors | length == 0]
     fail_msg: '{{ ((bind_front_runtime_selection | from_json if bind_front_runtime_selection is string else bind_front_runtime_selection)).errors }}'
+
+- name: Remove owned persistent additions
+  ansible.builtin.command:
+    argv: [nmcli, --wait, '10', connection, modify, uuid, '{{ bind_front_plan.uuid }}', -ipv4.routes, '{{ item }}']
+  environment: {LC_ALL: C}
+  loop: '{{ ((bind_front_profile_selection | from_json if bind_front_profile_selection is string else bind_front_profile_selection)).routes }}'
 
 - name: Remove owned active additions
   ansible.builtin.command:

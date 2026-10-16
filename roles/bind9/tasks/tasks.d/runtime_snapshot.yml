@@ -24,7 +24,10 @@
       - not item.stat.exists or (item.stat.isreg | default(false))
       - not (item.stat.islnk | default(false))
       - not item.stat.exists or item.stat.uid == 0
-    fail_msg: 'Managed runtime paths must be absent or regular root-owned files.'
+      - not item.stat.exists or (item.stat.nlink | default(0) | int) == 1
+      - not item.stat.exists or item.stat.mode is match('^0[0-7][0145][0145]$')
+      - not item.stat.exists or (item.stat.size | int) <= 1048576
+    fail_msg: 'Managed runtime paths must be absent or singly linked root-owned regular files, not group/world writable, at most 1 MiB.'
   loop: '{{ bind_runtime_files_before.results }}'
   loop_control:
     label: '{{ item.item }}'

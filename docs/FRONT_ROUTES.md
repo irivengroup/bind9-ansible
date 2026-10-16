@@ -5,6 +5,13 @@ Le réseau du serveur est déjà configuré. Le rôle complète les routes IPv4 
 profil NetworkManager actif par UUID, puis lit sa propriété `ipv4.gateway`.
 Aucune variable de passerelle ou d'interface supplémentaire n'est nécessaire.
 
+La révision de durcissement relit le profil, sa passerelle, les routes et les
+règles sous verrou avant le premier ajout. Une dérive provoque un refus avant
+écriture et libère seulement le verrou acquis par cette exécution. Les règles
+standard sont contrôlées aussi avant commit et rollback ; des priorités correctes
+avec un sélecteur `fwmark`, une destination ou une autre politique ne sont pas
+assimilées au routage classique. Voir [DURCISSEMENT_SECURITE.md](DURCISSEMENT_SECURITE.md).
+
 Les clients du sous-réseau directement connecté à FRONT ne nécessitent pas
 de route via une passerelle ; leur chemin effectif est néanmoins contrôlé.
 Une adresse de client sans préfixe est normalisée en `/32`.
@@ -100,6 +107,16 @@ ancienne route quand un client disparaît de la liste.
 
 ## Échec, interruption et reprise
 
+Le rollback vérifie désormais les identités persistantes **et** actives avant
+de retirer la première route. Il refuse les attributs noyau inattendus, les
+métriques modifiées, les changements de passerelle/règles et les recouvrements
+des adresses actuelles ADM/FRONT/BACK ou du contrôleur SSH. Une route sans
+métrique explicite dans la commande correspond à la métrique noyau zéro,
+pas à une métrique arbitraire. Un conflit conserve le journal pour inspection.
+Un journal de reprise doit être un fichier root régulier `0600` avec un seul
+lien, dans les répertoires root `0700` attendus. Son schéma historique est
+conservé, mais les doublons d’ajouts sont refusés avant toute commande de retrait.
+
 Le plan est construit par les tâches natives : expressions Jinja standard, validation IPv4 stricte et comparaison d’intervalles numériques pour les réseaux. Les adresses primaires et secondaires sont observées avec `ip -j -4 address show`. Les références de réseaux sont comparées exactement, jamais par sous-chaîne. La déduplication et l’agrégation des préfixes adjacents/inclus restent identiques à la livraison source.
 
 Les faits JSON sont acceptés sous leur forme sérialisée ou sous la forme de dictionnaire/liste déjà convertie par Ansible 2.9 ; ils sont ensuite contrôlés avant emploi. Une sortie vide ou malformée provoque un échec explicite. Les commandes de mutation peuvent réussir sans stdout : seul leur résultat d’exécution puis les observations réseau déterminent la réussite. Aucune erreur d’ajout ou de suppression n’est masquée par `failed_when: false`.
@@ -137,6 +154,36 @@ finale le signale ; la restauration BIND est malgré tout tentée.
 Avec `--tags routes`, le commit suit immédiatement la vérification des routes.
 Une restauration manuelle ultérieure avec `bind-configtool restore` restaure
 uniquement les fichiers BIND : elle ne supprime pas des routes déjà committées.
+
+### Diagnostiquer « Reject invalid IPv4 observations before any routing write »
+
+L’existence des passerelles ne suffit pas à identifier la cause : la même
+normalisation traite également les adresses locales, `ansible_host`, les
+réseaux clients, les destinations noyau et le contenu d’un journal de reprise.
+La valeur exacte de l’erreur initiale reste nécessaire pour attribuer cet
+incident à une entrée particulière ; aucune cause n’est annoncée comme prouvée
+sans cette valeur.
+
+Le message indique désormais le contexte de lecture, le type et la valeur
+échappée en cas de format invalide. Selon le contexte :
+
+- **Interfaces/inventaire** : vérifier FRONT/BACK et l’IPv4 ADM littérale dans
+  `ansible_host` ; un nom DNS n’est pas une IPv4 normalisable par cette fonction.
+- **Plan** : contrôler les clients déclarés, la source SSH et `ipv4.gateway`
+  du profil FRONT sélectionné ; aucune passerelle globale de remplacement.
+- **Profil** : examiner uniquement `ipv4.routes` de ce profil, avec son format
+  exact et ses réseaux/adresses ; une sortie incomprise n’est pas ignorée.
+- **Noyau** : examiner `ip -j -4 address show` et
+  `ip -j -4 route show table main`, sans modifier le réseau.
+- **Journal** : inspecter le fichier privé conservé et sa provenance avant
+  `routes-recover` ; ne pas remplacer des valeurs au hasard ni effacer le verrou.
+
+Les observations non IPv4, non canoniques ou de mauvais type restent bloquantes.
+Une source SSH IPv6 native n’est pas ajoutée aux gardes IPv4. Seules les formes
+IPv4 mappées complètes `::ffff:a.b.c.d` et `::ffff:hhhh:hhhh` sont converties :
+une adresse IPv6 contenant simplement `::ffff:` au milieu reste une IPv6.
+Une normalisation exécutée pendant une vérification/rollback ne signifie pas
+qu’aucune tâche antérieure n’a ajouté de route : lire le journal de l’opération.
 
 ## Vérification et limites
 

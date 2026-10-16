@@ -1,0 +1,26 @@
+---
+# Exactly the classic three rules; matching priorities alone misses selectors.
+- name: Require a nonempty list of three standard IPv4 routing rules
+  ansible.builtin.assert:
+    that:
+      - (bind_front_rule_observation | from_json if bind_front_rule_observation is string else bind_front_rule_observation) is sequence
+      - (bind_front_rule_observation | from_json if bind_front_rule_observation is string else bind_front_rule_observation) is not string
+      - (bind_front_rule_observation | from_json if bind_front_rule_observation is string else bind_front_rule_observation) is not mapping
+      - (bind_front_rule_observation | from_json if bind_front_rule_observation is string else bind_front_rule_observation) | length == 3
+    fail_msg: 'IPv4 policy observation must contain the three classic rules; no routing writes allowed.'
+
+- name: Refuse custom selectors or alternate IPv4 rule tables
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - (item.keys() | list | difference(['priority', 'src', 'table', 'protocol'])) | length == 0
+      - item.priority in [0, 32766, 32767]
+      - item.src == 'all'
+      - item.table == {0:'local', 32766:'main', 32767:'default'}[item.priority]
+    fail_msg: 'Only selector-free local/main/default IPv4 rules are supported.'
+  loop: '{{ bind_front_rule_observation | from_json if bind_front_rule_observation is string else bind_front_rule_observation }}'
+
+- name: Refuse duplicate or missing standard IPv4 rule priorities
+  ansible.builtin.assert:
+    that:
+      - ((bind_front_rule_observation | from_json if bind_front_rule_observation is string else bind_front_rule_observation) | map(attribute='priority') | list | sort) == [0, 32766, 32767]

@@ -49,10 +49,13 @@ jobs:
         run: bash -n roles/bind9/files/bind-configtool.sh roles/bind9/files/named-healthcheck.sh tests/run_integration_front_routes.sh tests/run_integration_loopback.sh tests/run_integration_logging.sh
       - name: Native route task workflows on legacy Ansible
         if: matrix.ansible-version == '2.9.27'
-        run: sudo --preserve-env=PATH "$(command -v python)" -m pytest -q tests/test_front_routes_ansible.py
+        run: sudo --preserve-env=PATH "$(command -v python)" -m pytest -q tests/test_front_routes_ansible.py tests/test_front_route_hardening_ansible.py
       - name: Optional DNSSEC lifecycle workflows on legacy Ansible
         if: matrix.ansible-version == '2.9.27'
         run: sudo --preserve-env=PATH "$(command -v python)" -m pytest -q tests/test_dnssec_workflows.py
+      - name: Backup and restore security in isolated mount namespaces
+        if: matrix.ansible-version == '2.9.27'
+        run: sudo --preserve-env=PATH "$(command -v python)" -m pytest -q tests/test_configtool_workflows.py
       - name: Preflight all delivered inventories on legacy Ansible
         if: matrix.ansible-version == '2.9.27'
         run: python tests/integration_preflight.py
@@ -60,10 +63,10 @@ jobs:
         if: matrix.ansible-version == '2.9.27'
         run: |
           python -m pip install 'coverage==7.6.1'
-          sudo --preserve-env=PATH "$(command -v python)" -m coverage run --include='*/roles/bind9/filter_plugins/dns_topology.py,*/roles/bind9/filter_plugins/soa_health.py,*/roles/bind9/filter_plugins/client_acl.py,*/roles/bind9/files/bind-private-dnssec.py' -m pytest -q tests/test_native_front_routes.py tests/test_dns_topology.py tests/test_soa_health.py tests/test_security_remediation.py tests/test_private_dnssec.py tests/test_global_review.py
+          sudo --preserve-env=PATH "$(command -v python)" -m coverage run --include='*/roles/bind9/filter_plugins/dns_topology.py,*/roles/bind9/filter_plugins/soa_health.py,*/roles/bind9/filter_plugins/client_acl.py,*/roles/bind9/files/bind-private-dnssec.py,*/roles/bind9/files/tsig-secret.py' -m pytest -q tests/test_native_front_routes.py tests/test_front_route_hardening.py tests/test_dns_topology.py tests/test_soa_health.py tests/test_security_remediation.py tests/test_private_dnssec.py tests/test_private_dnssec_hardening.py tests/test_global_review.py tests/test_tsig_hardening.py tests/test_tsig_provisioning.py
           python -m coverage report --fail-under=98
       - name: Analyze modified production Python code
         if: matrix.ansible-version == '2.9.27'
         run: |
           python -m pip install 'bandit==1.7.10'
-          python -m bandit -q roles/bind9/filter_plugins/dns_topology.py roles/bind9/filter_plugins/soa_health.py roles/bind9/files/reverse-serial.py roles/bind9/filter_plugins/client_acl.py roles/bind9/files/bind-private-dnssec.py
+          python -m bandit -q roles/bind9/filter_plugins/dns_topology.py roles/bind9/filter_plugins/soa_health.py roles/bind9/files/reverse-serial.py roles/bind9/filter_plugins/client_acl.py roles/bind9/files/bind-private-dnssec.py roles/bind9/files/tsig-secret.py

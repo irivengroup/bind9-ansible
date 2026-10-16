@@ -8,23 +8,15 @@
       - bind_tsig_secret_file != '/etc/named.conf'
     fail_msg: 'Invalid TSIG key name, algorithm or controller secret path.'
 
-- name: Create private controller TSIG directory
-  ansible.builtin.file:
-    path: "{{ bind_tsig_secret_file | dirname }}"
-    state: directory
-    mode: '0700'
-  delegate_to: localhost
-  become: false
-  no_log: true
-
 - name: Generate or verify persistent site TSIG secret atomically on controller
   ansible.builtin.command:
     argv:
       - "{{ ansible_playbook_python }}"
       - "{{ role_path }}/files/tsig-secret.py"
       - "{{ bind_tsig_secret_file }}"
+      - --create-parent
   register: bind_tsig_provision
-  changed_when: bind_tsig_provision.stdout == 'CREATED'
+  changed_when: (bind_tsig_provision.stdout | default('')) == 'CREATED'
   delegate_to: localhost
   become: false
   no_log: true

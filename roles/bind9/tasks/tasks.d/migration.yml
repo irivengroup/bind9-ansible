@@ -1,11 +1,12 @@
 ---
-- name: Create protected BIND backup directory
-  ansible.builtin.file:
-    path: "{{ bind_backup_root }}"
-    state: directory
-    owner: root
-    group: root
-    mode: '0700'
+- name: Require an absolute backup root before installing the backup utility
+  # The utility checks all ancestors and creates a new private root itself.
+  # Never chmod/chown an arbitrary existing directory from inventory first.
+  ansible.builtin.assert:
+    that:
+      - bind_backup_root is string
+      - bind_backup_root is match('^/')
+    fail_msg: 'bind_backup_root must be an absolute Linux path; the backup utility validates its isolation and permissions.'
 
 - name: Install BIND backup and restore utility
   ansible.builtin.copy:

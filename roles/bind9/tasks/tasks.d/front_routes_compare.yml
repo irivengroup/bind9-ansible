@@ -8,12 +8,13 @@
 - name: Normalize active destinations being inspected
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
   vars:
+    bind_front_ipv4_context: 'ip -j -4 route show table main during verification'
     bind_front_ipv4_values: >-
       {%- set ns = namespace(values=[]) -%}
       {%- for route in (bind_front_compare_runtime | from_json if bind_front_compare_runtime is string else bind_front_compare_runtime) -%}
         {%- set ns.values = ns.values + [route.get('dst','default') | replace('default','0.0.0.0/0')] -%}
       {%- endfor -%}
-      {{ ns.values }}
+      {{ ns.values | to_json }}
 
 - name: Compute exact routing preservation diagnostics
   ansible.builtin.set_fact:
@@ -51,7 +52,12 @@
               {%- set row.matches = row.matches + [route] -%}
             {%- endif -%}
           {%- endfor -%}
-          {%- if row.matches | length != 1 or (parts | length == 3 and row.matches[0].get('metric') != parts[2] | int) -%}
+          {%- if row.matches | length != 1 or row.matches[0].get('type','unicast') != 'unicast' or
+              (row.matches[0].keys() | list | difference(['dst','gateway','dev','metric','protocol','scope','flags','type','table'])) or
+              row.matches[0].get('flags',[]) != [] or row.matches[0].get('table','main') not in ['main',254,'254'] or
+              row.matches[0].get('protocol','boot') not in ['boot','static',3,4] or
+              row.matches[0].get('scope','global') not in ['global','universe',0] or
+              row.matches[0].get('metric',0) != ((parts[2] | int) if parts | length == 3 else 0) -%}
             {%- set ns.errors = ns.errors + ['Intended active route missing, duplicated or metric changed'] -%}
           {%- endif -%}
         {%- endfor -%}

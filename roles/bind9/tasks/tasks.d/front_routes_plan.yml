@@ -24,24 +24,27 @@
       - (item.table | string) == ({0:'local', 32766:'main', 32767:'default'}[item.priority])
   loop: '{{ bind_front_kernel.results[1].stdout | from_json }}'
 
-- name: Normalize the real SSH peer without a custom filter
-  ansible.builtin.set_fact:
-    bind_front_ssh_ipv4: >-
-      {%- set value = bind_front_ssh_client | lower -%}
-      {%- if '::ffff:' in value -%}
-        {%- set tail = value.split('::ffff:')[-1] -%}
-        {%- if '.' in tail -%}{{ tail }}
-        {%- elif tail is match('^[0-9a-f]{1,4}:[0-9a-f]{1,4}$') -%}
-          {%- set parts = tail.split(':') -%}
-          {%- set high = parts[0] | int(base=16) -%}{%- set low = parts[1] | int(base=16) -%}
-          {{ [high//256, high%256, low//256, low%256] | join('.') }}
-        {%- else -%}invalid-mapped-ssh-peer{%- endif -%}
-      {%- elif ':' in value -%}{{ '' }}
-      {%- else -%}{{ value }}{%- endif -%}
+- name: Validate complete standard IPv4 policy before planning writes
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_policy.yml'
+  vars:
+    bind_front_rule_observation: '{{ bind_front_kernel.results[1].stdout }}'
+
+- name: Normalize the actual SSH peer for FRONT protection
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ssh_normalize.yml'
+
+- name: Require an explicit IPv4 gateway on the active FRONT profile
+  ansible.builtin.assert:
+    that:
+      - bind_front_profile.results[0].stdout | trim is match('^(0|[1-9][0-9]{0,2})[.](0|[1-9][0-9]{0,2})[.](0|[1-9][0-9]{0,2})[.](0|[1-9][0-9]{0,2})$')
+    fail_msg: >-
+      FRONT profile {{ bind_front_uuid }} property ipv4.gateway is empty or is not an IPv4 address
+      (observed {{ bind_front_profile.results[0].stdout | trim | to_json }}).
+      No routes were changed. Inspect this profile only; no default/global gateway fallback is used.
 
 - name: Normalize client networks, gateway, runtime and protected ranges
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
   vars:
+    bind_front_ipv4_context: 'FRONT plan: clients, ipv4.gateway, inventory ADM/BACK, SSH peer and kernel destinations'
     bind_front_ipv4_values: >-
       {%- set ns = namespace(values=bind_cloud_clients + bind_front_interface.protected_networks +
           [bind_front_interface.network, bind_front_profile.results[0].stdout | trim, ansible_host, bind_back_ip,
@@ -51,7 +54,7 @@
       {%- for route in bind_front_kernel.results[0].stdout | from_json -%}
         {%- set ns.values = ns.values + [route.get('dst','default') | replace('default','0.0.0.0/0')] -%}
       {%- endfor -%}
-      {{ ns.values }}
+      {{ ns.values | to_json }}
 
 - name: Validate canonical external IPv4 networks
   ansible.builtin.assert:

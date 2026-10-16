@@ -31,7 +31,7 @@
 
 - name: Reject unsafe filesystem paths
   ansible.builtin.import_tasks: tasks.d/path_safety.yml
-  tags: [deploy, preflight]
+  tags: [deploy, preflight, configure, zones, records, services, backup]
 
 - name: Recover an explicitly requested interrupted FRONT operation
   ansible.builtin.import_tasks: tasks.d/front_routes_recover.yml

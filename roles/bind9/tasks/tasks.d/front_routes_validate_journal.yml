@@ -29,6 +29,13 @@
       - item is match('^[0-9.]+$')
   loop: '{{ bind_front_plan.protected_ips }}'
 
+- name: Refuse duplicated route ownership entries
+  ansible.builtin.assert:
+    that:
+      - bind_front_plan.profile_additions | unique | list | length == bind_front_plan.profile_additions | length
+      - bind_front_plan.runtime_additions | unique | list | length == bind_front_plan.runtime_additions | length
+    fail_msg: 'Duplicate owned additions make automated recovery ambiguous.'
+
 - name: Validate owned route syntax before splitting arguments
   ansible.builtin.assert:
     that:
@@ -43,6 +50,7 @@
 - name: Normalize journal addresses before ownership checks
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
   vars:
+    bind_front_ipv4_context: 'saved FRONT recovery journal addresses and snapshots'
     bind_front_ipv4_values: >-
       {%- set ns = namespace(values=bind_front_plan.protected_ips + [bind_front_plan.gateway,
           '0.0.0.0/8','127.0.0.0/8','169.254.0.0/16','224.0.0.0/4','240.0.0.0/4']) -%}
@@ -52,7 +60,7 @@
       {%- for route in bind_front_plan.profile_before + bind_front_plan.runtime_before -%}
         {%- set ns.values = ns.values + [route.get('network',route.get('dst','default')) | replace('default','0.0.0.0/0')] -%}
       {%- endfor -%}
-      {{ ns.values }}
+      {{ ns.values | to_json }}
 
 - name: Require canonical nondefault owned networks
   ansible.builtin.assert:
