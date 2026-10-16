@@ -1,6 +1,6 @@
 # Compatibilité et vérification — 15 octobre 2026
 
-Projet **Bind9-Ansible**, playbook `playbooks/bind9-deploy.yml`, cible RHEL 8, Ansible 2.9 et Python serveur 3.6.8. Source de cette correction : `Bind9-Ansible-consolide-dnssec-transport.zip`, SHA-256 `49723fe241d7d02c0a1115c902ed49f9780907e9745dcb1f2136cd1107167efd`. Le fichier original sur D: n’a pas été relu. Différences et preuves exactes : `DELIVERY.json` ; contenu : `SOURCE-MANIFEST.sha256`.
+Projet **Bind9-Ansible**, playbook `playbooks/bind9-deploy.yml`, cible RHEL 8, Ansible 2.9 et Python serveur 3.6.8. Source de cette livraison : `Bind9-Ansible-correction-controles-dns.zip`, SHA-256 `62fcc29eb0c4bd3a8688ab3c0909f888d8ee3556be5fbc80fd8d2e104a60f918`. Le fichier original sur D: n’a pas été relu. Différences et preuves exactes : `DELIVERY.json` ; contenu : `SOURCE-MANIFEST.sha256`.
 
 Le routage a été remplacé par des tâches Ansible natives sans dépendance ajoutée. Le filtre Python correspondant a été supprimé ; les scripts nécessaires au DNS restent présents. Structure BIND sans vues, ACL techniques, zones natives et tags sont conservés ; DNSSEC devient optionnel, défaut `false` ; les inventaires déclarent deux listes plates IPv4 ; `bind_allowed_clients` est leur fusion calculée, jamais une troisième entrée. Les corrections de cycle de vie de la livraison précédente restent couvertes. Voir [VALIDATION_ROUTES_NATIVES.md](VALIDATION_ROUTES_NATIVES.md) et [VERIFICATION_GLOBALE.md](VERIFICATION_GLOBALE.md).
 
@@ -104,3 +104,12 @@ Déployer un environnement à la fois, primaire avant secondaire, valider avant 
 ## Correction des contrôles de santé et de configuration
 
 Les preuves, les régressions et la procédure de vérification du serveur sont détaillées dans [CORRECTION_CONTROLES_DNS.md](CORRECTION_CONTROLES_DNS.md). Les essais BIND exécutent maintenant aussi les vraies tâches Ansible ; les chemins et ports sont adaptés uniquement au laboratoire. La couverture Python et le laboratoire NetworkManager cités ci-dessus proviennent de la livraison précédente, dont ces sources sont inchangées ; les workflows Ansible de routage et DNSSEC ont été rejoués pour cette correction.
+
+## Journalisation et ACL cliente
+
+L’autorisation du service `dns` dans firewalld est intégrée au déploiement
+et au tag `firewall`. Sa recette sur le pare-feu réel reste **NON EXÉCUTÉE** ;
+les raisons, prérequis, commandes, résultats attendus et risques figurent
+dans [FIREWALLD.md](FIREWALLD.md).
+
+La journalisation fichier, ses rotations, les tâches SELinux et le renommage de l’ACL BIND sont décrits dans [JOURNALISATION.md](JOURNALISATION.md). Les preuves courantes sont dans DELIVERY.json. Les scénarios Ansible de journalisation utilisent des doubles CLI SELinux ; l’accès réel sous named_t/enforcing reste NON EXÉCUTÉ, avec procédure et risques dans ce rapport. Les workflows de routes et de cycle de vie DNSSEC cités dans les rapports précédents ne sont pas rejoués pour ce changement ciblé ; leurs sources de production sont inchangées.

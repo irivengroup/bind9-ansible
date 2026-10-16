@@ -2,7 +2,7 @@
 
 > Déployer et exploiter une paire BIND 9 par site, avec résolution privée, réplication TSIG, loopback natif RHEL et routes de retour FRONT ajoutées sans reconfigurer le réseau existant.
 
-Le point d'entrée est `playbooks/bind9-deploy.yml`. Le rôle produit `/etc/named.conf` depuis `roles/bind9/templates/named.conf.j2`, selon la structure native EL8 : **sans vues**, zones officielles chargées, **DNSSEC optionnel, désactivé par défaut** et lancement natif de BIND, avec écoute DNS IPv4 uniquement et transport sortant IPv4/IPv6. Les entrées clientes sont **`bind_cloud_clients`** (FRONT) et **`bind_internal_clients`** (BACK). Leur fusion calculée **`bind_allowed_clients`** alimente l’ACL BIND **`allowed_clients`**. Une liste peut être vide, jamais les deux. Les routes retour ne concernent que les clients cloud. Seules les ACL consommées sont générées : FRONT local, deux pairs BACK et leur agrégat BACK, loopback et clients déclarés. NXDOMAIN hors périmètre est conservé. La gestion des routes reste **désactivée par défaut**. Quand DNSSEC est activé, les suffixes privés non signés explicitement déclarés utilisent une exception renouvelée via RNDC natif et systemd. En mode `false`, ces composants ne sont pas déployés. La qualification sur vos serveurs reste **NON TERMINÉE** ; voir [VALIDATION_RHEL8.md](docs/VALIDATION_RHEL8.md) et [DNSSEC.md](docs/DNSSEC.md).
+Le point d'entrée est `playbooks/bind9-deploy.yml`. Le rôle produit `/etc/named.conf` depuis `roles/bind9/templates/named.conf.j2`, selon la structure native EL8 : **sans vues**, zones officielles chargées, **DNSSEC optionnel, désactivé par défaut** et lancement natif de BIND, avec écoute DNS IPv4 uniquement et transport sortant IPv4/IPv6. Les entrées clientes sont **`bind_cloud_clients`** (FRONT) et **`bind_internal_clients`** (BACK). Leur fusion calculée **`bind_allowed_clients`** alimente l’ACL BIND **`user_defined_clients`**. Une liste peut être vide, jamais les deux. Les routes retour ne concernent que les clients cloud. Seules les ACL consommées sont générées : FRONT local, deux pairs BACK et leur agrégat BACK, loopback et clients déclarés. NXDOMAIN hors périmètre est conservé. La gestion des routes reste **désactivée par défaut**. Quand DNSSEC est activé, les suffixes privés non signés explicitement déclarés utilisent une exception renouvelée via RNDC natif et systemd. En mode `false`, ces composants ne sont pas déployés. La qualification sur vos serveurs reste **NON TERMINÉE** ; voir [VALIDATION_RHEL8.md](docs/VALIDATION_RHEL8.md) et [DNSSEC.md](docs/DNSSEC.md).
 
 ## 📊 Matrice de compatibilité
 
@@ -21,6 +21,12 @@ La matrice GitHub Actions contient Ansible 2.9.27, 2.13.13, 2.14.18 et 2.16.14 a
 Version minimale déclarée dans les métadonnées du rôle : **Ansible 2.9**. La version effectivement utilisée pour cette recette est **2.9.27**.
 
 ## 🔌 Prérequis & dépendances
+
+Firewalld doit être installé et actif sur les cibles, avec `firewall-cmd`
+et `ip` disponibles. Le rôle ajoute le service `dns` dans les zones FRONT
+et BACK, immédiatement et de façon permanente, sans rechargement global.
+Il ne démarre pas un pare-feu arrêté. Portée, contrôles et limites :
+[FIREWALLD.md](docs/FIREWALLD.md).
 
 - Contrôleur Linux avec Ansible, Python, accès SSH aux adresses ADM et droit `become: true` sur les cibles. Aucun rôle externe ni collection Galaxy supplémentaire n'est utilisé.
 - Cibles : Python utilisable par Ansible, DNF et ses bindings Python, systemd, SELinux, dépôts RHEL accessibles. Le rôle installe `bind`, `bind-utils` et `policycoreutils-python-utils`.
@@ -107,6 +113,7 @@ Cette livraison consolide les sources et utilise les mêmes sélecteurs locaux p
 |---|---|
 | `deploy` | Parcours complet : TSIG, contrôles, paquets, sauvegarde, routes si activées, configuration, zones, RNDC, DNSSEC et renouvellement si activés, SELinux, validation, service et santé ; rollback protégé |
 | `routes` | Routes de retour IPv4 FRONT uniquement si activées, avec contrôles et journal ; aucun déploiement DNS |
+| `firewall` | Ajout du service DNS manquant dans les zones des interfaces FRONT/BACK, runtime et permanent, sans reload |
 | `routes-recover` | Reprise explicite d'un journal de routes interrompu ; marqué `never`, exclu du parcours normal |
 | `preflight` | Validation d'entrées, chemins et disponibilité du primaire ; nécessite déjà les utilitaires et le secret TSIG fourni pour cette exécution |
 | `install` | Installation des trois paquets RHEL |
@@ -223,6 +230,15 @@ Le rollback est local à l'hôte en cours, pas une transaction distribuée sur l
 
 ## 🧪 Tests, exploitation et limites de validation
 
+Les journaux BIND sont activés dans `/var/log/named/default.log`,
+`security.log` et `xfer.log`, avec rotation native par taille. Le répertoire
+est `named:named 0750` ; les trois fichiers sont préparés en `0640` sans
+tronquer l’historique. La règle SELinux persistante `named_log_t` couvre
+également les rotations. Les requêtes restent désactivées avec `querylog no`
+et un canal `null`. Les canaux usuels vont maintenant dans ces fichiers ;
+`journalctl -u named` reste utile pour l’unité et le démarrage.
+Rétention, limites et parties impactées : [JOURNALISATION.md](docs/JOURNALISATION.md).
+
 ```bash
 python -m pytest -q tests
 python tests/integration_preflight.py
@@ -254,7 +270,7 @@ Les rapports fournissent pour chaque contrôle manquant la raison, les prérequi
 
 ## 📦 Livraison et traçabilité
 
-Cette correction part de `Bind9-Ansible-consolide-dnssec-transport.zip`, conservée intacte. Le fichier original sur D: n'a pas été relu. `DELIVERY.json` décrit provenance et différences ; `SOURCE-MANIFEST.sha256` décrit les fichiers ; le ZIP possède une empreinte SHA-256 externe. Caches, journaux, runtimes et secrets générés sont exclus. Le helper et les unités DNSSEC ne sont déployés que pour `true`/`auto` ; les transitions et leur rollback sont intégrés au parcours deploy ; le filtre Python de routage est supprimé également du contrôleur. Les scripts Python nécessaires au DNS restent distincts de cette évolution. Les tâches de migration et les fonctions optionnelles utilisées sont conservées. Les déclarations d’ACL sans consommateur sont retirées ; le contrat client distingue cloud et internes, avec fusion calculée pour DNS et routage exclusivement cloud.
+Cette livraison part de `Bind9-Ansible-correction-controles-dns.zip`, conservée intacte. Le fichier original sur D: n'a pas été relu. `DELIVERY.json` décrit provenance et différences ; `SOURCE-MANIFEST.sha256` décrit les fichiers ; le ZIP possède une empreinte SHA-256 externe. Caches, journaux, runtimes et secrets générés sont exclus. Le helper et les unités DNSSEC ne sont déployés que pour `true`/`auto` ; les transitions et leur rollback sont intégrés au parcours deploy ; le filtre Python de routage est supprimé également du contrôleur. Les scripts Python nécessaires au DNS restent distincts de cette évolution. Les tâches de migration et les fonctions optionnelles utilisées sont conservées. Les déclarations d’ACL sans consommateur sont retirées ; le contrat client distingue cloud et internes, avec fusion calculée pour DNS et routage exclusivement cloud.
 
 Les tests sont fournis avec les sources. Le nom public du projet reste **Bind9-Ansible** et le playbook reste **bind9-deploy.yml**. Les métadonnées du rôle déclarent `license: proprietary` ; aucun texte de licence détaillant les droits n'est fourni dans cette archive.
 

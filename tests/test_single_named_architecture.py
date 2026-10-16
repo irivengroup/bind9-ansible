@@ -48,7 +48,7 @@ def test_named_conf_render_with_one_client_acl():
         'bind_forward_zones': [{'domain': 'corp.example.test', 'forwarders': [{'address': '10.20.0.53'}]}],
     }
     out = Environment(undefined=StrictUndefined).from_string(TEMPLATE.read_text()).render(**context)
-    assert 'acl "allowed_clients"' in out
+    assert 'acl "user_defined_clients"' in out
     assert '192.0.2.0/24;' in out and '10.10.0.0/24;' in out
     assert 'view "' not in out and 'in-view' not in out
     assert 'zone "prod.example.test" IN' in out

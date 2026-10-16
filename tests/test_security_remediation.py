@@ -81,10 +81,11 @@ def test_restorecon_succeeds_with_canonical_layout_and_no_legacy_directory(tmp_p
     (tmp_path / 'etc').mkdir()
     (tmp_path / 'etc/named.conf').write_text('')
     (tmp_path / 'var/named').mkdir(parents=True)
+    (tmp_path / 'var/log/named').mkdir(parents=True)
     double = tmp_path / 'restorecon-double.sh'
     double.write_text('for path do\n  [ "$path" = "-RF" ] && continue\n'
                       '  [ -e "$path" ] || exit 1\ndone\n')
     paths = [str(tmp_path / path.lstrip('/')) if path.startswith('/') else path for path in argv[1:]]
     result = subprocess.run(['sh', str(double)] + paths, capture_output=True, text=True)
     assert result.returncode == 0, 'restorecon must not target absent legacy files'
-    assert set(argv[2:]) == {'/etc/named.conf', '/var/named'}
+    assert set(argv[2:]) == {'/etc/named.conf', '/var/named', '/var/log/named'}

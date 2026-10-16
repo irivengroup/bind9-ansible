@@ -8,6 +8,13 @@ sans modifier ce fichier ni ses fichiers de zones. Voir [LOOPBACK.md](LOOPBACK.m
 
 ## Sauvegarde et restauration
 
+La journalisation fichier et les labels SELinux persistants de
+`/var/log/named` sont décrits dans [JOURNALISATION.md](JOURNALISATION.md).
+Les journaux et la base SELinux ne sont pas inclus dans l’archive BIND ;
+le rollback DNS conserve ces traces et la règle de contexte.
+Les autorisations DNS firewalld sont également conservées :
+[FIREWALLD.md](FIREWALLD.md) décrit les zones, les périmètres et la reprise.
+
 Une sauvegarde des fichiers BIND, **forcée à chaque déploiement**, est créée **avant** toute modification de la configuration ou des zones, avec SHA-256 et rétention glissante de 30 jours (sans limite sur le nombre d’archives). En cas d'échec du bloc protégé, Ansible suspend les unités de renouvellement privées présentes, arrête named avant extraction, restaure l'archive exacte puis redémarre named. Le timer est relancé seulement s'il était actif avant cette restauration. Le rescue restaure aussi les six fichiers runtime capturés en mémoire avant la transaction, ainsi que l’état précédent du timer. Le backup ne couvre pas l'ensemble du système ; voir les limites de retour de version ci-dessous.
 
 ```bash

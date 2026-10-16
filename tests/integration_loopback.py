@@ -86,6 +86,7 @@ class LoopbackIntegration:
         (data / 'slaves').mkdir()
         (data / 'data').mkdir()
         (data / 'dynamic').mkdir()
+        (folder / 'logs').mkdir(mode=0o750)
         for name in ('named.localhost', 'named.loopback', 'named.empty'):
             shutil.copyfile(str(self.native_dir / name), str(data / name))
         native = folder / 'named.rfc1912.zones'
@@ -104,6 +105,7 @@ class LoopbackIntegration:
                             base64.b64encode(secrets.token_bytes(32)).decode('ascii') + '"; };\n')
         rndc_key.chmod(0o600)
         config = config.replace('/etc/rndc.key', str(rndc_key))
+        config = config.replace('/var/log/named', str(folder / 'logs'))
         path = folder / 'named.conf'
         path.write_text(config)
         result = subprocess.run([str(self.bin_dir / 'named-checkconf'), '-z', str(path)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)

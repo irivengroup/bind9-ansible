@@ -12,11 +12,58 @@
         *) PATH="${PATH:+${PATH}:}/usr/local/sbin"; export PATH ;;
       esac
 
+- name: Read persistent SELinux file context rules for BIND logging
+  ansible.builtin.command:
+    argv: [semanage, fcontext, -l]
+  environment:
+    LC_ALL: C
+  register: bind_named_log_contexts
+  changed_when: false
+  when: ansible_selinux is defined and ansible_selinux.status == 'enabled'
+
+- name: Persist the SELinux log context for the directory and all rotated files
+  ansible.builtin.command:
+    argv:
+      - semanage
+      - fcontext
+      - '{{ "-m" if bind_named_log_rule_lines | length > 0 else "-a" }}'
+      - -f
+      - a
+      - -t
+      - named_log_t
+      - /var/log/named(/.*)?
+  environment:
+    LC_ALL: C
+  vars:
+    # Match the exact all-files rule; broader native rules do not label the directory.
+    bind_named_log_rule_lines: >-
+      {{ bind_named_log_contexts.stdout_lines
+         | select('match', '^/var/log/named[(]/[.][*][)][?][ \t]+all files[ \t]+') | list }}
+  when:
+    - ansible_selinux is defined and ansible_selinux.status == 'enabled'
+    - bind_named_log_rule_lines | select('search', ':named_log_t:') | list | length == 0
+
 - name: Restore SELinux contexts
   ansible.builtin.command:
     # The canonical layout does not create the obsolete /etc/named directory.
-    argv: [restorecon, -RF, /etc/named.conf, /var/named]
+    argv: [restorecon, -RF, /etc/named.conf, /var/named, /var/log/named]
   changed_when: false
+
+- name: Inspect SELinux labels on the BIND log directory and files
+  ansible.builtin.command:
+    argv: [ls, -Zd, /var/log/named, /var/log/named/default.log, /var/log/named/security.log, /var/log/named/xfer.log]
+  register: bind_named_log_labels
+  changed_when: false
+  when: ansible_selinux is defined and ansible_selinux.status == 'enabled'
+
+- name: Require named_log_t on all managed log paths
+  ansible.builtin.assert:
+    that:
+      - bind_named_log_labels.stdout_lines | length == 4
+      - bind_named_log_labels.stdout_lines | select('search', ':named_log_t:') | list | length == 4
+    fail_msg: 'BIND log directory and files must have the persistent SELinux type named_log_t.'
+  when: ansible_selinux is defined and ansible_selinux.status == 'enabled'
+
 - name: Verify SELinux file labels are not unlabelled
   ansible.builtin.command:
     argv: [ls, -Z, /etc/named.conf]

@@ -33,7 +33,7 @@ contradictoire par extra-vars échoue explicitement. Les deux entrées sont
 typées et validées avant concaténation ; IPv6, `/0`, CIDR non canoniques,
 structures de groupes et caractères d’injection sont refusés.
 
-La fusion alimente uniquement l’ACL BIND commune `allowed_clients` et ses
+La fusion alimente uniquement l’ACL BIND commune `user_defined_clients` et ses
 contrôles de requêtes/récursion/cache. Le plan de routes lit exclusivement
 `bind_cloud_clients` : IP seule normalisée en `/32`, déduplication/agrégation
 des routes, profil et passerelle FRONT existants, gardes BACK/ADM/SSH et

@@ -1,6 +1,6 @@
 # Exemple : deux zones forwardées et liste cliente unique
 
-Rendu du template livré pour le primaire FRONT `192.0.2.11`, BACK `10.20.1.11` ; pair secondaire FRONT `192.0.2.12`, BACK `10.20.1.12`. La liste `bind_cloud_clients` contient `198.51.100.0/24` et `bind_internal_clients` vaut `[]`. La fusion calculée `bind_allowed_clients` alimente l’ACL cliente commune `allowed_clients`. La récursion BACK n’est donc pas activée dans cet exemple cloud seul.
+Rendu du template livré pour le primaire FRONT `192.0.2.11`, BACK `10.20.1.11` ; pair secondaire FRONT `192.0.2.12`, BACK `10.20.1.12`. La liste `bind_cloud_clients` contient `198.51.100.0/24` et `bind_internal_clients` vaut `[]`. La fusion calculée `bind_allowed_clients` alimente l’ACL cliente commune `user_defined_clients`. La récursion BACK n’est donc pas activée dans cet exemple cloud seul.
 
 - [variables.yml](variables.yml) déclare deux zones privées non signées, avec `dnssec_validate: false` explicite. Les deux listes d’entrée acceptent IP IPv4 et CIDR ; l’une peut être vide, jamais les deux. La fusion n’est pas une variable à déclarer.
 - [named.conf](named.conf) est le rendu primaire ; [named-secondary.conf](named-secondary.conf) est le rendu secondaire. Chacun utilise ses propres ACL FRONT/BACK pour l'écoute et `allow-query-on`. Ils sont sans vues, DNSSEC désactivé et avec écoute IPv4 uniquement, sans limiter les échanges sortants IPv4/IPv6 ; les fichiers natifs sont inclus. La clé TSIG affichée est **publique, fictive et interdite en production** ; le rôle génère sa véritable clé.

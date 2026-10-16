@@ -8,6 +8,10 @@
     - /var/named
     - /var/named/zones
     - /var/named/slaves
+    - /var/log/named
+    - /var/log/named/default.log
+    - /var/log/named/security.log
+    - /var/log/named/xfer.log
   register: bind_managed_paths
   changed_when: false
 

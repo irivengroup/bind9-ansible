@@ -11,4 +11,20 @@
     - {path: /var/named/slaves, owner: named, mode: '0750'}
     - {path: /var/named/data, owner: named, mode: '0750'}
     - {path: /var/named/dynamic, owner: named, mode: '0750'}
+    - {path: /var/log/named, owner: named, mode: '0750'}
   when: item.path != '/var/named/dynamic' or bind_dnssec_active == 'auto' or (bind_dnssec_active | bool)
+
+- name: Prepare private BIND log files without truncating existing records
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: touch
+    follow: false
+    owner: named
+    group: named
+    mode: '0640'
+    access_time: preserve
+    modification_time: preserve
+  loop:
+    - /var/log/named/default.log
+    - /var/log/named/security.log
+    - /var/log/named/xfer.log

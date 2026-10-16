@@ -36,7 +36,7 @@ acl "bind_servers_back_ip" {
     bind_secondary_back_ip;
 };
 {% if client_networks %}
-acl "allowed_clients" {
+acl "user_defined_clients" {
 {% for cidr in client_networks %}    {{ cidr }};
 {% endfor %}};
 {% endif %}
@@ -47,7 +47,7 @@ acl "dns_query_clients" {
     local_loopback;
     bind_servers_back_ip;
 {% if client_networks %}
-    allowed_clients;
+    user_defined_clients;
 {% endif %}
 };
 acl "dns_recursive_clients" {
@@ -56,7 +56,7 @@ acl "dns_recursive_clients" {
     !key "{{ bind_tsig_key_name }}";
     local_loopback;
 {% if client_networks %}
-    allowed_clients;
+    user_defined_clients;
 {% endif %}
 };
 
@@ -66,7 +66,7 @@ controls {
 
 options {
     directory "/var/named";
-    // Paths and logging follow the distribution's native EL8 named.conf.
+    // Diagnostic paths follow the distribution's native EL8 named.conf.
     dump-file "/var/named/data/cache_dump.db";
     statistics-file "/var/named/data/named_stats.txt";
     memstatistics-file "/var/named/data/named_mem_stats.txt";
@@ -117,15 +117,45 @@ options {
 {% endif %}
     empty-zones-enable yes;
     minimal-responses yes;
+    // A queries category exists below; explicitly avoid per-query processing.
+    querylog no;
     version "not disclosed";
     include "/etc/crypto-policies/back-ends/bind.config";
 };
 
 logging {
-    channel default_debug {
-        file "data/named.run";
-        severity dynamic;
+    // Rotation is size-based: versions counts archives, excluding the live file.
+    channel default_log {
+        file "/var/log/named/default.log" versions 5 size 10m;
+        severity info;
+        print-time yes;
+        print-category yes;
+        print-severity yes;
     };
+    channel security_log {
+        file "/var/log/named/security.log" versions 5 size 10m;
+        severity info;
+        print-time yes;
+        print-category yes;
+        print-severity yes;
+    };
+    channel xfer_log {
+        file "/var/log/named/xfer.log" versions 3 size 5m;
+        severity info;
+        print-time yes;
+    };
+    channel queries_null {
+        null;
+    };
+    category default  { default_log; };
+    category general  { default_log; };
+    category config   { default_log; };
+    category security { security_log; };
+    // DNSSEC validation failures have their own BIND category.
+    category dnssec   { security_log; };
+    category xfer-in  { xfer_log; };
+    category xfer-out { xfer_log; };
+    category queries  { queries_null; };
 };
 
 {% if dnssec_mode == 'yes' %}

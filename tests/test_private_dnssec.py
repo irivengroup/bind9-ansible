@@ -186,7 +186,7 @@ def test_single_client_acl_preserves_dnssec_and_front_only_recursion(clients):
                                        {'domain': 'signed.test', 'dnssec_validate': True,
                                         'forwarders': [{'address': '10.12.0.53'}]}])
     rendered = Environment(undefined=StrictUndefined).from_string((ROLE / 'templates/named.conf.j2').read_text()).render(**context)
-    assert 'acl "allowed_clients"' in rendered
+    assert 'acl "user_defined_clients"' in rendered
     assert 'dnssec-validation auto;' in rendered and 'listen-on-v6 { none; };' in rendered
     assert '// Bind9-Ansible DNSSEC-PRIVATE corp.test' in rendered
     assert '// Bind9-Ansible DNSSEC-PRIVATE signed.test' not in rendered

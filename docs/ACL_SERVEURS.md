@@ -10,7 +10,7 @@ Les ACL sont définies une seule fois dans `roles/bind9/templates/named.conf.j2`
 | `bind_primary_front_ip` | FRONT local, déclaré seulement sur le primaire |
 | `bind_secondary_front_ip` | FRONT local, déclaré seulement sur le secondaire |
 | `bind_servers_back_ip` | Les deux ACL individuelles BACK |
-| `allowed_clients` | Fusion calculée `bind_allowed_clients` = cloud + internes sans doublons ; non vide obligatoire |
+| `user_defined_clients` | Fusion calculée `bind_allowed_clients` = cloud + internes sans doublons ; non vide obligatoire |
 | `dns_query_clients` | Loopback, pairs BACK et liste cliente unique |
 | `dns_recursive_clients` | Exclut d'abord les pairs BACK et la clé TSIG ; autorise ensuite loopback et liste cliente unique |
 
@@ -30,7 +30,7 @@ Les ACL sont définies une seule fois dans `roles/bind9/templates/named.conf.j2`
 
 `transfer-source`, `notify-source`, `masters`, `also-notify` et `forwarders` attendent des adresses de transport ; leurs IP explicites sont conservées. Les remplacer par des noms d'ACL serait incorrect. Voir la [référence BIND](https://bind9.readthedocs.io/en/v9.18.24/reference.html).
 
-`controls inet` attend aussi une IP littérale : 127.0.0.1 y est nécessaire ; sa liste `allow` utilise bien `local_loopback`. Le drop-in commun conserve le lancement natif IPv4/IPv6 ; `listen-on-v6 { none; };` ferme l’écoute DNS IPv6. RNDC reste une fonction administrative indépendante et IPv4 locale. Les entrées `bind_cloud_clients` et `bind_internal_clients` sont fusionnées dans le fait `bind_allowed_clients`, rendu dans `allowed_clients`.
+`controls inet` attend aussi une IP littérale : 127.0.0.1 y est nécessaire ; sa liste `allow` utilise bien `local_loopback`. Le drop-in commun conserve le lancement natif IPv4/IPv6 ; `listen-on-v6 { none; };` ferme l’écoute DNS IPv6. RNDC reste une fonction administrative indépendante et IPv4 locale. Les entrées `bind_cloud_clients` et `bind_internal_clients` sont fusionnées dans le fait `bind_allowed_clients`, rendu dans `user_defined_clients`.
 
 `allow-query-on` sélectionne des destinations locales : le primaire utilise `bind_primary_front_ip` / `bind_primary_back_ip`, le secondaire `bind_secondary_front_ip` / `bind_secondary_back_ip`. Les sélecteurs Jinja locaux sont communs à cette directive et à `listen-on`. Les écoutes FRONT et BACK restent présentes si l’une des listes est vide, notamment pour l’autorité et les pairs. La récursion conserve ses propres restrictions selon les listes déclarées. Chaque rendu ne déclare que l'ACL FRONT locale ; l'agrégat FRONT inutilisé est retiré. L'agrégat BACK reste nécessaire aux permissions de requête et au refus de récursion des pairs. Aucun nom d'ACL n'est conservé sans consommateur dans les rendus testés.
 

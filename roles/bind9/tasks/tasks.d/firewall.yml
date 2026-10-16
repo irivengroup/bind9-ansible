@@ -1,0 +1,140 @@
+---
+# Only add the native DNS service; never reload or reassign a zone/interface.
+- name: Require an already running firewalld daemon
+  ansible.builtin.command:
+    argv: [firewall-cmd, --state]
+  register: bind_dns_firewall_state
+  changed_when: false
+  check_mode: false
+  failed_when: bind_dns_firewall_state.rc != 0 or bind_dns_firewall_state.stdout | trim != 'running'
+
+- name: Read local IPv4 addresses for DNS listener interfaces
+  ansible.builtin.command:
+    argv: [ip, -j, -4, address, show]
+  register: bind_dns_firewall_addresses
+  changed_when: false
+  check_mode: false
+
+- name: Require nonempty IPv4 interface observations
+  ansible.builtin.assert:
+    that:
+      - bind_dns_firewall_addresses.stdout | trim | length > 0
+      - (bind_dns_firewall_addresses.stdout | from_json) is sequence
+      - (bind_dns_firewall_addresses.stdout | from_json) is not mapping
+      - (bind_dns_firewall_addresses.stdout | from_json) is not string
+    fail_msg: 'Cannot discover DNS firewalld interfaces: ip -j -4 address show must return an address list.'
+
+- name: Reset discovered DNS firewall interfaces and targets
+  ansible.builtin.set_fact:
+    bind_dns_firewall_listener_addresses: []
+    bind_dns_firewall_targets: {}
+
+- name: Associate configured FRONT and BACK addresses with existing interfaces
+  ansible.builtin.set_fact:
+    bind_dns_firewall_listener_addresses: >-
+      {{ bind_dns_firewall_listener_addresses + [{'address': item.1.local, 'device': item.0.ifname}] }}
+  loop: '{{ bind_dns_firewall_addresses.stdout | from_json | subelements("addr_info", skip_missing=True) }}'
+  loop_control:
+    label: '{{ item.0.ifname }} {{ item.1.local }}'
+  when:
+    - item.1.local in [bind_front_ip, bind_back_ip]
+
+- name: Require one interface for each configured DNS listener address
+  ansible.builtin.assert:
+    that:
+      - bind_dns_firewall_listener_addresses | selectattr('address', 'equalto', bind_front_ip) | list | length == 1
+      - bind_dns_firewall_listener_addresses | selectattr('address', 'equalto', bind_back_ip) | list | length == 1
+    fail_msg: 'FRONT and BACK must each occur exactly once on local interfaces before configuring firewalld.'
+
+- name: Read the existing default firewalld zone
+  ansible.builtin.command:
+    argv: [firewall-cmd, --get-default-zone]
+  register: bind_dns_firewall_default_zone
+  changed_when: false
+  check_mode: false
+
+- name: Require a valid existing default zone name
+  ansible.builtin.assert:
+    that:
+      - bind_dns_firewall_default_zone.stdout | trim is match('^[a-zA-Z0-9_-]+$')
+    fail_msg: 'firewalld must report a nonempty existing default zone.'
+
+- name: Discover existing runtime and permanent DNS interface zones
+  ansible.builtin.command:
+    argv: >-
+      {{ ['firewall-cmd', '--get-zone-of-interface=' ~ item.0] +
+         (['--permanent'] if item.1 == 'permanent' else []) }}
+  loop: '{{ bind_dns_firewall_listener_addresses | map(attribute="device") | unique | product(["runtime", "permanent"]) | list }}'
+  loop_control:
+    label: '{{ item.0 }} {{ item.1 }}'
+  register: bind_dns_firewall_interface_zones
+  changed_when: false
+  check_mode: false
+  # firewalld returns rc=2 and "no zone" for an unbound interface.
+  failed_when: >-
+    bind_dns_firewall_interface_zones.rc != 0 and not
+    (bind_dns_firewall_interface_zones.rc == 2 and
+     (bind_dns_firewall_interface_zones.stdout | trim == 'no zone' or
+      bind_dns_firewall_interface_zones.stderr | trim == 'no zone'))
+
+- name: Validate zone discovery before adding any service
+  ansible.builtin.assert:
+    that:
+      - >-
+        (item.rc == 0 and item.stdout | trim is match('^[a-zA-Z0-9_-]+$') and item.stdout | trim != 'no zone') or
+        (item.rc == 2 and (item.stdout | trim == 'no zone' or item.stderr | trim == 'no zone'))
+    fail_msg: 'Invalid firewalld interface-zone output; DNS service changes were not started.'
+  loop: '{{ bind_dns_firewall_interface_zones.results }}'
+  loop_control:
+    label: '{{ item.item.0 }} {{ item.item.1 }}'
+
+- name: Deduplicate DNS zones while preserving runtime and permanent scope
+  ansible.builtin.set_fact:
+    bind_dns_firewall_targets: >-
+      {{ bind_dns_firewall_targets | combine({(item.item.1 ~ ':' ~ zone_name):
+         {'zone': zone_name, 'scope': item.item.1}}) }}
+  vars:
+    # An unbound interface uses the existing default zone; no binding is changed.
+    zone_name: '{{ item.stdout | trim if item.rc == 0 else bind_dns_firewall_default_zone.stdout | trim }}'
+  loop: '{{ bind_dns_firewall_interface_zones.results }}'
+  loop_control:
+    label: '{{ item.item.0 }} {{ item.item.1 }}'
+
+- name: Query DNS service authorization separately in both firewalld scopes
+  ansible.builtin.command:
+    argv: >-
+      {{ ['firewall-cmd', '--zone=' ~ item.value.zone, '--query-service=dns'] +
+         (['--permanent'] if item.value.scope == 'permanent' else []) }}
+  loop: '{{ bind_dns_firewall_targets | dict2items }}'
+  loop_control:
+    label: '{{ item.value.zone }} {{ item.value.scope }}'
+  register: bind_dns_firewall_queries
+  changed_when: false
+  check_mode: false
+  failed_when: >-
+    bind_dns_firewall_queries.rc not in [0, 1] or
+    (bind_dns_firewall_queries.rc == 0 and bind_dns_firewall_queries.stdout | trim != 'yes') or
+    (bind_dns_firewall_queries.rc == 1 and bind_dns_firewall_queries.stdout | trim != 'no')
+
+- name: Add only missing runtime or permanent DNS service authorizations
+  ansible.builtin.command:
+    argv: >-
+      {{ ['firewall-cmd', '--zone=' ~ item.item.value.zone, '--add-service=dns'] +
+         (['--permanent'] if item.item.value.scope == 'permanent' else []) }}
+  loop: '{{ bind_dns_firewall_queries.results }}'
+  loop_control:
+    label: '{{ item.item.value.zone }} {{ item.item.value.scope }}'
+  when: item.rc == 1
+
+- name: Verify DNS service is authorized at runtime and permanently
+  ansible.builtin.command:
+    argv: >-
+      {{ ['firewall-cmd', '--zone=' ~ item.value.zone, '--query-service=dns'] +
+         (['--permanent'] if item.value.scope == 'permanent' else []) }}
+  loop: '{{ bind_dns_firewall_targets | dict2items }}'
+  loop_control:
+    label: '{{ item.value.zone }} {{ item.value.scope }}'
+  register: bind_dns_firewall_verified
+  changed_when: false
+  failed_when: bind_dns_firewall_verified.rc != 0 or bind_dns_firewall_verified.stdout | trim != 'yes'
+  when: not ansible_check_mode

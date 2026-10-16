@@ -1,25 +1,44 @@
 {
   "project": "Bind9-Ansible",
-  "release": "2026.10.15-correction-controles-dns",
-  "source_archive": "Bind9-Ansible-consolide-dnssec-transport.zip",
-  "source_sha256": "49723fe241d7d02c0a1115c902ed49f9780907e9745dcb1f2136cd1107167efd",
+  "release": "2026.10.16-journalisation-selinux-firewalld-acl",
+  "source_archive": "Bind9-Ansible-correction-controles-dns.zip",
+  "source_sha256": "62fcc29eb0c4bd3a8688ab3c0909f888d8ee3556be5fbc80fd8d2e104a60f918",
   "playbook": "playbooks/bind9-deploy.yml",
   "changes": {
     "modified": [
+      ".github/workflows/ci.yml",
       "README.md",
-      "docs/LOOPBACK.md",
+      "docs/ACL_SERVEURS.md",
+      "docs/CLIENTS_UNIQUES.md",
+      "docs/OPERATIONS.md",
       "docs/VALIDATION_RHEL8.md",
-      "roles/bind9/tasks/tasks.d/health.yml",
-      "roles/bind9/tasks/tasks.d/primary_readiness.yml",
-      "roles/bind9/tasks/tasks.d/verify.yml",
-      "tests/integration_loopback.py"
+      "examples/deux-zones-forwardees/README.md",
+      "examples/deux-zones-forwardees/named-secondary.conf",
+      "examples/deux-zones-forwardees/named.conf",
+      "roles/bind9/tasks/main.yml",
+      "roles/bind9/tasks/tasks.d/directories.yml",
+      "roles/bind9/tasks/tasks.d/path_safety.yml",
+      "roles/bind9/tasks/tasks.d/security.yml",
+      "roles/bind9/templates/named.conf.j2",
+      "tests/integration_loopback.py",
+      "tests/test_private_dnssec.py",
+      "tests/test_security_remediation.py",
+      "tests/test_single_named_architecture.py"
     ],
     "added": [
-      "docs/CORRECTION_CONTROLES_DNS.md",
-      "tests/test_loopback_health_conditions.py"
+      "docs/FIREWALLD.md",
+      "docs/JOURNALISATION.md",
+      "roles/bind9/tasks/tasks.d/firewall.yml",
+      "tests/integration_logging.py",
+      "tests/run_integration_logging.sh",
+      "tests/test_firewall.py",
+      "tests/test_firewall_ansible.py",
+      "tests/test_logging.py",
+      "tests/test_logging_ansible.py",
+      "tests/test_user_defined_client_acl.py"
     ],
     "removed": [],
-    "unchanged_files": 128,
+    "unchanged_files": 119,
     "regenerated_metadata": [
       "DELIVERY.json",
       "SOURCE-MANIFEST.sha256"
@@ -28,54 +47,111 @@
   "checks": {
     "ansible": "2.9.27",
     "controller_python": "3.8.20",
-    "jinja_engines": {
-      "jinja_3.0.3": {
+    "engines": {
+      "2.10.3": {
         "status": "EXÉCUTÉ",
-        "controller_tests": 447,
+        "controller_tests": 489,
+        "syntax_inventories": 3,
         "preflight": {
           "inventories": 3,
           "hosts": 12,
           "real_preflight_assertions": true,
           "target_facts_simulated": true
-        },
-        "regressions": {
-          "jinja": "3.0.3",
-          "actual_user_environment_cause_confirmed": false,
-          "previous_loopback_accepted": 0,
-          "previous_primary_accepted": false,
-          "previous_unsafe_transfer_rejected": false,
-          "current_loopback_accepted": 4,
-          "current_primary_accepted": true,
-          "current_unsafe_transfer_rejected": true
-        },
-        "syntax_inventories": 3
+        }
       },
-      "jinja_2.10.3": {
+      "3.0.3": {
         "status": "EXÉCUTÉ",
-        "controller_tests": 447,
+        "controller_tests": 489,
+        "syntax_inventories": 3,
         "preflight": {
           "inventories": 3,
           "hosts": 12,
           "real_preflight_assertions": true,
           "target_facts_simulated": true
-        },
-        "regressions": {
-          "jinja": "2.10.3",
-          "actual_user_environment_cause_confirmed": false,
-          "previous_loopback_accepted": 0,
-          "previous_primary_accepted": false,
-          "previous_unsafe_transfer_rejected": false,
-          "current_loopback_accepted": 4,
-          "current_primary_accepted": true,
-          "current_unsafe_transfer_rejected": true
-        },
-        "syntax_inventories": 3
+        }
       }
     },
-    "distinct_tests_jinja210": 469,
-    "ansible_route_workflows": 14,
-    "ansible_dnssec_workflows": 8,
-    "workflow_scope": "Real runner and file operations; CLI/systemd contract doubles",
+    "distinct_tests_jinja210": 509,
+    "selinux_file_workflow_tests": 12,
+    "workflow_cases": [
+      {
+        "scenario": "missing",
+        "passed": 2,
+        "jinja_typing_modes": [
+          false,
+          true
+        ]
+      },
+      {
+        "scenario": "wrong",
+        "passed": 2,
+        "jinja_typing_modes": [
+          false,
+          true
+        ]
+      },
+      {
+        "scenario": "correct",
+        "passed": 2,
+        "jinja_typing_modes": [
+          false,
+          true
+        ]
+      },
+      {
+        "scenario": "disabled",
+        "passed": 2,
+        "jinja_typing_modes": [
+          false,
+          true
+        ]
+      },
+      {
+        "scenario": "bad_labels",
+        "passed": 2,
+        "jinja_typing_modes": [
+          false,
+          true
+        ]
+      },
+      {
+        "scenario": "mutation_failure",
+        "passed": 2,
+        "jinja_typing_modes": [
+          false,
+          true
+        ]
+      }
+    ],
+    "firewall_workflow_tests": 8,
+    "firewall_workflow_cases": [
+      {
+        "scenario": "split",
+        "passed": 2
+      },
+      {
+        "scenario": "shared_default",
+        "passed": 2
+      },
+      {
+        "scenario": "empty_addresses",
+        "passed": 1
+      },
+      {
+        "scenario": "inactive",
+        "passed": 1
+      },
+      {
+        "scenario": "missing_back",
+        "passed": 1
+      },
+      {
+        "scenario": "query_error",
+        "passed": 1
+      }
+    ],
+    "firewall_scope": "Real Ansible runner; firewalld/ip CLI contract doubles, no host firewall changes",
+    "workflow_scope": "Real Ansible file operations; semanage/restorecon/ls contract doubles",
     "dns": {
       "el8-dns": {
         "configurations_loaded": 109,
@@ -100,26 +176,123 @@
         "direct_wildcard_transfer_rejected": true
       }
     },
+    "real_logging": {
+      "el8": {
+        "files_written": 3,
+        "unprivileged_daemon": true,
+        "actual_rotation_threshold_bytes": 10485760,
+        "backup_versions": 5,
+        "oldest_archive_removed": true,
+        "query_logging_disabled": true,
+        "security_refusal_logged": true,
+        "tsig_transfer_logged": true,
+        "dns_checks": 3,
+        "observed_file_modes": {
+          "default.log": "0o644",
+          "security.log": "0o640",
+          "xfer.log": "0o640"
+        }
+      },
+      "modern": {
+        "files_written": 3,
+        "unprivileged_daemon": true,
+        "actual_rotation_threshold_bytes": 10485760,
+        "backup_versions": 5,
+        "oldest_archive_removed": true,
+        "query_logging_disabled": true,
+        "security_refusal_logged": true,
+        "tsig_transfer_logged": true,
+        "dns_checks": 3,
+        "observed_file_modes": {
+          "default.log": "0o644",
+          "security.log": "0o640",
+          "xfer.log": "0o640"
+        }
+      }
+    },
+    "example": {
+      "two_forward_zones": true,
+      "client_acl_present": true,
+      "single_client_acl": true,
+      "dnssec_disabled_default": true,
+      "local_destination_acls_for_both_roles": true,
+      "native_el8_checkconf_z_exits": [
+        0,
+        0
+      ]
+    },
     "source_audit": {
       "assets_referenced": 12,
-      "task_files_referenced": 34,
+      "task_files_referenced": 35,
       "handlers_notified": 1,
       "defaults_consumed": 11,
       "filters_consumed": 11,
-      "yaml_files_parsed": 62,
+      "yaml_files_parsed": 63,
       "restorecon_baseline_exit": 1,
       "restorecon_current_exit": 0
     },
     "pyflakes_shell_syntax": "EXÉCUTÉ",
     "production_dependencies_added": [],
-    "actual_deployed_target_configuration": "NON EXÉCUTÉ",
-    "actual_rhel8_systemd_selinux_network_and_reboot": "NON EXÉCUTÉ",
+    "actual_selinux_enforcing_named_t": "NON EXÉCUTÉ",
+    "actual_rhel8_service_deployment": "NON EXÉCUTÉ",
+    "actual_firewalld_kernel_and_reboot": "NON EXÉCUTÉ",
+    "load_and_calendar_retention": "NON EXÉCUTÉ",
     "remote_ci": "NON EXÉCUTÉ",
     "production_qualification": "NON TERMINÉE",
-    "missing_check_procedures": "docs/CORRECTION_CONTROLES_DNS.md and docs/VALIDATION_RHEL8.md",
-    "unchanged_python_coverage_networkmanager_python36": "Previous delivery evidence; not rerun in this correction"
+    "missing_check_procedures": [
+      "docs/JOURNALISATION.md",
+      "docs/FIREWALLD.md"
+    ],
+    "unchanged_route_dnssec_lifecycle_coverage_python36": "Previous delivery evidence; not rerun for this scoped change"
   },
-  "impact_report": "docs/CORRECTION_CONTROLES_DNS.md",
+  "impact_report": "docs/JOURNALISATION.md",
+  "logging_contract": {
+    "directory": "/var/log/named",
+    "owner": "named:named",
+    "directory_mode": "0750",
+    "prepared_file_mode": "0640",
+    "rotated_file_mode": "Native daemon behavior; protected by directory 0750",
+    "files": {
+      "default.log": {
+        "archives": 5,
+        "size_mib": 10
+      },
+      "security.log": {
+        "archives": 5,
+        "size_mib": 10
+      },
+      "xfer.log": {
+        "archives": 3,
+        "size_mib": 5
+      }
+    },
+    "query_logging": false,
+    "selinux_type": "named_log_t",
+    "persistent_fcontext": "/var/log/named(/.*)?",
+    "rollback_keeps_logs_and_context_rule": true,
+    "calendar_retention_guaranteed": false
+  },
+  "bind_client_acl": "user_defined_clients",
+  "calculated_client_variable": "bind_allowed_clients",
+  "firewall_contract": {
+    "service": "dns",
+    "standard_ports": [
+      "53/udp",
+      "53/tcp"
+    ],
+    "scope": [
+      "runtime",
+      "permanent"
+    ],
+    "zones": "Existing FRONT/BACK interface zones; existing default for unbound interfaces",
+    "runtime_permanent_zone_drift_handled": true,
+    "reload_or_binding_changes": false,
+    "already_running_firewalld_required": true,
+    "installed_or_started_by_role": false,
+    "tag": "firewall",
+    "rollback_keeps_requested_authorizations": true,
+    "source_based_zones_and_custom_policies": "Require target-specific acceptance; not changed automatically"
+  },
   "archive_checks": {
     "status": "EXÉCUTÉ",
     "manifest": true,

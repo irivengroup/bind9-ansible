@@ -46,7 +46,7 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q roles/bind9/files roles/bind9/filter_plugins tests && python -m py_compile roles/bind9/files/reverse-serial.py roles/bind9/files/tsig-secret.py
       - name: Check shell syntax
-        run: bash -n roles/bind9/files/bind-configtool.sh roles/bind9/files/named-healthcheck.sh tests/run_integration_front_routes.sh tests/run_integration_loopback.sh
+        run: bash -n roles/bind9/files/bind-configtool.sh roles/bind9/files/named-healthcheck.sh tests/run_integration_front_routes.sh tests/run_integration_loopback.sh tests/run_integration_logging.sh
       - name: Native route task workflows on legacy Ansible
         if: matrix.ansible-version == '2.9.27'
         run: sudo --preserve-env=PATH "$(command -v python)" -m pytest -q tests/test_front_routes_ansible.py

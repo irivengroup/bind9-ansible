@@ -41,6 +41,12 @@
   ansible.builtin.import_tasks: tasks.d/packages.yml
   tags: [deploy, install]
 
+- name: Authorize DNS in existing FRONT and BACK firewalld zones
+  ansible.builtin.import_tasks: tasks.d/firewall.yml
+  environment:
+    LC_ALL: C
+  tags: [deploy, firewall]
+
 - name: Verify local primary before secondary deployment
   ansible.builtin.import_tasks: tasks.d/primary_readiness.yml
   tags: [deploy, preflight]
