@@ -1,255 +1,98 @@
 ---
-# Native tasks select the address-bearing FRONT device, including secondary addresses.
-- name: Initialize ownership of this route operation
+# One native process holds the transient kernel lock for the complete route action.
+# The script module transfers the helper temporarily: no new resident service.
+- name: Select the explicit FRONT action without altering the DNS workflow
   ansible.builtin.set_fact:
-    bind_front_route_transaction_pending: false
-    bind_front_route_rollback_attempted: false
-    bind_front_lock_acquired: {failed: true}
+    bind_front_action: '{{ bind_front_requested_action | default("plan" if ansible_check_mode else "apply") }}'
 
-- name: Discover current IPv4 interfaces
-  ansible.builtin.command:
-    argv: [ip, -j, -4, address, show]
-  register: bind_front_addresses
-  changed_when: false
-  check_mode: false
-
-- name: Normalize live primary and secondary IPv4 addresses
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_ipv4.yml'
-  vars:
-    bind_front_ipv4_context: 'ip -j -4 address show and inventory FRONT/BACK/ADM'
-    bind_front_ipv4_values: >-
-      {%- set ns = namespace(values=[bind_front_ip, bind_back_ip, ansible_host]) -%}
-      {%- for iface in bind_front_addresses.stdout | from_json -%}
-        {%- for address in iface.get('addr_info', []) if address.get('family') == 'inet' -%}
-          {%- set ns.values = ns.values + [address.local ~ '/' ~ address.prefixlen] -%}
-        {%- endfor -%}
-      {%- endfor -%}
-      {{ ns.values | to_json }}
-
-- name: Match FRONT and protected subnets from current primary or secondary IPv4 addresses
-  ansible.builtin.set_fact:
-    bind_front_interface_json: >-
-      {%- set ns = namespace(found=[], present=[], protected=[]) -%}
-      {%- for iface in bind_front_addresses.stdout | from_json -%}
-        {%- set row = namespace(front=[], protected=false) -%}
-        {%- for address in iface.get('addr_info', []) if address.get('family') == 'inet' -%}
-          {%- set ns.present = ns.present + [address.local] -%}
-          {%- if address.local in [bind_back_ip, ansible_host] -%}
-            {%- set ns.protected = ns.protected + [bind_front_ipv4_data[address.local ~ '/' ~ address.prefixlen].cidr] -%}
-            {%- set row.protected = true -%}
-          {%- endif -%}
-          {%- if address.local == bind_front_ip -%}
-            {%- set row.front = row.front + [bind_front_ipv4_data[address.local ~ '/' ~ address.prefixlen].cidr] -%}
-          {%- endif -%}
-        {%- endfor -%}
-        {%- if row.front | length == 1 and not row.protected and 'master' not in iface and
-            (iface.get('operstate') == 'UP' or (iface.get('operstate') == 'UNKNOWN' and 'UP' in iface.get('flags', []))) -%}
-          {%- set ns.found = ns.found + [{'device':iface.ifname, 'address':bind_front_ip, 'network':row.front[0]}] -%}
-        {%- endif -%}
-      {%- endfor -%}
-      {{ {'found':ns.found, 'present':ns.present, 'protected':ns.protected | unique | list} | to_json }}
-
-- name: Require one UP FRONT device distinct from present BACK and ADM addresses
+- name: Validate the native FRONT action envelope
   ansible.builtin.assert:
     that:
-      - ((bind_front_interface_json | from_json if bind_front_interface_json is string else bind_front_interface_json)).found | length == 1
-      - bind_back_ip in ((bind_front_interface_json | from_json if bind_front_interface_json is string else bind_front_interface_json)).present
-      - ansible_host in ((bind_front_interface_json | from_json if bind_front_interface_json is string else bind_front_interface_json)).present
-      - bind_front_ip != bind_back_ip and bind_front_ip != ansible_host and bind_back_ip != ansible_host
-    fail_msg: 'FRONT is missing, ambiguous, down, enslaved or shares BACK/ADM; no routes modified.'
+      - bind_front_action in ['plan', 'apply', 'verify', 'commit', 'rollback', 'recover']
+      - not ansible_check_mode or bind_front_action == 'plan'
+      - (bind_front_route_metric | type_debug) in ['int', 'long']
+    fail_msg: 'FRONT accepts plan/apply/verify/commit/rollback/recover, an integer metric, and plan only with --check.'
 
-- name: Retain the uniquely identified FRONT device
-  ansible.builtin.set_fact:
-    bind_front_interface: '{{ ((bind_front_interface_json | from_json if bind_front_interface_json is string else bind_front_interface_json)).found[0] | combine({"protected_networks": ((bind_front_interface_json | from_json if bind_front_interface_json is string else bind_front_interface_json)).protected}) }}'
+- name: Inspect the previous journal format only for explicit recovery
+  ansible.builtin.stat:
+    path: /var/lib/Bind9-Ansible/front-routes.lock
+    follow: false
+  register: bind_front_legacy_journal
+  when: bind_front_action == 'recover'
 
-- name: Discover the active NetworkManager profile UUID
-  ansible.builtin.command:
-    argv: [nmcli, -g, GENERAL.CON-UUID, device, show, '{{ bind_front_interface.device }}']
-  environment: {LC_ALL: C}
-  register: bind_front_active_profile
-  changed_when: false
-  check_mode: false
+- name: Recover the previous journal without converting or overwriting it
+  ansible.builtin.include_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_legacy.yml'
+  when:
+    - bind_front_action == 'recover'
+    - bind_front_legacy_journal.stat.exists | default(false)
 
-- name: Validate active FRONT profile identity
-  ansible.builtin.set_fact:
-    bind_front_uuid: '{{ bind_front_active_profile.stdout | trim | lower }}'
-
-- name: Read existing FRONT gateway and persistent routes
-  ansible.builtin.command:
-    argv: [nmcli, -g, '{{ item }}', connection, show, uuid, '{{ bind_front_uuid }}']
-  environment: {LC_ALL: C}
-  loop: [ipv4.gateway, ipv4.routes, ipv4.route-table]
-  register: bind_front_profile
-  changed_when: false
-  check_mode: false
-
-- name: Snapshot native main routing table and policy rules
-  ansible.builtin.command:
-    argv: '{{ item }}'
-  loop:
-    - [ip, -j, -4, route, show, table, main]
-    - [ip, -j, -4, rule, show]
-  register: bind_front_kernel
-  changed_when: false
-  check_mode: false
-
-- name: Read the real SSH connection before protecting its return route
-  # Read from the SSH account rather than sudo's environment: sudo can strip
-  # SSH_CONNECTION from gathered root facts, hiding the controller return path.
+- name: Read the real SSH peer before any route mutation
   ansible.builtin.command:
     argv: [printenv, SSH_CONNECTION]
   become: false
   register: bind_front_ssh_session
   changed_when: false
   check_mode: false
-  failed_when: bind_front_ssh_session.rc != 0 or (bind_front_ssh_session.stdout.split() | length) != 4
-  when: ansible_connection | default('ssh') != 'local'
+  failed_when: bind_front_ssh_session.rc != 0 or bind_front_ssh_session.stdout.split() | length != 4
+  when:
+    - bind_front_action in ['plan', 'apply', 'rollback', 'recover']
+    - ansible_connection | default('ssh') != 'local'
 
-- name: Record actual SSH peer for routing protection
+- name: Prepare explicit shell-quoted arguments for the native route transaction
   ansible.builtin.set_fact:
-    bind_front_ssh_client: >-
-      {{ bind_front_ssh_session.stdout.split()[0]
-      if (ansible_connection | default('ssh')) != 'local' else '' }}
+    bind_front_arguments: >-
+      {%- set ns = namespace(args=['--action', bind_front_action]) -%}
+      {%- if bind_front_action in ['plan', 'apply'] -%}
+        {%- set ns.args = ns.args + ['--front-ip', bind_front_ip, '--back-ip', bind_back_ip,
+          '--adm-ip', ansible_host, '--metric', bind_front_route_metric | string,
+          '--peer-back-ip', hostvars[bind_primary_host].bind_back_ip,
+          '--peer-back-ip', hostvars[bind_secondary_host].bind_back_ip] -%}
+        {%- for client in bind_cloud_clients -%}
+          {%- set ns.args = ns.args + ['--client', client] -%}
+        {%- endfor -%}
+        {%- if bind_front_routes_defer_commit | default(false) | bool -%}
+          {%- set ns.args = ns.args + ['--defer-commit'] -%}
+        {%- endif -%}
+      {%- elif bind_front_action != 'recover' -%}
+        {%- set ns.args = ns.args + ['--token', bind_front_transaction_token | default('')] -%}
+      {%- endif -%}
+      {%- if bind_front_action in ['plan', 'apply', 'rollback', 'recover'] and ansible_connection | default('ssh') != 'local' -%}
+        {%- set ns.args = ns.args + ['--ssh-peer', bind_front_ssh_session.stdout.split()[0]] -%}
+      {%- endif -%}
+      {{ ns.args }}
 
-- name: Build and validate the route plan using native Ansible tasks
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_plan.yml'
-
-- name: Show calculated FRONT route plan with verbose diagnostics
-  ansible.builtin.debug:
-    verbosity: 1
-    msg:
-      device: '{{ bind_front_plan.device }}'
-      gateway: '{{ bind_front_plan.gateway }}'
-      profile_additions: '{{ bind_front_plan.profile_additions }}'
-      runtime_additions: '{{ bind_front_plan.runtime_additions }}'
-
-- name: Inspect routing journal parent before creating any files
-  ansible.builtin.stat:
-    path: /var/lib/Bind9-Ansible
-    follow: false
-  register: bind_front_state_parent
+- name: Run the single native FRONT transaction with bounded observations
+  ansible.builtin.script:
+    cmd: '{{ (role_path ~ "/files/bind-front-routes.sh") | quote }} {{ bind_front_arguments | map("quote") | join(" ") }}'
+    executable: /bin/bash
+  register: bind_front_operation
   check_mode: false
+  changed_when: bind_front_operation.rc == 2
+  failed_when: bind_front_operation.rc not in [0, 2]
+  when: not (bind_front_legacy_journal.stat.exists | default(false))
 
-- name: Bound the durable recovery journal size
-  ansible.builtin.assert:
-    that: [(bind_front_plan | to_nice_json | length) < 262144]
-    fail_msg: 'Routing snapshot too large for bounded automated recovery; no routes were modified.'
+- name: Retain only the transaction created by this DNS deployment
+  ansible.builtin.set_fact:
+    bind_front_transaction_token: '{{ (bind_front_operation.stdout | regex_findall("(?m)^transaction: ([0-9a-f-]{36})\r?$")) | first | default("") }}'
+    bind_front_route_transaction_pending: true
+    bind_front_route_rollback_attempted: false
+  when:
+    - bind_front_action == 'apply'
+    - bind_front_operation.rc == 2
+    - bind_front_routes_defer_commit | default(false) | bool
 
-- name: Require a safe root-owned routing state parent
+- name: Require an unambiguous receipt before any deferred route operation
   ansible.builtin.assert:
     that:
-      - not bind_front_state_parent.stat.exists or (bind_front_state_parent.stat.isdir | default(false))
-      - not (bind_front_state_parent.stat.islnk | default(false))
-      - not bind_front_state_parent.stat.exists or bind_front_state_parent.stat.uid == 0
-      - not bind_front_state_parent.stat.exists or bind_front_state_parent.stat.mode in ['0700', '0750', '0755']
-
-- name: Inspect unfinished routing operation
-  ansible.builtin.stat:
-    path: /var/lib/Bind9-Ansible/front-routes.lock
-    follow: false
-  register: bind_front_route_lock
-  check_mode: false
-
-- name: Require recovery before reusing an interrupted routing operation
-  ansible.builtin.assert:
-    that: [not bind_front_route_lock.stat.exists]
-    fail_msg: 'A FRONT operation is active or interrupted. Inspect its journal; after ensuring no deployment is running, use --tags routes-recover.'
-
-- name: Show proposed route additions in check mode
-  ansible.builtin.debug:
-    msg:
-      profile: '{{ bind_front_plan.profile_additions }}'
-      active: '{{ bind_front_plan.runtime_additions }}'
-  changed_when: bind_front_plan.profile_additions | length > 0 or bind_front_plan.runtime_additions | length > 0
-  when: ansible_check_mode
-
-- name: Apply and verify the native route operation
-  block:
-    - name: Prepare private routing state parent
-      ansible.builtin.file:
-        path: /var/lib/Bind9-Ansible
-        state: directory
-        owner: root
-        group: root
-        mode: '0700'
-
-    - name: Acquire exclusive FRONT operation directory
-      ansible.builtin.command:
-        argv: [mkdir, --, /var/lib/Bind9-Ansible/front-routes.lock]
-      register: bind_front_lock_acquired
-      changed_when: true
-
-    - name: Restrict operation directory permissions
-      ansible.builtin.file:
-        path: /var/lib/Bind9-Ansible/front-routes.lock
-        mode: '0700'
-        owner: root
-        group: root
-
-    - name: Persist recovery plan before the first route mutation
-      ansible.builtin.copy:
-        content: '{{ bind_front_plan | to_nice_json }}'
-        dest: /var/lib/Bind9-Ansible/front-routes.lock/plan.json
-        mode: '0600'
-        owner: root
-        group: root
-
-    - name: Revalidate the route baseline while holding the operation lock
-      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_before_write.yml'
-      environment: {LC_ALL: C}
-
-    - name: Mark route additions pending until their owning operation succeeds
-      ansible.builtin.set_fact:
-        bind_front_route_transaction_pending: true
-
-    - name: Add only missing persistent profile routes
-      ansible.builtin.command:
-        argv: [nmcli, --wait, '10', connection, modify, uuid, '{{ bind_front_plan.uuid }}', +ipv4.routes, '{{ item }}']
-      environment: {LC_ALL: C}
-      loop: '{{ bind_front_plan.profile_additions }}'
-
-    # Change only exact kernel routes; never reactivate/reapply the connection.
-    - name: Add only missing routes to the active FRONT device
-      ansible.builtin.command:
-        argv: >-
-          {{ ['ip', '-4', 'route', 'add', item.split()[0], 'via', item.split()[1], 'dev', bind_front_plan.device] +
-             (['metric', item.split()[2]] if item.split() | length == 3 else []) + ['table', 'main'] }}
-      environment: {LC_ALL: C}
-      loop: '{{ bind_front_plan.runtime_additions }}'
-
-    - name: Verify route persistence and preservation
-      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_verify.yml'
-
-    - name: Commit successful route operation
-      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_commit.yml'
-      when: not (bind_front_routes_defer_commit | default(false) | bool)
-
-  rescue:
-    - name: Roll back owned route additions while preserving the original failure
-      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_rollback.yml'
-      when:
-        - bind_front_lock_acquired is defined and bind_front_lock_acquired is succeeded
-        - bind_front_route_transaction_pending | default(false) | bool
-
-    - name: Release only our unused lock after a pre-mutation refusal
-      ansible.builtin.file:
-        path: /var/lib/Bind9-Ansible/front-routes.lock
-        state: absent
-      when:
-        - bind_front_lock_acquired is defined and bind_front_lock_acquired is succeeded
-        - not (bind_front_route_transaction_pending | default(false) | bool)
-        - not (bind_front_route_rollback_attempted | default(false) | bool)
-
-    - name: Stop after native route operation failure
-      ansible.builtin.fail:
-        msg: 'FRONT route operation failed. Owned additions were rolled back when possible; any rollback failure retains the recovery journal and its explicit error.'
+      - bind_front_transaction_token | default('') is match('^[0-9a-f-]{36}$')
+    fail_msg: 'FRONT applied routes but its receipt is unavailable. Journal retained; inspect it before routes-recover.'
   when:
-    - not ansible_check_mode
-    - bind_front_plan.profile_additions | length > 0 or bind_front_plan.runtime_additions | length > 0
+    - bind_front_action == 'apply'
+    - bind_front_operation.rc == 2
+    - bind_front_routes_defer_commit | default(false) | bool
 
-- name: Verify existing return paths when no modification is needed
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_verify.yml'
-  when:
-    - not ansible_check_mode
-    - bind_front_plan.profile_additions | length == 0
-    - bind_front_plan.runtime_additions | length == 0
+- name: Clear pending FRONT ownership only after successful completion
+  ansible.builtin.set_fact:
+    bind_front_route_transaction_pending: false
+    bind_front_route_rollback_attempted: '{{ bind_front_action in ["rollback", "recover"] }}'
+  when: bind_front_action in ['commit', 'rollback', 'recover']

@@ -65,6 +65,7 @@ def test_routes_on_a_deployed_host_ignore_a_previous_lease_without_changing_dns(
     assert (live.read_bytes(), live.stat().st_ino, live.stat().st_mtime_ns) == dns_before
     assert lease.stat().st_ino == lease_identity and not (sandbox.state_root / 'front-routes.lock').exists()
     assert evidence.read_bytes() == b'preserve prior lease'
+    assert not (sandbox.state_root / 'front-routes.pending').exists()
     forbidden = ('Install canonical named.conf', 'Install authoritative zone files',
                  'Install BIND and SELinux tooling', 'Start or reload BIND')
     assert not any(name in applied.stdout or name in repeated.stdout for name in forbidden)

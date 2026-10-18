@@ -6,6 +6,7 @@ an exclusive host lease, native BIND validation and an immediate revision check.
 Dynamic zones and include/generate directives inside a changed zone are refused.
 """
 import contextlib
+import fcntl
 import hashlib
 import ipaddress
 import json
@@ -56,6 +57,36 @@ class VerifiedIO:
             cls.write(stream, data)
         cls.directory(path.parent)
 
+    @staticmethod
+    def read_json(path, limit):
+        """Read complete private state without following links or trusting size alone."""
+        descriptor = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, 'rb') as stream:
+            info = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or
+                    stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > limit):
+                raise ManagementError('Unsafe private recovery state file')
+            data = stream.read(limit + 1)
+            if len(data) != info.st_size:
+                raise ManagementError('Incomplete private recovery state')
+            observed = SafeFiles.stamp(info)
+            if observed != SafeFiles.stamp(os.fstat(stream.fileno())) or observed != SafeFiles.stamp(path.lstat()):
+                raise ManagementError('Private recovery state changed during observation')
+        try:
+            def unique_object(pairs):
+                result = {}
+                for key, item in pairs:
+                    if key in result:
+                        raise ValueError('Duplicate recovery field')
+                    result[key] = item
+                return result
+            value = json.loads(data.decode('utf-8'), object_pairs_hook=unique_object)
+            if not isinstance(value, dict):
+                raise ValueError('State must be a mapping')
+            return value
+        except (ValueError, UnicodeError) as error:
+            raise ManagementError('Invalid private recovery JSON state') from error
+
 
 class NativeCommand:
     """Capture complete bounded output and terminate the owned process group on failure."""
@@ -93,7 +124,7 @@ class NativeCommand:
             except subprocess.TimeoutExpired as error:
                 raise ManagementError('Native command timed out: ' + Path(argv[0]).name) from error
             if code:
-                raise ManagementError('Native validation/reload failed: ' + Path(argv[0]).name)
+                raise ManagementError('Native validation/reload failed: ' + Path(argv[0]).name + ' (rc ' + str(code) + ')')
             try:
                 return bytes(result).decode('utf-8', errors='strict')
             except UnicodeDecodeError as error:
@@ -674,6 +705,7 @@ class Manager:
             raise ManagementError('Management requires root')
         self.config = Configuration(self.files)
         revision = self.config.revision()
+        self.recovery_guard(writing=self.action not in ('read', 'list'))
         if self.action in ('read', 'list'):
             if self.action == 'list' and self.request.get('expected_checksum') not in (None, '', revision):
                 raise ManagementError('Listing checksum changed; restart pagination from the current state')
@@ -1160,6 +1192,7 @@ class Manager:
             raise ManagementError('Configuration changed while the candidate was being validated')
         self.assert_state('Configuration changed while the candidate was being validated')
         applied = []
+        self.mark_pending(backup)
         self.retain_lease = True
         try:
             # New data precedes declarations; purges follow declaration removal.
@@ -1188,6 +1221,7 @@ class Manager:
             manifest['after'] = final_revision
             manifest['status'] = 'committed'
             self.journal(backup, manifest)
+            self.clear_pending(backup)
             self.retain_lease = False
         except BaseException as error:
             failures = []
@@ -1230,14 +1264,27 @@ class Manager:
                     failures.append('reload')
             manifest['status'] = 'recovery-required' if failures else 'rolled-back'
             self.journal(backup, manifest)
+            if not failures:
+                self.clear_pending(backup)
             self.retain_lease = bool(failures)
-            raise ManagementError('Management failed; ' + manifest['status'] + '. Protected recovery data: ' + str(backup)) from error
+            cause = str(error) if isinstance(error, ManagementError) else type(error).__name__
+            raise ManagementError('Management failed; ' + manifest['status'] + '. Cause: ' + cause +
+                                  '. Protected recovery data: ' + str(backup)) from error
         return {'changed': True, 'checksum': final_revision,
                 'action': self.action, 'resource': self.resource, 'paths': sorted(self.changes),
                 'backup': str(backup), 'status': 'committed', 'serials': self.expected_serials}
 
     def check_lease(self):
         """Check ownership before mutations, not merely on context-manager exit."""
+        descriptor = getattr(self, 'operation_descriptor', None)
+        if descriptor is not None:
+            try:
+                current = (self.root / 'var/lib/Bind9-Ansible/operations.flock').lstat()
+                owned = os.fstat(descriptor)
+                if SafeFiles.stamp(current) != SafeFiles.stamp(owned):
+                    raise ManagementError('Transient operation lock changed before publication')
+            except OSError as error:
+                raise ManagementError('Transient operation lock disappeared before publication') from error
         owned = getattr(self, 'owned_lease', None)
         if owned is not None:
             try:
@@ -1286,6 +1333,167 @@ class Manager:
         if stat.S_IMODE(cursor.stat().st_mode) != 0o700:
             raise ManagementError('Management state directory must be private mode 0700')
         return cursor
+
+    @contextlib.contextmanager
+    def operation(self):
+        """Serialize actual module calls with a kernel lock, never a stale directory.
+
+        The empty file persists; its existence does not indicate an active owner.
+        The kernel releases ownership when all owning descriptors are closed.
+        This file is shared with the native FRONT helper. Legacy directory-lease
+        opt-in remains separate for compatibility with older deployment runners.
+        """
+        if getattr(self, 'operation_descriptor', None) is not None:
+            # Refuse reentry before an inner finally could erase outer ownership.
+            raise ManagementError('An operation context is already active for this manager')
+        state = self.private_directory('/var/lib/Bind9-Ansible')
+        path = state / 'operations.flock'
+        descriptor = os.open(str(path), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+        try:
+            info = os.fstat(descriptor)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or
+                    stat.S_IMODE(info.st_mode) != 0o600 or info.st_size != 0 or
+                    (info.st_dev, info.st_ino) != (path.lstat().st_dev, path.lstat().st_ino)):
+                raise ManagementError('Unsafe transient operation lock file')
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise ManagementError('Another route or management operation is active; retry after it ends') from error
+            self.operation_descriptor = descriptor
+            yield
+        finally:
+            self.operation_descriptor = None
+            os.close(descriptor)
+
+    def pending_path(self):
+        return self.root / 'var/lib/Bind9-Ansible/management.pending.json'
+
+    def recovery_guard(self, writing):
+        """Block another write after an interrupted publication, without hiding reads.
+
+        A final journal can outlive a crash during marker cleanup; clear that
+        harmless marker automatically. Never infer recovery from lock existence.
+        """
+        if writing:
+            state = self.root / 'var/lib/Bind9-Ansible'
+            if any(os.path.lexists(str(state / name)) for name in ('front-routes.pending', 'front-routes.lock')):
+                raise ManagementError('A pending FRONT transaction must complete or recover before DNS management writes')
+        pointer = self.pending_path()
+        if not os.path.lexists(str(pointer)):
+            if writing:
+                self.legacy_recovery_guard()
+            return
+        try:
+            value = VerifiedIO.read_json(pointer, 4096)
+            transaction = value.get('transaction')
+            if value.get('schema') != 1 or not isinstance(transaction, str) or not re.fullmatch('/var/backups/Bind9-Ansible/management/transaction-[a-zA-Z0-9_-]+', transaction):
+                raise ManagementError('Malformed pending management marker')
+            folder = self.root / transaction.lstrip('/')
+            cursor = self.root
+            for part in Path(transaction).parts[1:]:
+                cursor = cursor / part
+                info = cursor.lstat()
+                if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                    raise ManagementError('Unsafe pending transaction ancestor')
+            manifest = VerifiedIO.read_json(folder / 'manifest.json', 1024 * 1024)
+            if manifest.get('schema') != 1:
+                raise ManagementError('Unsupported pending transaction manifest')
+            if manifest.get('status') in ('committed', 'rolled-back'):
+                self.clear_pending(folder)
+                # Completing this marker does not prove other older journals
+                # completed. Apply the same pre-write guard as a marker-free run.
+                if writing:
+                    self.legacy_recovery_guard()
+                return
+            if writing:
+                raise ManagementError('Unresolved management transaction; inspect ' + transaction +
+                                      '/manifest.json before another write. Read/list remain available.')
+        except (OSError, ValueError, TypeError, AttributeError) as error:
+            if isinstance(error, ManagementError):
+                raise
+            raise ManagementError('Pending management state is unreadable; preserve it for recovery') from error
+
+    def legacy_recovery_guard(self):
+        """Recognize unfinished pre-marker journals before the first new write.
+
+        A prepared candidate whose targets are still exactly the original bytes
+        never published DNS data and can be closed without changing those files.
+        All other unfinished candidates require the existing targeted runbook.
+        """
+        state = self.root / 'var/backups/Bind9-Ansible/management'
+        if not os.path.lexists(str(state)):
+            return
+        self.private_directory('/var/backups/Bind9-Ansible/management')
+        for index, folder in enumerate(state.iterdir()):
+            if index >= 4096:
+                raise ManagementError('Management journal catalog exceeds 4096 entries; archive completed evidence before writing')
+            if not re.fullmatch('transaction-[a-zA-Z0-9_-]+', folder.name):
+                continue
+            info = folder.lstat()
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o700:
+                raise ManagementError('Unsafe legacy management transaction directory')
+            path = folder / 'manifest.json'
+            if not os.path.lexists(str(path)):
+                continue  # Older code could stop before journal publication.
+            manifest = VerifiedIO.read_json(path, 1024 * 1024)
+            if manifest.get('schema') != 1:
+                raise ManagementError('Unsupported legacy management journal schema')
+            status = manifest.get('status')
+            if status in ('committed', 'rolled-back', 'aborted-before-publication'):
+                continue
+            entries = manifest.get('files')
+            untouched = status == 'prepared' and isinstance(entries, dict) and bool(entries)
+            if untouched:
+                for name, item in entries.items():
+                    expected = item.get('before') if isinstance(item, dict) else False
+                    try:
+                        target = self.files.path(name)
+                        actual = hashlib.sha256(self.files.read(name)).hexdigest() if os.path.lexists(str(target)) else None
+                        if expected is False or actual != expected:
+                            untouched = False
+                            break
+                    except (OSError, ManagementError):
+                        untouched = False
+                        break
+            if untouched:
+                manifest['status'] = 'aborted-before-publication'
+                self.journal(folder, manifest)
+            else:
+                raise ManagementError('Unresolved legacy management transaction; inspect ' + str(path) + ' before another write')
+
+    def mark_pending(self, folder):
+        """Durably record the transaction before any DNS publication."""
+        self.private_directory('/var/lib/Bind9-Ansible')
+        virtual = '/' + folder.relative_to(self.root).as_posix()
+        payload = json.dumps({'schema': 1, 'transaction': virtual}, sort_keys=True).encode('utf-8')
+        pointer = self.pending_path()
+        descriptor, temporary = tempfile.mkstemp(prefix='.management-', dir=str(pointer.parent))
+        try:
+            with os.fdopen(descriptor, 'w+b') as stream:
+                os.fchmod(stream.fileno(), 0o600)
+                VerifiedIO.write(stream, payload)
+            # Exclusive publication: never replace another operation's marker.
+            os.link(temporary, str(pointer), follow_symlinks=False)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+        VerifiedIO.directory(pointer.parent)
+
+    def clear_pending(self, folder):
+        """Remove only the exact marker for this completed transaction."""
+        pointer = self.pending_path()
+        expected = json.dumps({'schema': 1, 'transaction': '/' + folder.relative_to(self.root).as_posix()}, sort_keys=True).encode('utf-8')
+        info = pointer.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size != len(expected):
+            raise ManagementError('Pending transaction ownership changed; marker preserved')
+        descriptor = os.open(str(pointer), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, 'rb') as stream:
+            if SafeFiles.stamp(info) != SafeFiles.stamp(os.fstat(stream.fileno())) or stream.read(len(expected) + 1) != expected:
+                raise ManagementError('Pending transaction ownership changed; marker preserved')
+            if SafeFiles.stamp(info) != SafeFiles.stamp(pointer.lstat()):
+                raise ManagementError('Pending transaction ownership changed; marker preserved')
+        pointer.unlink()
+        VerifiedIO.directory(pointer.parent)
 
     def audit_details(self):
         """Additional private journal metadata, without request values."""
@@ -1575,6 +1783,7 @@ class BatchManager(Manager):
             raise ManagementError('Management requires root')
         self.config = Configuration(self.files)
         revision = self.config.revision()
+        self.recovery_guard(writing=self.action == 'apply')
         if self.action == 'apply':
             expected = self.request.get('expected_checksum')
             if not isinstance(expected, str) or expected != revision:

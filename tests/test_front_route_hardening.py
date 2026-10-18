@@ -3,7 +3,6 @@ import copy
 import json
 
 import pytest
-import yaml
 
 from route_task_expressions import TaskExpressions
 from test_native_front_routes import BASE, NEW, RULES, plan
@@ -21,7 +20,7 @@ class TestStrictFrontRoutes:
 
     @pytest.mark.parametrize('attributes', [{'nhid': 12}, {'flags': ['onlink']}, {'prefsrc': '198.51.100.9'}])
     def test_route_with_changed_attributes_is_not_owned(self, attributes):
-        tasks = yaml.safe_load((TaskExpressions.TASKS / 'deploy/front_routes_rollback.yml').read_text())
+        tasks = TaskExpressions.load('deploy/front_routes_rollback.yml')
         first = next(i for i, task in enumerate(tasks) if task['name'] == 'Normalize active destinations being inspected')
         context = {'bind_front_plan': plan(), 'bind_front_rollback_kernel': {'stdout': json.dumps(BASE + [dict(NEW, **attributes)])}}
         with pytest.raises(ValueError):

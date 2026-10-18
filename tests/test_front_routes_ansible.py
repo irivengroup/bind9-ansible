@@ -32,6 +32,8 @@ class AnsibleRouteSandbox:
         shutil.copytree(ROOT / 'roles/bind9', role, ignore=shutil.ignore_patterns('__pycache__'))
         for path in (role / 'tasks/tasks.d/deploy').glob('front*.yml'):
             path.write_text(path.read_text().replace('/var/lib/Bind9-Ansible', str(self.state_root)))
+        helper = role / 'files/bind-front-routes.sh'
+        helper.write_text(helper.read_text().replace('STATE=/var/lib/Bind9-Ansible', 'STATE=' + str(self.state_root)))
         binaries = folder / 'bin'
         binaries.mkdir()
         # Ansible 2.9 treats interpreter as a shell command: use a simple local
@@ -43,6 +45,8 @@ class AnsibleRouteSandbox:
             path = binaries / command
             shutil.copyfile(fixture, path)
             path.chmod(0o755)
+        helper.write_text(helper.read_text().replace('export PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+                                                   'export PATH=' + str(binaries) + ':/tmp/bin:/usr/sbin:/usr/bin:/sbin:/bin'))
         self.data_file = folder / 'network.json'
         self.data = {'uuid': UUID, 'gateway': '198.51.100.1', 'addresses': json.loads(ADDRESSES),
                      'rules': json.loads(RULES), 'runtime': copy.deepcopy(BASE),
@@ -70,6 +74,9 @@ class AnsibleRouteSandbox:
                      'bind_primary_host': 'localhost', 'bind_secondary_host': 'secondary',
                      'bind_cloud_clients': ['203.0.113.0/24'], 'bind_internal_clients': ['10.0.0.0/24','10.30.1.20'], 'bind_front_route_metric': 100,
                      'bind_front_routes_enabled': True}
+        if tasks_from.endswith('front_routes_recover.yml'):
+            tasks_from = 'tasks.d/deploy/front_return_routes.yml'
+            variables['bind_front_requested_action'] = 'recover'
         variables.update(extra_vars or {})
         play = [{'hosts': 'localhost', 'gather_facts': False, 'vars': variables,
                  # Dynamic includes need apply to reproduce the production
@@ -129,7 +136,7 @@ class TestAnsibleNativeFrontRoutes:
         result = sandbox.run()
         assert result.returncode != 0, result.stdout
         assert sandbox.read() == sandbox.data
-        assert not sandbox.state_root.exists()
+        assert not (sandbox.state_root / 'front-routes.pending').exists()
 
     @pytest.mark.parametrize('failure_phase', [None, 'health', 'reload', 'disabled', 'internal-only'])
     def test_routes_commit_after_dns_health_or_are_removed_by_dns_rollback(self, tmp_path, failure_phase):
@@ -186,11 +193,13 @@ class TestAnsibleNativeFrontRoutes:
         elif failure_phase:
             assert data['persistent'] == initial['persistent'], result.stdout
             assert data['runtime'] == initial['runtime'], result.stdout
-            assert 'Remove owned persistent additions' in result.stdout
+            assert not (sandbox.state_root / 'front-routes.pending').exists(), result.stdout
+            assert 'failed=1' in result.stdout and 'rescued=1' in result.stdout
         else:
             assert data['runtime'] == initial['runtime'] + [NEW], result.stdout
             assert len(data['persistent']) == 2
-            assert 'Commit successfully validated owned FRONT additions' in result.stdout
+            assert not (sandbox.state_root / 'front-routes.pending').exists(), result.stdout
+            assert 'failed=0' in result.stdout
         assert not (sandbox.state_root / 'front-routes.lock').exists()
 
     def test_empty_mutation_stdout_and_second_run_idempotence(self, tmp_path):
@@ -211,7 +220,7 @@ class TestAnsibleNativeFrontRoutes:
         result = sandbox.run(check=True)
         assert result.returncode == 0, result.stdout
         assert sandbox.read() == sandbox.data
-        assert not sandbox.state_root.exists()
+        assert not (sandbox.state_root / 'front-routes.pending').exists()
 
     def test_native_active_failure_rolls_back_only_added_profile_entry(self, tmp_path):
         sandbox = AnsibleRouteSandbox(tmp_path)

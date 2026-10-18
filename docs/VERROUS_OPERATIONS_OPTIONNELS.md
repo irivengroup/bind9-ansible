@@ -1,5 +1,7 @@
 # Verrou commun temporairement optionnel
 
+**Rapport historique :** ces résultats décrivent la révision indiquée ci-dessous. Le contrat et les preuves de la livraison courante figurent dans [REFONTE_ROUTES_MANAGEMENT.md](REFONTE_ROUTES_MANAGEMENT.md).
+
 Cette révision repart exclusivement de l’archive fournie `Bind9-Ansible-hibernate-deployment.zip`, SHA-256 `63f826d85deb0ce68ee45dbe87a77fade81df44f636e5fdd0749281d2052c992`. Elle applique la demande d’ignorer temporairement le verrou commun hors hibernation. Elle ne réimporte pas les modifications des livraisons intermédiaires de diagnostic ou de découverte des passerelles.
 
 ## Contrat d’exploitation

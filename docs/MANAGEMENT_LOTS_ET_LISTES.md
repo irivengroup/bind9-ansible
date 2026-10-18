@@ -1,6 +1,6 @@
 # Management de plusieurs ressources et découverte de l’existant
 
-**Mode temporaire actuel :** `bind_operation_lock_enabled: false` désactive la prise du verrou commun `.operation.lock` pour les opérations ordinaires, lectures et simulations de management comprises. Un ancien verrou est ignoré et conservé. **Une seule opération à la fois**, y compris toute intervention manuelle. Avec le booléen YAML `true`, les garanties de verrou coopératif décrites ci-dessous s’appliquent de nouveau. Le tag `hibernate` et le déploiement complet avec `hibernate_deployment: yes` conservent toujours ce verrou. Les journaux de reprise, contrôles de checksum et verrous propres aux routes/sauvegardes restent actifs. [Contrat et preuves de cette révision](VERROUS_OPERATIONS_OPTIONNELS.md).
+**Exclusion actuelle :** routes et management utilisent toujours un verrou de processus commun `/var/lib/Bind9-Ansible/operations.flock`, libéré automatiquement à la fin du processus. Le fichier vide peut rester présent sans bloquer une nouvelle opération. `bind_operation_lock_enabled: false` ignore uniquement le répertoire historique `.operation.lock` hors hibernation ; il ne désactive pas cette exclusion de processus. Les journaux incomplets sont des données de reprise, jamais des verrous à effacer. Organiser les déploiements DNS complets et interventions manuelles dans une fenêtre exclusive. [Fonctionnement, preuves et limites](REFONTE_ROUTES_MANAGEMENT.md).
 
 Le format unitaire existant reste disponible. Cette révision ajoute `action: list` aux ressources `option`, `zone` et `record`, ainsi qu’une enveloppe `resource: batch` avec `action: read` ou `apply`. Un lot applique des actions ordonnées sur plusieurs types de ressources dans une transaction locale commune.
 
@@ -12,7 +12,7 @@ Les [protections I/O et limites de données](FIABILITE_DONNEES_ET_IO.md) s’app
 
 Utiliser le contrôleur Linux/Bash, depuis la racine du projet, avec une paire déjà déployée et les prérequis du [guide de management](MANAGEMENT.md). Les exemples emploient `site1-dns01` et `site1-dns02`, dans le groupe `site1`. Adapter les adresses, domaines et noms d’hôtes avant exécution. Aucun paquet ou service supplémentaire n’est requis.
 
-En mode strict (`bind_operation_lock_enabled: true`), toutes les observations prennent le verrou exclusif existant. Lecture, listing et simulation peuvent créer le répertoire d’état privé et prennent une lease temporaire ; ils ne publient pas de fichier DNS, ne créent pas de sauvegarde et ne rechargent pas BIND. Une lease interrompue bloque aussi ces actions et nécessite la reprise documentée.
+Toute observation prend l’exclusion de processus commune aux routes et au management. Lecture, listing et simulation peuvent créer le dossier privé et le fichier vide `operations.flock` ; ils ne publient aucun fichier DNS, ne créent pas de sauvegarde et ne rechargent pas BIND. La fin du processus libère l’exclusion. Un journal incomplet bloque les écritures suivantes, tandis que les lectures restent possibles ; voir la [reprise ciblée](MANAGEMENT.md#transaction-sécurité-et-reprise).
 
 ## Lister les zones, avec leur type et leurs options
 
@@ -182,7 +182,7 @@ ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-management.yml \
 
 Ne lancer l’application qu’après réussite et examen de la simulation. Le playbook effectue d’abord une prévalidation sans publication sur tous les hôtes ciblés ; une erreur de checksum ou de candidat sur le secondaire arrête le parcours avant l’écriture du primaire. Il recontrôle ensuite chaque hôte au moment de son application.
 
-Sur chaque serveur : une lease uniquement en mode strict, un candidat final, une sauvegarde complète et un journal ciblé, publication gardée de tous les fichiers concernés, labels, un rechargement BIND, réconciliation DNSSEC et expiration de chaque suffixe modifié, puis contrôles UDP/TCP/SOA. Les fichiers primaires existants avancent d’un seul serial par lot ; une nouvelle zone conserve son serial initial demandé, même si ses records sont ajoutés dans le même lot. Un lot sans différence ne crée pas de sauvegarde et ne recharge pas le service.
+Sur chaque serveur : une exclusion de processus, un candidat final, une sauvegarde complète et un journal ciblé avec pointeur de reprise avant publication, publication gardée de tous les fichiers concernés, labels, un rechargement BIND, réconciliation DNSSEC et expiration de chaque suffixe modifié, puis contrôles UDP/TCP/SOA. Les fichiers primaires existants avancent d’un seul serial par lot ; une nouvelle zone conserve son serial initial demandé, même si ses records sont ajoutés dans le même lot. Un lot sans différence ne crée pas de sauvegarde et ne recharge pas le service.
 
 Les records s’écrivent uniquement sur le primaire. Sur le secondaire, ces opérations sont explicitement marquées `skipped: true`, `reason: primary-only` ; les options et déclarations de zones du lot sont appliquées. Un lot contenant des records doit inclure le primaire avant le secondaire, avec le même lot et la même phase. Le secondaire contrôle ensuite les serials reçus du primaire.
 
@@ -194,7 +194,7 @@ Après application, utiliser les listings ou les lectures unitaires pour vérifi
 - Supprimer une zone et opérer sur ses records dans le même lot est refusé. Les doublons, champs inconnus, lots imbriqués, actions internes de lecture, chemins non observés et limites dépassées sont refusés.
 - Un fichier primaire partagé par plusieurs zones ne peut être modifié ou purgé sans migration explicite ; cela protège les autres autorités, y compris en CRUD unitaire. Son listing reste disponible.
 - Les protections des zones natives, options de sécurité, données signées, fichiers, permissions, ACL, TSIG et interventions manuelles restent celles du management unitaire. Le lot ne gère ni réseau, ni ACL, ni clés, ni logs.
-- Une erreur de planification ou de validation ne publie aucune opération du lot. Une erreur après publication déclenche le rollback des fichiers de tout le lot sur cet hôte. Un fichier modifié par un tiers est conservé ; le journal passe à `recovery-required` et la lease reste présente si la restauration est incomplète.
+- Une erreur de planification ou de validation ne publie aucune opération du lot. Une erreur après publication déclenche le rollback des fichiers de tout le lot sur cet hôte. Un fichier modifié par un tiers est conservé ; le journal passe à `recovery-required` si la restauration est incomplète. Le processus libère l’exclusion, mais les nouvelles écritures restent bloquées jusqu’à la reprise de cette transaction.
 
 Les journaux privés conservent les empreintes de lot et de plan ainsi que le nombre d’opérations, sans recopier les valeurs de requête dans le manifeste. Les sauvegardes de fichiers peuvent contenir des secrets ; leur accès reste root privé. La procédure de reprise et de rétention est celle de [MANAGEMENT.md](MANAGEMENT.md#transaction-sécurité-et-reprise).
 

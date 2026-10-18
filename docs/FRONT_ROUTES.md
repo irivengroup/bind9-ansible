@@ -1,221 +1,76 @@
-# Ajouter les seules routes de retour FRONT
+# Routes de retour FRONT : exploitation
 
-**Mode temporaire actuel :** `bind_operation_lock_enabled: false` désactive la prise du verrou commun `.operation.lock` pour les opérations ordinaires, lectures et simulations de management comprises. Un ancien verrou est ignoré et conservé. **Une seule opération à la fois**, y compris toute intervention manuelle. Avec le booléen YAML `true`, les garanties de verrou coopératif décrites ci-dessous s’appliquent de nouveau. Le tag `hibernate` et le déploiement complet avec `hibernate_deployment: yes` conservent toujours ce verrou. Les journaux de reprise, contrôles de checksum et verrous propres aux routes/sauvegardes restent actifs. [Contrat et preuves de cette révision](VERROUS_OPERATIONS_OPTIONNELS.md).
+Le réseau existe déjà. Le rôle ajoute uniquement les routes IPv4 nécessaires aux `bind_cloud_clients`, dans le profil NetworkManager actif de FRONT et dans le noyau. Les `bind_internal_clients` ne déclenchent aucun ajout de route. Les adresses isolées deviennent des `/32` ; les CIDR sont normalisés et leur union est conservée, sans élargissement des destinations.
 
-Le réseau du serveur est déjà configuré. Le rôle complète les routes IPv4 vers
-`bind_cloud_clients` avec les outils natifs `ip` et `nmcli`. Il découvre le
-profil NetworkManager actif par UUID, puis lit sa propriété `ipv4.gateway`.
-Aucune variable de passerelle ou d'interface supplémentaire n'est nécessaire.
+**La découverte suit l’IP FRONT, puis son interface et son profil actif. FRONT n’a pas besoin de porter la route par défaut du système, ni même une route `0.0.0.0/0` active. La passerelle système ou celle d’une autre interface ne sert jamais de repli.**
 
-La révision de durcissement relit le profil, sa passerelle, les routes et les
-règles sous verrou avant le premier ajout. Une dérive provoque un refus avant
-écriture et libère seulement le verrou acquis par cette exécution. Les règles
-standard sont contrôlées aussi avant commit et rollback ; des priorités correctes
-avec un sélecteur `fwmark`, une destination ou une autre politique ne sont pas
-assimilées au routage classique. Voir [DURCISSEMENT_SECURITE.md](DURCISSEMENT_SECURITE.md).
+Deux fichiers portent le fonctionnement courant : `roles/bind9/tasks/tasks.d/deploy/front_return_routes.yml` et `roles/bind9/files/bind-front-routes.sh`. Un seul adaptateur YAML, `front_routes_legacy.yml`, reste réservé à la reprise des anciens journaux. Les douze anciens fichiers auxiliaires séparés sont retirés.
 
-Les clients du sous-réseau directement connecté à FRONT ne nécessitent pas
-de route via une passerelle ; leur chemin effectif est néanmoins contrôlé.
-Une adresse de client sans préfixe est normalisée en `/32`.
+## Préparer puis appliquer
 
-## Configuration et commande
+L’inventaire doit garder les deux pairs et leurs adresses ADM/FRONT/BACK, même avec une limite à un hôte. Les trois adresses locales sont des IPv4 littérales ; FRONT doit être présente sur une interface active distincte des interfaces ADM/BACK, y compris lorsque FRONT est une adresse secondaire.
 
-La gestion est **désactivée par défaut**, conformément à l'état demandé après le problème de plan vide. Définir le booléen YAML `bind_front_routes_enabled: true` pour l'activer. La reprise `routes-recover` reste disponible lorsque la gestion est désactivée. Une liste cloud vide ne déclenche aucun ajout ; dans ce cas, la liste interne doit être non vide. Deux listes vides sont refusées avant toute commande réseau.
-
-Les réseaux des clients sont déjà déclarés dans les `group_vars` du site :
+Dans les variables du site :
 
 ```yaml
+bind_front_routes_enabled: true
 bind_cloud_clients:
-  - 198.51.100.0/24
-  - 203.0.113.25
+  - 203.0.113.0/24
+  - 172.20.1.25
+bind_front_route_metric: 100
 ```
 
-Ces adresses sont des exemples de documentation, pas les réseaux de production. `bind_internal_clients` ne fournit aucune destination de route : le réseau BACK existant est conservé. La fusion `bind_allowed_clients` sert exclusivement aux autorisations DNS.
-`bind_front_route_metric` est un entier optionnel, par défaut `100`, appliqué
-uniquement aux nouvelles routes spécifiques. Une route existante conserve sa
-métrique. Les adresses FRONT, BACK et ADM restent celles de l'inventaire.
+Les adresses ci-dessus sont des exemples à adapter. Le booléen est `false` par défaut et la métrique est un entier de 1 à 4294967295. Une liste cloud vide n’appelle pas le moteur ; dans ce cas les clients internes doivent être déclarés. Deux listes clientes vides restent refusées.
 
-Depuis la racine du projet, exécuter uniquement les tâches de routage :
+Le moteur accepte au plus **512 entrées cloud par opération**, avant agrégation ; cette limite concerne le routage, pas l’ACL DNS lorsque les routes sont désactivées. Chaque observation native est limitée à **1 Mio**, avec trente secondes par commande puis cinq secondes avant arrêt forcé si nécessaire. Un dépassement est refusé explicitement ; aucune sortie tronquée n’est acceptée comme état complet.
+
+Depuis la racine du projet sur le contrôleur Linux :
 
 ```bash
-ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --tags routes \
-  -e '{"bind_front_routes_enabled": true}'
+ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml \
+  --limit site1-dns01 --tags routes --check -v \
+  -e '{"bind_front_routes_enabled":true}'
+
+ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml \
+  --limit site1-dns01 --tags routes \
+  -e '{"bind_front_routes_enabled":true}'
 ```
 
-Pour un seul serveur, ajouter `--limit` avec son nom d'inventaire. Les groupes
-du site et les variables des deux pairs doivent rester présents dans l'inventaire.
-Le tag `routes` n'installe pas de paquet et ne déploie pas de configuration DNS.
-Les tâches existantes marquées `always` dérivent seulement les faits du rôle.
-Les routes sont aussi incluses dans le tag `deploy` du déploiement complet lorsque ce booléen est activé. Éviter `-e bind_front_routes_enabled=true`, qui produit une chaîne avec Ansible 2.9 ; le rôle exige un véritable booléen.
+La simulation calcule et affiche les ajouts. Elle ne modifie ni profil ni route ; elle peut créer le dossier privé et le fichier vide d’exclusion. Une répétition après application ne doit annoncer aucun changement. Les commandes de mutation peuvent renvoyer un stdout vide : elles sont contrôlées par leur code retour et par la relecture des deux magasins, jamais par `from_json` sur leur stdout.
 
-Prévisualisation sans mutation du réseau ni création du journal :
+Ce tag ne redéploie pas BIND et ne modifie pas les ACL DNS. Les variables clientes servent au calcul des routes ; leur modification ne met pas, à elle seule, la configuration DNS live à jour.
+
+## Découverte et protections
+
+Le moteur utilise uniquement Bash et les outils natifs : `iproute`, NetworkManager/`nmcli`, `util-linux` (`flock`), GNU coreutils et `sed`. Aucun Python de routage, `jq`, `netaddr`, filtre personnalisé ou collection Galaxy n’est ajouté. Les outils manquants provoquent une erreur nommant le prérequis avant toute écriture de route.
+
+La passerelle est lue sur le profil actif FRONT par UUID. Si `ipv4.gateway` est vide, l’état actif `IP4.GATEWAY` de cette même interface peut fournir la passerelle. Si les deux sont absents, une unique passerelle de route par défaut déjà déclarée dans ce même profil peut être utilisée. Des observations contradictoires sont refusées. La passerelle doit être une adresse utilisable du sous-réseau de l’adresse FRONT, différente de toutes les IPv4 locales actives, y compris les adresses secondaires. Aucune passerelle globale, BACK ou ADM n’est choisie par défaut. Les métriques explicites existantes restent conservées ; une métrique automatique est déduite de la route active ou de la métrique effectivement observée sur FRONT.
+
+Le moteur ajoute avec `+ipv4.routes` et `ip route add`. Il ne remplace ni ne supprime une ancienne route contradictoire, ne vide aucune table et n’utilise ni `connection up`, ni `device reapply` en exploitation. Les paramètres de profil en attente, notamment DNS, ne sont pas activés. Les adresses, règles, passerelle et magasins sont relus avant écriture et après application ; les routes étrangères doivent rester identiques.
+
+Les plages réservées, les réseaux ADM/BACK, les adresses BACK des pairs et le client SSH IPv4 réel sont protégés. Les formes IPv4 mappées en IPv6 du client SSH sont également reconnues. Les clients directement connectés à FRONT ne nécessitent pas de route via une passerelle. Les règles IPv4 doivent être les trois règles standard des tables `local`, `main`, `default` : VRF, routage par politique et multipath nécessitent une gestion réseau spécifique.
+
+## Exclusion sans verrou périmé
+
+Routes et management partagent `/var/lib/Bind9-Ansible/operations.flock`, fichier **vide**, root `0600`, dans un dossier root `0700`. L’exclusion appartient au processus via `flock`, puis disparaît à sa fin, y compris après un arrêt brutal. L’existence du fichier n’est jamais interprétée comme une opération active ; ne pas le supprimer. Un processus actif concurrent reçoit un refus explicite et peut être relancé après la fin du premier.
+
+Le dossier historique `.operation.lock` reste ignoré par défaut hors hibernation. `bind_operation_lock_enabled: true` réactive sa coopération historique dans le garde de déploiement ; ce réglage reste `false` par défaut. Le sceau d’hibernation `.deployment.lock` conserve son fonctionnement. Les déploiements DNS complets et interventions root doivent toujours être organisés dans une fenêtre exclusive : un éditeur root ne coopérant pas avec l’exclusion peut agir entre deux contrôles.
+
+## Échec et reprise
+
+Une opération qui écrit prépare d’abord `/var/lib/Bind9-Ansible/front-routes.pending/`, avec instantanés, opérations ordonnées, progression et SHA-256. Ce dossier contient des données de reprise ; il ne représente pas un processus vivant. Après réussite isolée, il est supprimé de façon contrôlée, sans suppression récursive. Dans un déploiement DNS complet, il est conservé jusqu’aux contrôles DNS puis committé, ou repris par le rollback du déploiement.
+
+Un échec pris en charge déclenche le retrait des seuls ajouts confirmés, après contrôle des deux magasins. Une modification manuelle, une identité inattendue, un fichier de journal ajouté, une corruption ou une issue de commande rendue ambiguë par un crash empêchent toute suppression hasardeuse. Le journal reste présent avec une cause explicite. La reprise protège aussi le client SSH de la connexion courante, qui peut être différent de celui de l’opération initiale.
+
+Après inspection du journal et du réseau, et après vérification qu’aucune autre opération ou intervention n’est en cours :
 
 ```bash
-ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --tags routes --check -v \
-  -e '{"bind_front_routes_enabled": true}'
+ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml \
+  --limit site1-dns01 --tags routes-recover
 ```
 
-Les observations natives sont réellement lues en mode simulation ; les ajouts
-proposés sont affichés. Cette garantie concerne le tag `routes`, pas l'ensemble
-du déploiement DNS en mode simulation.
+La commande reprend le format actuel, ou l’ancien `front-routes.lock/plan.json` via l’adaptateur conservé. Elle ne supprime pas un journal absent ou dangereux pour repartir artificiellement. Un conflit nécessite une réconciliation opérateur des seules routes concernées. Ne pas effacer les journaux pour forcer une exécution.
 
-## Prérequis précis
+Une restauration de BIND n’annule pas des routes déjà committées. Retirer un client de l’inventaire ne supprime pas sa route historique : le fonctionnement reste additif.
 
-- RHEL 8, Ansible 2.9 et Python 3.6.8 côté serveur constituent la cible demandée.
-  Les modules Ansible standard s’exécutent sur le serveur. Aucun script ou filtre
-  Python de routage personnalisé n’est fourni, aucun paquet contrôleur supplémentaire
-  n’est nécessaire ; `netaddr` et les collections réseau ne sont pas requis.
-- SSH ADM et `become: true` ; `ip` et `nmcli` déjà disponibles ; NetworkManager
-  déjà actif avec un profil FRONT et une passerelle IPv4 configurée, sur le lien.
-- FRONT, BACK et ADM sont des interfaces distinctes avec les adresses IPv4
-  littérales déclarées dans l'inventaire. Les adresses doivent être présentes
-  sur le serveur ; la découverte refuse les profils absents ou ambigus.
-- Routage IPv4 dans la table principale avec les trois règles standard
-  `local`, `main`, `default`. Les VRF et règles de routage personnalisées sont
-  refusées plutôt que modifiées ou interprétées implicitement.
-- Les réseaux des clients ne doivent pas englober les réseaux BACK/ADM, les
-  adresses des pairs, ni l'adresse IPv4 SSH du contrôleur. Celle-ci est lue depuis
-  la session du compte SSH, sans dépendre de l'environnement filtré par sudo.
-  Une session SSH non identifiable provoque un échec avant modification.
-  Les routes par défaut, loopback, link-local, multicast et IPv6 sont refusées.
-- Aucun autre déploiement ou opérateur ne doit modifier le profil pendant cette
-  opération. Le verrou du rôle ne sérialise pas les commandes manuelles externes.
-
-## Opération additive
-
-Une route manquante est ajoutée avec l'opérateur `+ipv4.routes` dans le profil,
-puis dans la table principale du noyau avec `ip -4 route add ... via ... dev ...`, en conservant la métrique retenue.
-La commande noyau ne réactive pas la connexion et ne réapplique pas les
-autres modifications éventuelles en attente dans le profil. Les paramètres
-d'adressage, de passerelle, de DNS, de MTU et les profils BACK/ADM ne sont pas
-écrits par ces tâches. Il n'y a aucun appel `connection up/down` dans le rôle.
-
-Le choix des commandes suit la
-[documentation NetworkManager](https://www.networkmanager.dev/docs/api/1.30/nmcli.html)
-et la [procédure RHEL 8 pour les ajouts de routes](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/8/html/configuring_and_managing_networking/configuring-static-routes_configuring-and-managing-networking).
-
-Les routes initiales sont photographiées avant modification. Après l'ajout,
-le rôle contrôle leur conservation, la correspondance des routes persistantes
-avec le plan et le chemin obtenu avec `ip route get CLIENT from FRONT_IP`.
-La route par défaut existante doit rester identique. Un deuxième passage
-n'effectue aucune mutation si les routes sont déjà présentes et correctes.
-
-Une route contradictoire au même préfixe, ou plus spécifique, provoque un échec
-avant modification. Une route active non persistée n'est pas revendiquée comme
-propriété du rôle : la persister explicitement dans son profil avant de relancer.
-Les routes présentes ne sont jamais remplacées pour imposer une nouvelle métrique.
-Le rôle ajoute les préfixes demandés ; il ne supprime pas automatiquement une
-ancienne route quand un client disparaît de la liste.
-
-## Échec, interruption et reprise
-
-Le rollback vérifie désormais les identités persistantes **et** actives avant
-de retirer la première route. Il refuse les attributs noyau inattendus, les
-métriques modifiées, les changements de passerelle/règles et les recouvrements
-des adresses actuelles ADM/FRONT/BACK ou du contrôleur SSH. Une route sans
-métrique explicite dans la commande correspond à la métrique noyau zéro,
-pas à une métrique arbitraire. Un conflit conserve le journal pour inspection.
-Un journal de reprise doit être un fichier root régulier `0600` avec un seul
-lien, dans les répertoires root `0700` attendus. Son schéma historique est
-conservé, mais les doublons d’ajouts sont refusés avant toute commande de retrait.
-
-Le plan est construit par les tâches natives : expressions Jinja standard, validation IPv4 stricte et comparaison d’intervalles numériques pour les réseaux. Les adresses primaires et secondaires sont observées avec `ip -j -4 address show`. Les références de réseaux sont comparées exactement, jamais par sous-chaîne. La déduplication et l’agrégation des préfixes adjacents/inclus restent identiques à la livraison source.
-
-Les faits JSON sont acceptés sous leur forme sérialisée ou sous la forme de dictionnaire/liste déjà convertie par Ansible 2.9 ; ils sont ensuite contrôlés avant emploi. Une sortie vide ou malformée provoque un échec explicite. Les commandes de mutation peuvent réussir sans stdout : seul leur résultat d’exécution puis les observations réseau déterminent la réussite. Aucune erreur d’ajout ou de suppression n’est masquée par `failed_when: false`.
-
-`-v` affiche périphérique, passerelle et ajouts proposés. La route persistante et la route active sont contrôlées séparément : une route correctement persistée mais absente du noyau est réinstallée à chaud. Une route contradictoire existante n’est pas supprimée automatiquement : le réseau préexistant reste sous la responsabilité de son gestionnaire.
-
-Avant la première modification, le plan est enregistré dans
-`/var/lib/Bind9-Ansible/front-routes.lock/plan.json` : répertoire root `0700`,
-fichier root `0600`. Le journal est borné en taille. En cas d'échec, le rôle
-retire seulement ses ajouts qui sont encore présents avec la même identité (préfixe, passerelle, interface et métrique),
-puis exige le retour à l'état initial. Une erreur de rollback est explicite
-et laisse le journal disponible ; elle n'est pas ignorée.
-
-Le journal est supprimé à la réussite. Un arrêt brutal laisse le verrou et
-interdit un nouvel ajout. Vérifier qu'aucun déploiement n'est en cours, examiner
-le journal et les routes, puis lancer la reprise explicite sur le serveur :
-
-```bash
-ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --tags routes-recover
-```
-
-Ajouter `--limit` pour reprendre un seul hôte. Si une autre personne a remplacé
-une route ou changé le profil actif, la reprise s'arrête et conserve le journal
-pour examen. Ne pas supprimer le verrou d'une opération encore active. Un
-verrou sans journal exploitable exige une inspection manuelle ; aucune route
-n'est supprimée à l'aveugle.
-
-**Verrou commun de la révision courante :** les tags `routes` et
-`routes-recover` acquièrent aussi `/var/lib/Bind9-Ansible/.operation.lock`.
-Une restauration DNS/FRONT incomplète conserve ce verrou et bloque la reprise
-automatique. Suspendre les autres automatisations, confirmer l’absence de tout
-processus propriétaire, inspecter et rétablir DNS si nécessaire. Conserver le
-journal `front-routes.lock`. Après ces contrôles, un opérateur peut retirer
-uniquement le répertoire d’opération vide avec `rmdir`, puis lancer immédiatement
-`routes-recover` sous le nouveau verrou commun. Un répertoire non vide, remplacé
-ou dont le propriétaire est incertain ne doit pas être supprimé ; il exige
-une analyse manuelle. Ce retrait n’est pas une autorisation de redéploiement.
-Le sceau `.deployment.lock` est indépendant et reste en place ; voir
-[HIBERNATE_DEPLOYMENT.md](HIBERNATE_DEPLOYMENT.md).
-
-Avec `--tags deploy` ou l'exécution complète, les nouveaux ajouts restent
-journalisés jusqu'à la réussite des contrôles DNS et de la vérification réseau
-finale. Un échec dans ce bloc retire les ajouts persistants et actifs de cette
-exécution, puis déclenche la restauration BIND. Les routes préexistantes restent
-en place. Si une suppression échoue, le journal reste disponible et l'erreur
-finale le signale ; la restauration BIND est malgré tout tentée.
-
-Avec `--tags routes`, le commit suit immédiatement la vérification des routes.
-Une restauration manuelle ultérieure avec `bind-configtool restore` restaure
-uniquement les fichiers BIND : elle ne supprime pas des routes déjà committées.
-
-### Diagnostiquer « Reject invalid IPv4 observations before any routing write »
-
-L’existence des passerelles ne suffit pas à identifier la cause : la même
-normalisation traite également les adresses locales, `ansible_host`, les
-réseaux clients, les destinations noyau et le contenu d’un journal de reprise.
-La valeur exacte de l’erreur initiale reste nécessaire pour attribuer cet
-incident à une entrée particulière ; aucune cause n’est annoncée comme prouvée
-sans cette valeur.
-
-Le message indique désormais le contexte de lecture, le type et la valeur
-échappée en cas de format invalide. Selon le contexte :
-
-- **Interfaces/inventaire** : vérifier FRONT/BACK et l’IPv4 ADM littérale dans
-  `ansible_host` ; un nom DNS n’est pas une IPv4 normalisable par cette fonction.
-- **Plan** : contrôler les clients déclarés, la source SSH et `ipv4.gateway`
-  du profil FRONT sélectionné ; aucune passerelle globale de remplacement.
-- **Profil** : examiner uniquement `ipv4.routes` de ce profil, avec son format
-  exact et ses réseaux/adresses ; une sortie incomprise n’est pas ignorée.
-- **Noyau** : examiner `ip -j -4 address show` et
-  `ip -j -4 route show table main`, sans modifier le réseau.
-- **Journal** : inspecter le fichier privé conservé et sa provenance avant
-  `routes-recover` ; ne pas remplacer des valeurs au hasard ni effacer le verrou.
-
-Les observations non IPv4, non canoniques ou de mauvais type restent bloquantes.
-Une source SSH IPv6 native n’est pas ajoutée aux gardes IPv4. Seules les formes
-IPv4 mappées complètes `::ffff:a.b.c.d` et `::ffff:hhhh:hhhh` sont converties :
-une adresse IPv6 contenant simplement `::ffff:` au milieu reste une IPv6.
-Une normalisation exécutée pendant une vérification/rollback ne signifie pas
-qu’aucune tâche antérieure n’a ajouté de route : lire le journal de l’opération.
-
-## Vérification et limites
-
-Voir [VALIDATION_FRONT_ROUTES.md](VALIDATION_FRONT_ROUTES.md) pour les résultats
-exécutés et les contrôles restant à réaliser sur le serveur RHEL.
-
-Le laboratoire NetworkManager est reproductible sur un contrôleur Linux
-disposable disposant de root, `unshare`, `ip`, `dbus-daemon`, NetworkManager,
-Ansible et Python avec PyYAML :
-
-```bash
-sudo bash tests/run_integration_front_routes.sh
-```
-
-Le lanceur crée les espaces réseau, processus et montages isolés AVANT le
-démarrage du service de test. Les commandes de réactivation dans ce laboratoire
-servent uniquement à prouver la persistance ; elles ne figurent pas dans les
-tâches déployées. Aucun paquet n'est installé par ce test.
-
-Adaptation du playbook fourni et résultats actuels : [VALIDATION_ROUTES_NATIVES.md](VALIDATION_ROUTES_NATIVES.md).
+L’initialisation concurrente du dossier d’état est acceptée seulement si le dossier apparu est ensuite reconnu root `0700`, sans lien ; aucun droit existant n’est corrigé aveuglément. Les preuves, limites et parties impactées figurent dans [DURCISSEMENT_FINAL.md](DURCISSEMENT_FINAL.md). La [refonte antérieure](REFONTE_ROUTES_MANAGEMENT.md) conserve sa traçabilité. La recette sur vos serveurs RHEL reste nécessaire.

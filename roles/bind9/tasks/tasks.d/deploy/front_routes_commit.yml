@@ -1,9 +1,0 @@
----
-- name: Commit successfully validated owned FRONT additions
-  ansible.builtin.file:
-    path: /var/lib/Bind9-Ansible/front-routes.lock
-    state: absent
-
-- name: Mark the FRONT route operation committed
-  ansible.builtin.set_fact:
-    bind_front_route_transaction_pending: false

@@ -1,12 +1,19 @@
 """Safety contracts executed from native route YAML, without custom filters."""
 import copy
 import json
+import ipaddress
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 import pytest
-import yaml
 from route_task_expressions import TaskExpressions
 
+pytestmark = pytest.mark.skipif(os.name != 'posix' or os.geteuid() != 0, reason='Requires isolated Linux root')
 ROOT = Path(__file__).resolve().parents[1]
 UUID = '12345678-1234-4234-8234-123456789abc'
 RULES = json.dumps([{'priority': 0, 'src': 'all', 'table': 'local'},
@@ -20,21 +27,91 @@ BASE = [{'dst': 'default', 'gateway': '10.0.0.1', 'dev': 'back0', 'metric': 100}
 NEW = {'dst': '203.0.113.0/24', 'gateway': '198.51.100.1', 'dev': 'front0', 'metric': 100}
 
 
+class NativeRouteLab:
+    """Run the exact Bash engine with isolated ip/nmcli boundaries."""
+
+    def __init__(self, folder):
+        self.folder = folder
+        self.state = folder / 'route-state'
+        self.data_file = folder / 'network.json'
+        self.data = dict(uuid=UUID, gateway='198.51.100.1', addresses=json.loads(ADDRESSES),
+                         rules=json.loads(RULES), runtime=copy.deepcopy(BASE), persistent=[], operations=[])
+        binaries = folder / 'bin'
+        binaries.mkdir()
+        (binaries / 'python3').symlink_to(sys.executable)
+        for name in ('ip', 'nmcli'):
+            target = binaries / name
+            shutil.copyfile(str(ROOT / 'tests/fixtures/native_network_cli.py'), str(target))
+            target.chmod(0o755)
+        self.env = dict(os.environ, BIND_NETWORK_DOUBLE_STATE=str(self.data_file))
+        self.script = folder / 'routes.sh'
+        source = (ROOT / 'roles/bind9/files/bind-front-routes.sh').read_text()
+        source = source.replace('STATE=/var/lib/Bind9-Ansible', 'STATE=' + str(self.state))
+        source = source.replace('export PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+                                'export PATH=' + str(binaries) + ':/usr/sbin:/usr/bin:/sbin:/bin')
+        self.script.write_text(source)
+
+    def run(self, action='apply', clients=None, more=None):
+        self.data_file.write_text(json.dumps(self.data))
+        args = ['/bin/bash', str(self.script), '--action', action, '--front-ip', '198.51.100.2',
+                '--back-ip', '10.0.0.2', '--adm-ip', '192.0.2.2', '--peer-back-ip', '10.0.0.3']
+        for client in ['203.0.113.0/24'] if clients is None else clients:
+            args.extend(['--client', client])
+        args.extend(more or [])
+        result = subprocess.run(args, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                universal_newlines=True, timeout=60)
+        self.data = json.loads(self.data_file.read_text())
+        return result
+
+
 def plan(**kwargs):
-    """Supply CLI observations; actual planning and checks come from role tasks."""
+    """Exercise the new engine and present its result as a legacy journal fixture.
+
+    Old journal checks still use their production compatibility adapter. Route
+    planning is never evaluated from the retired Jinja implementation.
+    """
     values = dict(clients=['203.0.113.0/24'], internal=[], gateway='198.51.100.1', persistent='',
                   runtime=json.dumps(BASE), rules=RULES, route_table='0', profile=UUID, metric=100, ssh='192.0.2.99')
     values.update(kwargs)
-    context = {'ansible_host':'192.0.2.2', 'bind_front_ip':'198.51.100.2', 'bind_back_ip':'10.0.0.2',
-               'bind_primary_host':'p', 'bind_secondary_host':'s',
-               'hostvars':{'p':{'bind_back_ip':'10.0.0.2'}, 's':{'bind_back_ip':'10.0.0.3'}},
-               'bind_front_interface':{'device':'front0','network':'198.51.100.0/24',
-                   'protected_networks':['10.0.0.0/24','192.0.2.0/24']},
-               'bind_front_uuid':values['profile'], 'bind_front_ssh_client':values['ssh'],
-               'bind_cloud_clients':values['clients'], 'bind_internal_clients':values['internal'], 'bind_front_route_metric':values['metric'],
-               'bind_front_profile':{'results':[{'stdout':x} for x in [values['gateway'],values['persistent'],values['route_table']]]},
-               'bind_front_kernel':{'results':[{'stdout':values['runtime']},{'stdout':values['rules']}]}}
-    return TaskExpressions(context).run('deploy/front_routes_plan.yml')['bind_front_plan']
+    envelope = TaskExpressions(dict(bind_front_action='plan', ansible_check_mode=True,
+                                    bind_front_route_metric=values['metric']))
+    tasks = TaskExpressions.load('deploy/front_return_routes.yml')
+    envelope.run('', tasks=[next(task for task in tasks if task.get('name') == 'Validate the native FRONT action envelope')])
+    with tempfile.TemporaryDirectory() as temporary:
+        lab = NativeRouteLab(Path(temporary))
+        lab.data.update(gateway=values['gateway'], runtime=json.loads(values['runtime']),
+                        rules=json.loads(values['rules']), route_table=values['route_table'], uuid=values['profile'],
+                        profile_text=values['persistent'])
+        if 'addresses' in values:
+            lab.data['addresses'] = values['addresses']
+        result = lab.run('plan', values['clients'], ['--metric', str(values['metric']), '--ssh-peer', values['ssh']])
+        if result.returncode not in (0, 2):
+            raise ValueError(result.stdout)
+        match = re.search(r'FRONT device=(\S+) profile=(\S+) gateway=(\S+) additions=', result.stdout)
+        additions = {'P': [], 'R': []}
+        for store, net, gateway, metric in re.findall(r'(?m)^  ([PR])[|]([^|]+)[|]([^|]+)[|]([0-9]+)$', result.stdout):
+            additions[store].append(net + ' ' + gateway + ' ' + metric)
+        persistent = TaskExpressions({'bind_front_routes_text': values['persistent']}).run(
+            'deploy/front_routes_parse_profile.yml')['bind_front_parsed_profile']
+        protected = ['192.0.2.2', '10.0.0.2', '10.0.0.2', '10.0.0.3']
+        try:
+            peer = ipaddress.ip_address(values['ssh'])
+            if isinstance(peer, ipaddress.IPv6Address):
+                peer = peer.ipv4_mapped
+            if peer is not None:
+                protected.append(str(peer))
+        except ValueError:
+            pass
+        probes = []
+        for client in values['clients']:
+            net = ipaddress.ip_network(client if '/' in client else client + '/32')
+            connected = net.subnet_of(ipaddress.ip_network('198.51.100.0/24')) if hasattr(net, 'subnet_of') else net.network_address in ipaddress.ip_network('198.51.100.0/24')
+            probes.append(dict(address=str(net.network_address + (1 if net.prefixlen < 31 else 0)),
+                               network=str(net), gateway=None if connected else values['gateway']))
+        return dict(device=match.group(1), uuid=match.group(2), gateway=match.group(3),
+                    profile_additions=additions['P'], runtime_additions=additions['R'],
+                    probes=probes, runtime_before=json.loads(values['runtime']), profile_before=persistent,
+                    protected_ips=protected)
 
 
 class TestNativeRouteExpressions:
@@ -58,10 +135,7 @@ class TestNativeRouteExpressions:
         if secondary:
             addresses[0]['addr_info'].insert(0, {'family':'inet','local':'198.51.100.10','prefixlen':24})
             addresses[0]['addr_info'][1]['secondary'] = True
-        tasks = yaml.safe_load((TaskExpressions.TASKS/'deploy/front_return_routes.yml').read_text())[2:6]
-        result = TaskExpressions({'bind_front_addresses':{'stdout':json.dumps(addresses)}, 'bind_front_ip':'198.51.100.2',
-                                  'bind_back_ip':'10.0.0.2','ansible_host':'192.0.2.2'}).run('', tasks=tasks)
-        assert result['bind_front_interface']['device'] == 'front0'
+        assert plan(addresses=addresses)['device'] == 'front0'
 
     @pytest.mark.parametrize('change', ['down','missing-front','duplicate-front','missing-back','shared-back'])
     def test_unsafe_front_discovery_is_rejected(self, change):
@@ -71,10 +145,8 @@ class TestNativeRouteExpressions:
         elif change == 'duplicate-front': addresses.append(copy.deepcopy(addresses[0]))
         elif change == 'missing-back': addresses[1]['addr_info'] = []
         else: addresses[0]['addr_info'].extend(addresses[1]['addr_info'])
-        tasks = yaml.safe_load((TaskExpressions.TASKS/'deploy/front_return_routes.yml').read_text())[2:6]
         with pytest.raises(ValueError):
-            TaskExpressions({'bind_front_addresses':{'stdout':json.dumps(addresses)}, 'bind_front_ip':'198.51.100.2',
-                             'bind_back_ip':'10.0.0.2','ansible_host':'192.0.2.2'}).run('', tasks=tasks)
+            plan(addresses=addresses)
 
     @pytest.mark.parametrize('typed', [False, True])
     def test_preservation_accepts_json_or_ansible_converted_lists(self, typed):
@@ -91,7 +163,7 @@ class TestNativeRouteExpressions:
 
     @pytest.mark.parametrize('metric', [100, 200])
     def test_owned_active_route_identity_is_checked_before_removal(self, metric):
-        all_tasks = yaml.safe_load((TaskExpressions.TASKS/'deploy/front_routes_rollback.yml').read_text())
+        all_tasks = TaskExpressions.load('deploy/front_routes_rollback.yml')
         start = next(index for index,task in enumerate(all_tasks) if task['name']=='Normalize active destinations being inspected')
         runner = TaskExpressions({'bind_front_plan':plan(), 'bind_front_rollback_kernel':{'stdout':json.dumps(BASE+[dict(NEW,metric=metric)])}})
         if metric == 200:
@@ -181,3 +253,154 @@ class TestNativeRouteExpressions:
     def test_existing_journal_cannot_claim_preexisting_routes(self):
         corrupted=plan(); corrupted['runtime_before'].append(NEW)
         with pytest.raises(ValueError): TaskExpressions({'bind_front_plan':corrupted}).run('deploy/front_routes_validate_journal.yml')
+
+
+class TestNativeProcessTransactions:
+    """Exercise the replacement engine, not only its planned arithmetic."""
+
+    @pytest.mark.parametrize('device', ['front0', 'other0'])
+    def test_a_gateway_owned_by_the_server_is_refused_before_any_write(self, tmp_path, device):
+        lab = NativeRouteLab(tmp_path)
+        lab.data['addresses'].append({'ifname': device, 'operstate': 'UP', 'addr_info': [
+            {'family': 'inet', 'local': '198.51.100.1', 'prefixlen': 24}]})
+        result = lab.run()
+        assert result.returncode == 1, result.stdout
+        assert 'gateway is a local server address' in result.stdout
+        assert not lab.data['operations']
+        assert lab.data['runtime'] == BASE and not lab.data['persistent']
+
+    @pytest.mark.parametrize('mode', ['0700', '0777'])
+    def test_concurrent_state_initialization_is_revalidated_without_chmod(self, tmp_path, mode):
+        lab = NativeRouteLab(tmp_path)
+        wrapper = tmp_path / 'bin/mkdir'
+        wrapper.write_text('#!/bin/bash\n'
+            'if [[ "${@: -1}" == "$BIND_STATE_INIT_RACE" && ! -e "$BIND_STATE_INIT_RACE" ]]; then\n'
+            '  /usr/bin/mkdir -m ' + mode + ' -- "$BIND_STATE_INIT_RACE" || exit 2\n'
+            '  exit 1\nfi\nexec /usr/bin/mkdir "$@"\n')
+        wrapper.chmod(0o755)
+        lab.env['BIND_STATE_INIT_RACE'] = str(lab.state)
+        result = lab.run()
+        assert result.returncode == (2 if mode == '0700' else 1), result.stdout
+        assert lab.state.stat().st_mode & 0o777 == int(mode, 8)
+        if mode == '0777':
+            assert not lab.data['operations']
+
+    def test_gateway_from_active_front_device_when_profile_property_is_empty(self, tmp_path):
+        lab = NativeRouteLab(tmp_path)
+        lab.data.update(gateway='', active_gateway='198.51.100.1')
+        result = lab.run()
+        assert result.returncode == 2, result.stdout
+        assert lab.data['runtime'] == BASE + [NEW]
+        assert len(lab.data['persistent']) == 1
+
+    @pytest.mark.parametrize('system_gateway', ['10.0.0.1', '10.0.0.254'])
+    @pytest.mark.parametrize('profile_gateway', ['', '198.51.100.1'])
+    def test_front_gateway_is_independent_of_system_default(self, tmp_path, system_gateway, profile_gateway):
+        lab = NativeRouteLab(tmp_path)
+        lab.data['runtime'][0]['gateway'] = system_gateway
+        lab.data.update(gateway=profile_gateway, active_gateway='198.51.100.1')
+        assert not any(row.get('dst') == 'default' and row.get('dev') == 'front0' for row in lab.data['runtime'])
+        result = lab.run()
+        assert result.returncode == 2, result.stdout
+        assert lab.data['runtime'][0]['gateway'] == system_gateway
+        assert lab.data['runtime'][-1]['gateway'] == '198.51.100.1'
+        assert all('198.51.100.1' in item['route'] for item in lab.data['operations'])
+
+    @pytest.mark.parametrize('active', [False, True])
+    def test_automatic_profile_metric_uses_observed_front_metric(self, tmp_path, active):
+        lab = NativeRouteLab(tmp_path)
+        lab.data['route_metric'] = '-1'
+        lab.data['runtime'][1]['metric'] = 500
+        lab.data['persistent'] = [{'network': '203.0.113.0/24', 'gateway': '198.51.100.1', 'metric': -1}]
+        if active:
+            lab.data['runtime'].append(dict(NEW, metric=500))
+        result = lab.run()
+        assert result.returncode == (0 if active else 2), result.stdout
+        assert lab.data['runtime'][-1] == dict(NEW, metric=500)
+        assert lab.data['persistent'][0]['metric'] == -1
+
+    def test_gateway_from_existing_default_route_of_that_profile(self, tmp_path):
+        lab = NativeRouteLab(tmp_path)
+        lab.data.update(gateway='', persistent=[{'network': '0.0.0.0/0', 'gateway': '198.51.100.1', 'metric': 600}])
+        lab.data['runtime'].append(dict(NEW, dst='default', metric=600))
+        result = lab.run()
+        assert result.returncode == 2, result.stdout
+        assert len(lab.data['operations']) == 2
+        assert len(lab.data['persistent']) == 2
+        assert lab.data['runtime'] == BASE + [dict(NEW, dst='default', metric=600), NEW]
+
+    @pytest.mark.parametrize('field,value', [('runtime_text', ''), ('runtime_text', 'partial route'),
+                                           ('rules_text', ''), ('rules_text', '0: from all lookup local'),
+                                           ('addresses_text', ''), ('profile_text', '{ broken }'),
+                                           ('active_gateway', '198.51.100.254')])
+    def test_invalid_or_conflicting_observation_never_becomes_an_empty_plan(self, tmp_path, field, value):
+        lab = NativeRouteLab(tmp_path)
+        lab.data[field] = value
+        result = lab.run()
+        assert result.returncode == 1, result.stdout
+        assert not lab.data['operations'] and lab.data['runtime'] == BASE
+        assert not (lab.state / 'front-routes.pending').exists()
+
+    @pytest.mark.parametrize('failure', ['fail_active_once', 'bad_lookup'])
+    def test_native_failure_rolls_back_only_its_additions(self, tmp_path, failure):
+        lab = NativeRouteLab(tmp_path)
+        lab.data[failure] = True
+        result = lab.run()
+        assert result.returncode == 1, result.stdout
+        assert lab.data['persistent'] == [] and lab.data['runtime'] == BASE
+        assert not (lab.state / 'front-routes.pending').exists()
+
+    @pytest.mark.parametrize('action', ['commit', 'rollback', 'recover'])
+    def test_deferred_transaction_has_explicit_owned_completion(self, tmp_path, action):
+        lab = NativeRouteLab(tmp_path)
+        result = lab.run(more=['--defer-commit'])
+        assert result.returncode == 2, result.stdout
+        token = re.search('transaction: ([0-9a-f-]{36})', result.stdout).group(1)
+        assert (lab.state / 'front-routes.pending').is_dir()
+        again = lab.run(action, more=[] if action == 'recover' else ['--token', token])
+        assert again.returncode == (0 if action == 'commit' else 2), again.stdout
+        assert lab.data['runtime'] == (BASE + [NEW] if action == 'commit' else BASE)
+        assert not (lab.state / 'front-routes.pending').exists()
+
+    def test_corrupt_or_foreign_journal_is_preserved_without_route_deletion(self, tmp_path):
+        lab = NativeRouteLab(tmp_path)
+        result = lab.run(more=['--defer-commit'])
+        assert result.returncode == 2, result.stdout
+        journal = lab.state / 'front-routes.pending'
+        (journal / 'operations').write_text('R|0.0.0.0/0|198.51.100.1|100\n')
+        before = copy.deepcopy(lab.data)
+        result = lab.run('recover')
+        assert result.returncode == 1 and 'checksum' in result.stdout
+        assert lab.data == before and journal.exists()
+
+    def test_unexpected_journal_entry_is_never_recursively_removed(self, tmp_path):
+        lab = NativeRouteLab(tmp_path)
+        result = lab.run(more=['--defer-commit'])
+        assert result.returncode == 2, result.stdout
+        evidence = lab.state / 'front-routes.pending/operator-evidence'
+        evidence.write_bytes(b'preserve')
+        before = copy.deepcopy(lab.data)
+        result = lab.run('recover')
+        assert result.returncode == 1 and lab.data == before
+        assert evidence.read_bytes() == b'preserve'
+
+    @pytest.mark.parametrize('changes', [{'metric': 200}, {'dev': 'back0'}, {'prefsrc': '198.51.100.9'}, {'protocol': 'static'}])
+    def test_operator_route_change_prevents_any_rollback_deletion(self, tmp_path, changes):
+        lab = NativeRouteLab(tmp_path)
+        result = lab.run(more=['--defer-commit'])
+        assert result.returncode == 2, result.stdout
+        lab.data['runtime'][-1].update(changes)
+        before = copy.deepcopy(lab.data)
+        result = lab.run('recover')
+        assert result.returncode == 1, result.stdout
+        assert lab.data == before and (lab.state / 'front-routes.pending').is_dir()
+
+    @pytest.mark.parametrize('peer', ['203.0.113.8', '::ffff:203.0.113.8', '::ffff:cb00:7108'])
+    def test_recovery_preserves_the_current_ssh_return_path(self, tmp_path, peer):
+        lab = NativeRouteLab(tmp_path)
+        result = lab.run(more=['--defer-commit'])
+        assert result.returncode == 2, result.stdout
+        before = copy.deepcopy(lab.data)
+        result = lab.run('recover', more=['--ssh-peer', peer])
+        assert result.returncode == 1 and 'current SSH peer' in result.stdout
+        assert lab.data == before and (lab.state / 'front-routes.pending').exists()

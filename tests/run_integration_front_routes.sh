@@ -58,6 +58,9 @@ nmcli connection add type dummy ifname adm0 con-name adm ipv4.method manual \
 for profile in front back adm; do nmcli connection up "$profile"; done
 nmcli connection modify front +ipv4.routes '172.16.0.0/24 198.51.100.1 150'
 nmcli device modify front0 +ipv4.routes '172.16.0.0/24 198.51.100.1 150'
+# Disposable fixture: the system default is exclusively BACK; FRONT retains
+# its own configured gateway without an active default route.
+ip -4 route del default via 198.51.100.1 dev front0 metric 500 table main
 "$python_bin" "$script_dir/integration_front_routes.py" --workarea /run/bind-test
 LAB
 if [[ $status -ne 0 ]]; then

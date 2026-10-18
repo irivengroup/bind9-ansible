@@ -89,7 +89,7 @@ zone "example.test" {type master; file "zones/example.test.zone"; allow-update {
         manager = self.module.Manager(dict(resource=resource, action='read', name=name, **({key: fields[key] for key in ('zone', 'type') if key in fields})), self.context, runner=self.command)
         revision = manager.run()['checksum']
         manager = self.module.Manager(dict(resource=resource, action=action, name=name, expected_checksum=revision, **fields), self.context, runner=self.command)
-        with manager.lease():
+        with manager.operation():
             result = manager.run()
         assert result['changed'], result
         assert json.loads(Path(result['backup'], 'manifest.json').read_text())['status'] == 'committed'
@@ -105,14 +105,14 @@ zone "example.test" {type master; file "zones/example.test.zone"; allow-update {
         """Approve an exact candidate, check it, then publish it once."""
         request = dict(resource='batch', action='read', operations=operations)
         reader = self.module.BatchManager(request, self.context, runner=self.command)
-        with reader.lease():
+        with reader.operation():
             preview = reader.run()
         request.update(action='apply', expected_checksum=preview['checksum'], expected_plan_checksum=preview['plan_checksum'])
         candidate = self.module.BatchManager(request, self.context, runner=self.command, check=True)
-        with candidate.lease():
+        with candidate.operation():
             assert candidate.run()['check_mode']
         manager = self.module.BatchManager(request, self.context, runner=self.command)
-        with manager.lease():
+        with manager.operation():
             result = manager.run()
         assert result['status'] == 'committed'
         self.transactions += 1
@@ -139,7 +139,7 @@ zone "example.test" {type master; file "zones/example.test.zone"; allow-update {
             if resource == 'record':
                 request['zone'] = 'batch.test'
             reader = self.module.Manager(request, self.context, runner=self.command)
-            with reader.lease():
+            with reader.operation():
                 listings[resource] = reader.run()
         assert len({page['checksum'] for page in listings.values()}) == 1
         assert next(item for item in listings['zone']['items'] if item['name'] == 'batch.test.')['type'] == 'master'
@@ -165,7 +165,7 @@ zone "example.test" {type master; file "zones/example.test.zone"; allow-update {
         invalid = [create[0], dict(resource='record', action='update', zone='example.test', name='www', type='A', values=['999.0.0.1'])]
         reader = self.module.BatchManager(dict(resource='batch', action='read', operations=invalid), self.context, runner=self.command)
         try:
-            with reader.lease():
+            with reader.operation():
                 reader.run()
         except self.module.ManagementError:
             pass
@@ -225,7 +225,7 @@ zone "example.test" {type master; file "zones/example.test.zone"; allow-update {
                 unreachable = self.module.Manager(dict(resource='zone', action='update', name='forward.test',
                     forwarders=[{'address': self.upstream, 'port': 5355}], expected_checksum=revision), self.context, runner=self.command)
                 try:
-                    with unreachable.lease():
+                    with unreachable.operation():
                         unreachable.run()
                 except self.module.ManagementError as error:
                     assert 'rolled-back' in str(error), str(error)

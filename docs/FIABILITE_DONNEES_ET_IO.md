@@ -1,6 +1,6 @@
 # Fiabilité des données récupérées et des écritures
 
-**Mode temporaire actuel :** `bind_operation_lock_enabled: false` désactive la prise du verrou commun `.operation.lock` pour les opérations ordinaires, lectures et simulations de management comprises. Un ancien verrou est ignoré et conservé. **Une seule opération à la fois**, y compris toute intervention manuelle. Avec le booléen YAML `true`, les garanties de verrou coopératif décrites ci-dessous s’appliquent de nouveau. Le tag `hibernate` et le déploiement complet avec `hibernate_deployment: yes` conservent toujours ce verrou. Les journaux de reprise, contrôles de checksum et verrous propres aux routes/sauvegardes restent actifs. [Contrat et preuves de cette révision](VERROUS_OPERATIONS_OPTIONNELS.md).
+**Exclusion actuelle :** routes et management utilisent toujours un verrou de processus commun `/var/lib/Bind9-Ansible/operations.flock`, libéré automatiquement à la fin du processus. Le fichier vide peut rester présent sans bloquer une nouvelle opération. `bind_operation_lock_enabled: false` ignore uniquement le répertoire historique `.operation.lock` hors hibernation ; il ne désactive pas cette exclusion de processus. Les journaux incomplets sont des données de reprise, jamais des verrous à effacer. Organiser les déploiements DNS complets et interventions manuelles dans une fenêtre exclusive. [Fonctionnement, preuves et limites](REFONTE_ROUTES_MANAGEMENT.md).
 
 Révision `2026.10.17-management-io-safety.1`. Les contrôles ci-dessous complètent
 la [préservation de la configuration live](INTEGRITE_CONFIGURATION_LIVE.md).
@@ -148,6 +148,6 @@ entre les deux serveurs. Les sorties d'un terminal ou d'une interface peuvent
 être visuellement tronquées : ne pas les confondre avec un export intègre des
 données ; relire les ressources, examiner les pages et le plan exact avant apply.
 
-La [validation de cette révision](VALIDATION_FIABILITE_IO.md) distingue les essais
+La [validation de cette révision](REFONTE_ROUTES_MANAGEMENT.md) distingue les essais
 réellement exécutés et les qualifications restantes. Aucun engagement d'absence
 totale d'incident en production n'est donné.

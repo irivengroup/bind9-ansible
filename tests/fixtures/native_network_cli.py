@@ -22,6 +22,28 @@ class NativeNetworkDouble:
         self.path.write_text(json.dumps(self.state))
 
     def ip(self, args):
+        if args == ['-o', '-4', 'address', 'show', 'up']:
+            if 'addresses_text' in self.state:
+                return self.state['addresses_text']
+            return '\n'.join(str(index + 1) + ': ' + row['ifname'] + ' inet ' + address['local'] +
+                             '/' + str(address['prefixlen']) + ' scope global ' + row['ifname']
+                             for index, row in enumerate(self.state['addresses'])
+                             if row.get('operstate') in ('UP', 'UNKNOWN')
+                             for address in row['addr_info'] if address.get('family') == 'inet')
+        if args[:5] == ['-o', 'link', 'show', 'dev', 'front0']:
+            return '1: front0: <BROADCAST,UP> mtu 1500' + (' master bridge0' if 'master' in self.state['addresses'][0] else '')
+        if args == ['-o', '-4', 'rule', 'show']:
+            if 'rules_text' in self.state:
+                return self.state['rules_text']
+            return '\n'.join(str(row['priority']) + ': from ' + row.get('src', 'all') +
+                             ' lookup ' + str(row['table']) +
+                             ''.join(' ' + key + ' ' + str(value) for key, value in row.items()
+                                     if key not in ('priority', 'src', 'table')) for row in self.state['rules'])
+        if args == ['-o', '-4', 'route', 'show', 'table', 'main']:
+            return self.state.get('runtime_text', '\n'.join(self.route_text(row) for row in self.state['runtime']))
+        if args[:3] == ['-4', 'route', 'get']:
+            result = self.ip(['-j', '-4', 'route', 'get'] + args[3:])
+            return self.route_text(result[0])
         if args[:3] in (['-4', 'route', 'add'], ['-4', 'route', 'del']):
             # Reuse only the fixture's state/failure machinery; the role's
             # actual command is ip, not a NetworkManager device reactivation.
@@ -50,11 +72,25 @@ class NativeNetworkDouble:
             return [result]
         raise ValueError('Unexpected ip contract: ' + repr(args))
 
+    @staticmethod
+    def route_text(row):
+        text = (row.get('type', '') + ' ' if row.get('type') else '') + row.get('dst', 'default')
+        for key, label in [('gateway', 'via'), ('dev', 'dev'), ('metric', 'metric'),
+                           ('protocol', 'proto'), ('scope', 'scope'), ('prefsrc', 'src')]:
+            if key in row:
+                text += ' ' + label + ' ' + str(row[key])
+        for key, value in row.items():
+            if key not in ('type', 'dst', 'gateway', 'dev', 'metric', 'protocol', 'scope', 'prefsrc'):
+                text += ' ' + key + ' ' + str(value)
+        return text
+
     def nmcli(self, args):
         if args[:2] == ['--wait', '10']:
             args = args[2:]
         if args[:2] == ['-g', 'GENERAL.CON-UUID']:
             return self.state['uuid']
+        if args[:2] == ['-g', 'IP4.GATEWAY']:
+            return self.state.get('active_gateway', '')
         if args[:1] == ['-g'] and args[2:6] == ['connection', 'show', 'uuid', self.state['uuid']]:
             if args[1] == 'ipv4.gateway':
                 if self.state.get('drift_gateway_on_second_read'):
@@ -64,8 +100,12 @@ class NativeNetworkDouble:
                     self.save()
                 return self.state['gateway']
             if args[1] == 'ipv4.route-table':
-                return '0'
+                return self.state.get('route_table', '0')
+            if args[1] == 'ipv4.route-metric':
+                return self.state.get('route_metric', '100')
             if args[1] == 'ipv4.routes':
+                if 'profile_text' in self.state:
+                    return self.state['profile_text']
                 return ', '.join('{ ip = ' + x['network'] + ', nh = ' + x['gateway'] +
                                  ', mt = ' + str(x['metric']) + ' }' for x in self.state['persistent'])
         persistent = args[:3] == ['connection', 'modify', 'uuid']

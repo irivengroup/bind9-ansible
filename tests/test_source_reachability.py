@@ -11,6 +11,13 @@ import re
 import yaml
 
 
+class ExpandedYamlDumper(yaml.SafeDumper):
+    """Count each runtime use of a shared YAML block, not one serialized anchor."""
+
+    def ignore_aliases(self, data):
+        return True
+
+
 class TestSourceReachability:
     """Audit production references independently of documentation and test names."""
 
@@ -24,7 +31,7 @@ class TestSourceReachability:
         for folder in ('roles', 'inventory', 'playbooks'):
             for path in (cls.ROOT / folder).rglob('*'):
                 if path.suffix == '.yml':
-                    chunks.append(yaml.safe_dump(yaml.safe_load(path.read_text())))
+                    chunks.append(yaml.dump(yaml.safe_load(path.read_text()), Dumper=ExpandedYamlDumper))
                 elif path.suffix == '.j2':
                     content = re.sub(r'{#.*?#}', '', path.read_text(), flags=re.S)
                     chunks.append(re.sub(r'//[^\n]*', '', content))
@@ -52,6 +59,16 @@ class TestSourceReachability:
                 collect(yaml.safe_load(path.read_text()))
         assert definitions
         assert not [name for name, count in definitions.items() if occurrences[name] <= count]
+
+    def test_reused_yaml_blocks_do_not_hide_variable_consumers(self, tmp_path, monkeypatch):
+        # Consolidating the legacy adapter creates YAML aliases. Definitions and
+        # references must both be counted after expansion; assertions stay strict.
+        folder = tmp_path / 'roles'
+        folder.mkdir()
+        shared = {'vars': {'bind_example': 1}, 'debug': {'msg': '{{ bind_example }}'}}
+        (folder / 'main.yml').write_text(yaml.safe_dump([shared, shared]))
+        monkeypatch.setattr(type(self), 'ROOT', tmp_path)
+        self.test_assigned_variables_and_registered_results_have_consumers()
 
     def test_every_task_file_is_reachable_from_the_role_entry_point(self):
         pending = [self.ROLE / 'tasks/main.yml', self.ROLE / 'tasks/manage.yml']

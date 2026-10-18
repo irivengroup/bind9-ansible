@@ -1,5 +1,7 @@
 # Audit du projet et hibernation — 18 octobre 2026
 
+**Rapport historique :** ces résultats décrivent la révision indiquée ci-dessous. Le contrat et les preuves de la livraison courante figurent dans [REFONTE_ROUTES_MANAGEMENT.md](REFONTE_ROUTES_MANAGEMENT.md).
+
 **Rapport historique de l’archive restaurée.** Les résultats ci-dessous ne sont pas une exécution de la révision courante. Pour le changement de verrou demandé et ses vérifications, voir [VERROUS_OPERATIONS_OPTIONNELS.md](VERROUS_OPERATIONS_OPTIONNELS.md).
 
 Révision **2026.10.18-hibernate-deployment.1**, projet **Bind9-Ansible**.

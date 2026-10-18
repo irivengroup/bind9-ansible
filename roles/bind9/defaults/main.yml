@@ -2,8 +2,8 @@
 # Seal a successful full deployment or the explicit hibernate-only path.
 # An existing seal always blocks redeployment until an operator removes it.
 hibernate_deployment: no
-# Temporary operator-requested mode: ordinary operations do not acquire the
-# shared host lease. Hibernation still requires it. Run one operation at a time.
+# The legacy deployment directory lease remains optional outside hibernation.
+# Routes and management always use an automatically released kernel process lock.
 bind_operation_lock_enabled: false
 bind_cloud_clients: []
 bind_internal_clients: []

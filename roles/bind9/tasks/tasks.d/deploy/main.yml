@@ -34,7 +34,9 @@
   tags: [deploy, preflight, configure, zones, records, services, backup]
 
 - name: Recover an explicitly requested interrupted FRONT operation
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_recover.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_return_routes.yml'
+  vars:
+    bind_front_requested_action: recover
   tags: [never, routes-recover]
 
 - name: Install dependencies before DNS checks require dig on a fresh secondary
@@ -162,12 +164,16 @@
       tags: [deploy, health]
 
     - name: Verify pending return routes after successful DNS health checks
-      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_verify.yml'
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_return_routes.yml'
+      vars:
+        bind_front_requested_action: verify
       tags: [deploy]
       when: bind_front_route_transaction_pending | default(false) | bool
 
     - name: Commit return routes after successful DNS deployment
-      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_commit.yml'
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_return_routes.yml'
+      vars:
+        bind_front_requested_action: commit
       tags: [deploy]
       when: bind_front_route_transaction_pending | default(false) | bool
 
@@ -183,8 +189,10 @@
         - name: Roll back owned FRONT route additions
           # Evaluate the ownership guard once: a static import would reevaluate
           # it after the helper sets rollback_attempted, skipping its removals.
+          vars:
+            bind_front_requested_action: rollback
           ansible.builtin.include_tasks:
-            file: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_rollback.yml'
+            file: '{{ role_path }}/tasks/tasks.d/deploy/front_return_routes.yml'
             apply:
               tags: [deploy]
           when:

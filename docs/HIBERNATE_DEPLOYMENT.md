@@ -1,6 +1,6 @@
 # Verrouillage optionnel du déploiement
 
-**Mode temporaire actuel :** `bind_operation_lock_enabled: false` désactive la prise du verrou commun `.operation.lock` pour les opérations ordinaires, lectures et simulations de management comprises. Un ancien verrou est ignoré et conservé. **Une seule opération à la fois**, y compris toute intervention manuelle. Avec le booléen YAML `true`, les garanties de verrou coopératif décrites ci-dessous s’appliquent de nouveau. Le tag `hibernate` et le déploiement complet avec `hibernate_deployment: yes` conservent toujours ce verrou. Les journaux de reprise, contrôles de checksum et verrous propres aux routes/sauvegardes restent actifs. [Contrat et preuves de cette révision](VERROUS_OPERATIONS_OPTIONNELS.md).
+**Exclusion actuelle :** routes et management utilisent toujours un verrou de processus commun `/var/lib/Bind9-Ansible/operations.flock`, libéré automatiquement à la fin du processus. Le fichier vide peut rester présent sans bloquer une nouvelle opération. `bind_operation_lock_enabled: false` ignore uniquement le répertoire historique `.operation.lock` hors hibernation ; il ne désactive pas cette exclusion de processus. Les journaux incomplets sont des données de reprise, jamais des verrous à effacer. Organiser les déploiements DNS complets et interventions manuelles dans une fenêtre exclusive. [Fonctionnement, preuves et limites](REFONTE_ROUTES_MANAGEMENT.md).
 
 Le paramètre public de scellement est `hibernate_deployment`, de type booléen, avec
 `no` par défaut dans `roles/bind9/defaults/main.yml` (booléen YAML `false`). Les chaînes CLI
@@ -102,6 +102,8 @@ verrou ; une opération concurrente peut changer le résultat après le contrôl
 
 ## Verrou d’opération indépendant
 
+Cette section décrit le répertoire historique conservé pour l’hibernation et le mode optionnel strict. Routes et management prennent en plus, et toujours, `operations.flock` : sa présence n’indique pas une opération active et sa fin libère l’exclusion. La [politique courante](REFONTE_ROUTES_MANAGEMENT.md) distingue les deux mécanismes.
+
 `/var/lib/Bind9-Ansible/.operation.lock` protège les opérations coopérantes
 concurrentes lorsqu’elles l’utilisent. Il reste obligatoire pour l’hibernation,
 mais il est ignoré par défaut pour les tags `routes`, `routes-recover`, `backup`,
@@ -149,6 +151,8 @@ test "$(stat -c '%u:%a' -- "$state")" = '0:700'
 mkdir -m 0700 -- "$lease"
 trap 'rmdir -- "$lease"' EXIT
 test ! -e "$state/front-routes.lock" && test ! -L "$state/front-routes.lock"
+test ! -e "$state/front-routes.pending" && test ! -L "$state/front-routes.pending"
+test ! -e "$state/management.pending.json" && test ! -L "$state/management.pending.json"
 test -f "$seal" && test ! -L "$seal"
 test "$(stat -c '%u:%a:%h' -- "$seal")" = '0:600:1'
 saved=$state/.deployment.lock.operator-$(date -u +%Y%m%dT%H%M%SZ)-$$
@@ -177,5 +181,5 @@ Les fichiers sont remplacés atomiquement individuellement ; cela ne constitue
 pas une transaction atomique de tous les fichiers ou de la paire.
 
 Les contrôles et limites actuels sont détaillés dans
-[VERROUS_OPERATIONS_OPTIONNELS.md](VERROUS_OPERATIONS_OPTIONNELS.md).
+[REFONTE_ROUTES_MANAGEMENT.md](REFONTE_ROUTES_MANAGEMENT.md).
 [AUDIT_HIBERNATE_DEPLOYMENT.md](AUDIT_HIBERNATE_DEPLOYMENT.md) décrit l’archive initiale.

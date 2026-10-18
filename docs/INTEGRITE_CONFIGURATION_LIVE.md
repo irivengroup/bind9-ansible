@@ -1,6 +1,6 @@
 # Intégrité de la configuration live et interventions concurrentes
 
-**Mode temporaire actuel :** `bind_operation_lock_enabled: false` désactive la prise du verrou commun `.operation.lock` pour les opérations ordinaires, lectures et simulations de management comprises. Un ancien verrou est ignoré et conservé. **Une seule opération à la fois**, y compris toute intervention manuelle. Avec le booléen YAML `true`, les garanties de verrou coopératif décrites ci-dessous s’appliquent de nouveau. Le tag `hibernate` et le déploiement complet avec `hibernate_deployment: yes` conservent toujours ce verrou. Les journaux de reprise, contrôles de checksum et verrous propres aux routes/sauvegardes restent actifs. [Contrat et preuves de cette révision](VERROUS_OPERATIONS_OPTIONNELS.md).
+**Exclusion actuelle :** routes et management utilisent toujours un verrou de processus commun `/var/lib/Bind9-Ansible/operations.flock`, libéré automatiquement à la fin du processus. Le fichier vide peut rester présent sans bloquer une nouvelle opération. `bind_operation_lock_enabled: false` ignore uniquement le répertoire historique `.operation.lock` hors hibernation ; il ne désactive pas cette exclusion de processus. Les journaux incomplets sont des données de reprise, jamais des verrous à effacer. Organiser les déploiements DNS complets et interventions manuelles dans une fenêtre exclusive. [Fonctionnement, preuves et limites](REFONTE_ROUTES_MANAGEMENT.md).
 
 Ce document décrit la révision intégrité. Pour les contrôles courants, voir [VALIDATION_FIABILITE_IO.md](VALIDATION_FIABILITE_IO.md) et les [garanties I/O](FIABILITE_DONNEES_ET_IO.md).
 
@@ -103,57 +103,26 @@ ou disponibilité sous charge n'est revendiquée.
 
 ## Limite de concurrence et protocole opérateur
 
-Le verrou commun `/var/lib/Bind9-Ansible/.operation.lock` exclut les opérations
-coopératives de déploiement et management sur un même hôte. Deux processus
-ne peuvent pas le créer simultanément avec succès. Il n'existe pas de transaction
-distribuée entre primaire et secondaire, ni de publication atomique de plusieurs
-fichiers face à un crash.
+Routes et management prennent le même verrou de processus `operations.flock`.
+Sa fin libère l’exclusion, même après SIGKILL. Les checksums et instantanés
+détectent les conflits observables, mais root peut écrire entre deux contrôles.
+Le déploiement complet exige une fenêtre exclusive : aucune transaction
+distribuée ne couvre la paire ou la publication de plusieurs fichiers.
 
-**Un éditeur root ignorant ce verrou ne peut pas être bloqué par un checksum ou
-un verrou coopératif.** Une très courte course reste possible entre le dernier
-contrôle et un renommage/unlink. Pour garantir l'exclusion des interventions
-manuelles, l'opérateur et toutes les autres automatisations doivent prendre le
-même verrou pendant toute leur intervention. Le manager réduit les fenêtres et
-refuse les conflits observés ; il ne prétend pas supprimer cette limite système.
+Pour une intervention manuelle, suspendre toutes les automatisations et maintenir
+cette fenêtre exclusive jusqu’à la recette. Sauvegarder la configuration et les
+zones avant modification. Sous root, valider avec `named-checkconf -z`, appliquer
+les labels avec `restorecon`, recharger par `rndc -s 127.0.0.1 reload`, puis vérifier
+les réponses exactes en UDP/TCP, les SOA et la réplication. Le seul code retour de
+`dig` ne démontre pas la santé DNS. Pour reprendre une transaction, comparer les
+fichiers aux copies et manifestes, conserver les changements manuels et restaurer
+uniquement les cibles nécessaires selon [MANAGEMENT.md](MANAGEMENT.md).
 
-Sur un serveur déjà déployé, depuis un shell Bash root, arrêter à la première
-erreur. Exemple pour une intervention limitée à `/etc/named.conf` :
-
-```bash
-sudo -i
-umask 077
-
-lease=/var/lib/Bind9-Ansible/.operation.lock
-mkdir -m 0700 -- "$lease" || exit 1
-lease_identity=$(stat -c '%d:%i' -- "$lease") || exit 1
-
-# Adapter l'éditeur. Garder le verrou pendant toute l'intervention.
-vi /etc/named.conf || exit 1
-
-named-checkconf -z /etc/named.conf || exit 1
-restorecon -F /etc/named.conf || exit 1
-rndc -s 127.0.0.1 reload || exit 1
-dig -4 @127.0.0.1 localhost A +norecurse +notcp
-dig -4 @127.0.0.1 localhost A +norecurse +tcp
-
-# Examiner les réponses puis vérifier les zones et la réplication concernées.
-# Ne lancer les deux lignes suivantes qu'après ces contrôles réussis.
-test "$(stat -c '%d:%i' -- "$lease")" = "$lease_identity" || exit 1
-rmdir -- "$lease"
-```
-
-Cette procédure suppose le répertoire parent sécurisé par le déploiement.
-`dig` doit fournir les réponses attendues : son code de sortie seul ne suffit
-pas à démontrer la santé DNS. En cas d'échec, d'arrêt du shell ou de doute,
-laisser le verrou et examiner l'état avant reprise. Ne jamais effacer un verrou
-préexistant pour démarrer une intervention. Pour plusieurs fichiers ou des zones,
-adapter les labels, requêtes SOA/records et contrôles du secondaire.
-
-Le retrait d'un verrou interrompu est une action de reprise explicite, après
-identification de l'opération, comparaison des fichiers et journaux, sauvegarde
-de l'état courant, validation native et contrôles DNS. Ne pas restaurer une
-archive complète automatiquement au-dessus d'un état comportant des changements
-manuels ; sélectionner les cibles et résoudre les conflits.
+Le fichier vide d’exclusion ne doit pas être supprimé. Un journal incomplet est
+une donnée de reprise : la libération automatique de l’exclusion ne justifie
+jamais sa suppression ou une restauration complète au-dessus des changements
+opérateur. L’ancien `.operation.lock` reste réservé au mode historique optionnel
+et à l’hibernation.
 
 Les résultats propres à cette révision et les contrôles non exécutés sont dans
-[VALIDATION_INTEGRITE_LIVE.md](VALIDATION_INTEGRITE_LIVE.md).
+[REFONTE_ROUTES_MANAGEMENT.md](REFONTE_ROUTES_MANAGEMENT.md).

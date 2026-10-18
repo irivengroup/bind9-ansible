@@ -6,9 +6,9 @@
 
 Le rôle produit une configuration unique `/etc/named.conf`, sans vues BIND. Il conserve les zones localhost officielles, écoute le DNS en IPv4 sur loopback/FRONT/BACK et conserve les capacités IPv4/IPv6 sortantes. Les noms hors des zones déclarées reçoivent une réponse NXDOMAIN par la racine privée. La validation DNSSEC est activée en mode `auto` par défaut ; les routes de retour FRONT et le moniteur périodique restent optionnels et désactivés par défaut.
 
-**Configuration live :** le management conserve l'existant et refuse les créations sur un nom déjà présent. Le verrou commun est temporairement désactivé par défaut (`bind_operation_lock_enabled: false`) hors hibernation : organiser une seule opération à la fois, interventions manuelles comprises. Le mode strict peut être réactivé avec le booléen `true` ; les opérateurs doivent alors partager son verrou. Les lectures et écritures sont contrôlées contre les données partielles ; voir [fiabilité des données et I/O](docs/FIABILITE_DONNEES_ET_IO.md) et [procédure opérateur](docs/INTEGRITE_CONFIGURATION_LIVE.md).
+**Configuration live :** le management conserve les clauses non ciblées et refuse toute création sur un nom déjà présent. Routes et management partagent une exclusion de processus, libérée automatiquement à sa fin ; un fichier vide restant ne bloque pas la suite. Les écritures restent conditionnées aux checksums et aux journaux de reprise. Les déploiements complets et interventions manuelles exigent une fenêtre exclusive. Voir [les garanties et limites](docs/DURCISSEMENT_FINAL.md).
 
-**Qualification opérationnelle : NON TERMINÉE pour la production.** Aucun déploiement complet sur votre paire RHEL 8 n’a été exécuté. Voir [VERROUS_OPERATIONS_OPTIONNELS.md](docs/VERROUS_OPERATIONS_OPTIONNELS.md) pour les preuves et limites de cette révision ; les autres rapports restent historiques.
+**Qualification opérationnelle : NON TERMINÉE pour la production.** Aucun déploiement complet sur votre paire RHEL 8 n’a été exécuté. Voir [DURCISSEMENT_FINAL.md](docs/DURCISSEMENT_FINAL.md) pour les preuves et limites de cette révision ; les autres rapports restent historiques.
 
 Ce guide s’adresse aux équipes d’exploitation. Les commandes du contrôleur supposent Bash sous Linux, depuis la racine du projet. Les commandes de diagnostic système s’exécutent sur le serveur DNS indiqué. Toutes les adresses et tous les domaines d’exemple doivent être adaptés avant utilisation.
 
@@ -42,7 +42,7 @@ Ce guide s’adresse aux équipes d’exploitation. Les commandes du contrôleur
 | Python requis sur les cibles | **3.6.8** dans le contexte retenu. Compilation, composants et transports locaux sur le véritable Python 3.6.8 EL8 : **EXÉCUTÉ**. Modules Ansible/DNF sur votre serveur : **NON EXÉCUTÉ**. |
 | Contrôleur de cette passe | Linux, Python **3.6.8**, Ansible **2.9.27**, Jinja2 **2.10.3**. Les essais Python 3.8.20/Jinja 3.0.3 appartiennent aux rapports historiques. |
 | BIND de laboratoire courant | **9.11.36-16.el8_10.16**, paquets EL8 installés dans un conteneur Rocky Linux 8.9 avec paquets EL8.10. Ce n’est pas une recette système RHEL. Les essais BIND 9.18.24 restent historiques. |
-| NetworkManager de laboratoire | **1.46.0**, testé antérieurement en environnement isolé ; la version cible reste à qualifier pour les routes. |
+| NetworkManager de laboratoire courant | **1.40.16-21.el8_10**, moteur natif et noyau Linux dans un espace réseau jetable, avec route par défaut BACK et passerelle propre à FRONT. La version de vos serveurs reste à recetter. |
 | Familles d’adresses | Écoute DNS et clients déclarés : **IPv4**. Forwarders, transport sortant et données DNS : **IPv4/IPv6**. Routes gérées : **IPv4 uniquement**. |
 
 Les versions imposées par le contexte nécessitent une politique de maintenance de votre organisation. La CI déclarée couvre aussi Ansible Core 2.13.13, 2.14.18 et 2.16.14 ; son exécution distante et ces combinaisons supplémentaires sont **NON EXÉCUTÉES** dans les preuves de cette livraison.
@@ -77,18 +77,18 @@ Le rôle ne configure pas les adresses des interfaces, `/etc/resolv.conf`, le ro
 - Linux, Ansible et Python compatibles ; les versions réellement utilisées figurent dans la matrice.
 - SSH vers les adresses ADM et élévation sur les cibles (`become: true`). Le compte du contrôleur doit pouvoir créer le répertoire privé TSIG.
 - Inventaire complet du site : les variables des deux pairs sont nécessaires même avec `--limit` sur un hôte.
-- Aucun rôle Galaxy ni collection externe supplémentaire requis au déploiement. Le routage utilise YAML/Jinja et les outils natifs ; aucun filtre Python de routage personnalisé ni `netaddr` nécessaire.
+- Aucun rôle Galaxy ni collection externe supplémentaire requis au déploiement. Le routage utilise YAML/Jinja, Bash et les outils natifs ; aucun filtre Python de routage personnalisé ni `netaddr` nécessaire.
 
 ### Serveurs cibles
 
-- GNU coreutils, notamment `/usr/bin/sync`, est requis pour synchroniser les sauvegardes avant publication du management. Le contrôleur doit utiliser `ansible.cfg` livré (doublons YAML refusés). Voir [limites et compatibilité](docs/FIABILITE_DONNEES_ET_IO.md).
+- `findutils`, `tar`, `gzip`, GNU coreutils et `util-linux` (`flock`) sont nécessaires aux opérations de sauvegarde/gestion. GNU coreutils, notamment `/usr/bin/sync`, est requis pour synchroniser les sauvegardes avant publication du management. Le contrôleur doit utiliser `ansible.cfg` livré (doublons YAML refusés). Voir [limites et compatibilité](docs/FIABILITE_DONNEES_ET_IO.md).
 - Python accessible à Ansible, DNF et ses bindings Python, systemd, dépôts RHEL accessibles. Le rôle installe **`bind`**, **`bind-utils`**, **`policycoreutils-python-utils`**.
 - **Firewalld installé et déjà actif**, avec `firewall-cmd` et `ip`. Le rôle ne l’installe pas et ne le démarre pas ; il autorise DNS immédiatement et de façon permanente dans les zones FRONT/BACK existantes.
 - FRONT/BACK déjà affectées, y compris en adresses secondaires, et ADM distincte. Les adresses absentes ou ambiguës sont refusées.
 - Fichiers natifs présents : `/etc/named.rfc1912.zones`, `/var/named/named.localhost`, `/var/named/named.loopback`, `/var/named/named.empty`, `/etc/crypto-policies/back-ends/bind.config`. L’include de politique cryptographique doit résoudre vers un fichier régulier.
 - RNDC et `named-setup-rndc.service` natifs disponibles. Le rôle utilise ce générateur pour préparer `/etc/rndc.key` dans tous les modes DNSSEC.
 - Horloges synchronisées pour TSIG ; espace disque pour zones, archives et journaux.
-- **Routes FRONT activées seulement :** NetworkManager actif, `nmcli`, sortie JSON de `ip`, profil FRONT actif contenant sa passerelle IPv4 existante. FRONT/BACK/ADM doivent alors être des interfaces distinctes ; table principale et règles de routage standard, sans VRF ni règles personnalisées.
+- **Routes FRONT activées seulement :** Bash, `iproute`, NetworkManager actif/`nmcli`, `util-linux` (`flock`), GNU coreutils et `sed`. Découverte limitée à l’interface portant l’IP FRONT et à son profil actif ; sa passerelle peut être déclarée dans le profil ou observée sur cette même interface. La route par défaut du système peut rester exclusivement sur BACK. FRONT/BACK/ADM doivent être distinctes ; table principale et trois règles standard, sans VRF ni politique personnalisée. Aucun `jq`, Python de routage ou dépendance Galaxy.
 - **DNSSEC activé seulement :** `/usr/bin/python3`, ancres officielles `/etc/named.root.key` à jour et accès aux données nécessaires à la validation. Le rôle ne remplace pas les ancres de distribution.
 
 `ansible.cfg` utilise la découverte `auto_silent`. Si nécessaire, définir `ansible_python_interpreter: /usr/bin/python3` dans l’inventaire après vérification de ce chemin et des bindings DNF. La contrainte Python 3.6.8 concerne le serveur, pas le contrôleur.
@@ -210,7 +210,7 @@ Les **12 valeurs par défaut** proviennent de [defaults/main.yml](roles/bind9/de
 
 | Variable | Type | Description | Valeur par défaut | Obligatoire ? |
 |---|---|---|---|---|
-| `bind_operation_lock_enabled` | booléen YAML strict | Réactive le verrou commun hors hibernation à `true`. À `false`, sérialisation externe obligatoire ; les verrous existants sont laissés intacts. L’hibernation conserve toujours le verrou | `false` | Non |
+| `bind_operation_lock_enabled` | booléen YAML strict | Active à `true` la coopération avec le répertoire historique `.operation.lock`. Routes et management gardent toujours leur exclusion de processus ; les déploiements complets exigent une fenêtre exclusive. L’hibernation conserve son verrou historique | `false` | Non |
 | `hibernate_deployment` | booléen, ou chaîne CLI minuscule `yes/no/true/false` | À `yes`, crée le sceau après déploiement complet réussi, ou avec le tag dédié `hibernate`. Un sceau existant bloque toujours la reconstruction, même à `no` | `no` | Non |
 | `bind_cloud_clients` | liste plate de chaînes | IP/CIDR IPv4 FRONT ; seules destinations candidates aux routes retour | `[]` | Oui si internes vides |
 | `bind_internal_clients` | liste plate de chaînes | IP/CIDR IPv4 BACK ; aucune route ajoutée | `[]` | Oui si cloud vide |
@@ -367,7 +367,7 @@ Critères d’arrêt : configuration rejetée, service inactif, localhost incorr
 
 `hibernate_deployment: no` est la valeur par défaut : aucun nouveau sceau n’est généré. Avec `hibernate_deployment: yes`, le rôle enregistre, après déploiement complet et contrôles de santé réussis, un sceau masqué avec manifeste SHA-256 dans `/var/lib/Bind9-Ansible/.deployment.lock` (root 0600). **Tout sceau déjà présent bloque un nouveau déploiement et les tags de reconstruction, même avec `hibernate_deployment: no`.** Seul son retrait explicite par un opérateur autorise une reconstruction ; voir la [procédure de verrouillage et déverrouillage](docs/HIBERNATE_DEPLOYMENT.md).
 
-Sans sceau, un redéploiement reste autorisé et peut écraser les changements manuels ou ceux du management. `force` est retiré : sa présence dans les variables de déploiement provoque un refus explicite. Les noms intermédiaires `deployment_lock` et `deployment_locked` sont également refusés. Aucun sceau n’est créé après échec, parcours partiel ordinaire ou `--check`. Le verrou commun `.operation.lock` est ignoré par défaut hors hibernation, sans suppression d’un état existant. Le tag `hibernate` et un déploiement complet avec `hibernate_deployment: yes` continuent de le prendre. Les journaux de reprise FRONT et de management restent actifs. Voir [le mode temporaire](docs/VERROUS_OPERATIONS_OPTIONNELS.md).
+Sans sceau, un redéploiement reste autorisé et peut écraser les changements manuels ou ceux du management. `force` est retiré : sa présence dans les variables de déploiement provoque un refus explicite. Les noms intermédiaires `deployment_lock` et `deployment_locked` sont également refusés. Aucun sceau n’est créé après échec, parcours partiel ordinaire ou `--check`. Le verrou commun `.operation.lock` est ignoré par défaut hors hibernation, sans suppression d’un état existant. Le tag `hibernate` et un déploiement complet avec `hibernate_deployment: yes` continuent de le prendre. Les journaux de reprise FRONT et de management restent actifs. Routes et management prennent toujours le verrou de processus `operations.flock`. Voir [le contrat courant](docs/DURCISSEMENT_FINAL.md).
 
 ```bash
 ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml \
@@ -390,7 +390,7 @@ persistant ni prise de verrou d’opération.
 
 Utiliser `playbooks/bind9-management.yml` pour une action unitaire ou un lot mixte sur options, zones et records, en conservant les autres réglages réels. Les ressources peuvent être listées avec type, options, provenance et pagination. Une écriture exige le checksum courant ; un lot exige aussi son empreinte de plan et prépare un seul candidat final, avec une sauvegarde et un rechargement par hôte. La paire est prévalidée avant publication. Le management ne déploie pas le template global et n’ajoute pas de route. Les transactions restent locales à chaque hôte ; une paire n’est pas une transaction atomique. Exemples complets : [MANAGEMENT_LOTS_ET_LISTES.md](docs/MANAGEMENT_LOTS_ET_LISTES.md).
 
-Les réglages de chemins, écoute, contrôle d’accès et runtime DNSSEC restent protégés dans ce CRUD ; les zones dynamiques sont refusées. La procédure complète, les champs exacts, exemples CRUD, limites, reprise d’un verrou interrompu et migration depuis une version sans sceau figurent dans [MANAGEMENT.md](docs/MANAGEMENT.md). Les [preuves courantes](docs/VERROUS_OPERATIONS_OPTIONNELS.md) distinguent les tests de laboratoire de la qualification RHEL restant à réaliser.
+Les réglages de chemins, écoute, contrôle d’accès et runtime DNSSEC restent protégés dans ce CRUD ; les zones dynamiques sont refusées. La procédure complète, les champs exacts, exemples CRUD, limites, reprise d’une transaction interrompue et migration depuis une version sans sceau figurent dans [MANAGEMENT.md](docs/MANAGEMENT.md). Les [preuves courantes](docs/DURCISSEMENT_FINAL.md) distinguent les tests de laboratoire de la qualification RHEL restant à réaliser.
 
 <a id="tags"></a>
 ## 🏷️ Tags disponibles
@@ -438,7 +438,7 @@ L’absence des unités privées est attendue après nettoyage en mode désactiv
 
 ### Gérer les routes de retour FRONT
 
-La fonction est **désactivée par défaut**. Elle découvre l’interface FRONT, le profil NetworkManager actif par UUID et sa passerelle IPv4. Elle ajoute seulement les routes manquantes vers `bind_cloud_clients`, dans le profil et le noyau, sans réactivation de connexion, changement de route par défaut ou écriture BACK/ADM. Les clients directement connectés n’exigent pas de route par passerelle ; leur chemin est toutefois vérifié.
+La fonction est **désactivée par défaut**. Elle découvre l’interface portant l’IP FRONT, puis son profil NetworkManager actif par UUID et sa propre passerelle IPv4. **La route par défaut système reste sur BACK : FRONT n’a pas besoin d’une route par défaut active.** Aucune passerelle BACK/ADM/globale n’est utilisée comme repli. Seules les routes manquantes vers `bind_cloud_clients` sont ajoutées au profil et au noyau, sans réactivation de connexion. Les clients directement connectés n’exigent pas de route par passerelle ; leur chemin reste vérifié.
 
 Prévisualiser puis appliquer sur un hôte :
 
@@ -454,11 +454,11 @@ ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml \
 
 JSON préserve ici le booléen. `-e bind_front_routes_enabled=true` produit une chaîne avec Ansible 2.9 et n’est pas la forme attendue. Maintenir `bind_front_routes_enabled: true` dans les variables si cette gestion doit rester activée.
 
-Les routes préexistantes gardent leur identité et leur métrique. Une route contradictoire ou un profil ambigu provoque un refus ; aucune ancienne route n’est supprimée pour imposer une nouvelle configuration. Le journal privé est `/var/lib/Bind9-Ansible/front-routes.lock/plan.json`. En cas d’échec pris en charge, seuls les ajouts de l’opération sont retirés ; une interruption brutale laisse le journal.
+Les routes préexistantes gardent leur identité et leur métrique. Les conflits provoquent un refus sans remplacement. Le journal privé courant est `/var/lib/Bind9-Ansible/front-routes.pending/` ; l’ancien `front-routes.lock/plan.json` reste pris en charge uniquement pour reprise. Un échec pris en charge retire les seuls ajouts confirmés ; une issue ambiguë conserve le journal. Le fichier vide `operations.flock` ne constitue pas un journal et ne doit pas être supprimé pour « débloquer » une opération.
 
 Le profil, la passerelle, la table principale et les règles sont relus sous verrou avant le premier ajout. Les trois règles standard doivent être dépourvues de sélecteurs supplémentaires ; VRF, marques, destinations conditionnelles et autres politiques sont refusées. Le rollback valide les deux magasins avant toute suppression et refuse les attributs actifs inattendus, les changements de métrique, de passerelle ou de règles. La reprise protège aussi les adresses ADM/FRONT/BACK actuelles et la source SSH actuelle. Un conflit conserve le journal ; aucune atomicité n’est garantie face à un autre outil modifiant le réseau pendant l’opération.
 
-Si `Reject invalid IPv4 observations before any routing write` échoue alors que les passerelles sont définies, lire **la valeur refusée et son origine** : découverte des interfaces/inventaire, routes du profil, plan, noyau ou journal. `ansible_host` doit notamment contenir l’IPv4 ADM littérale pour cette fonction, pas un nom DNS. Le contrôle affiche le type et une représentation échappée des entrées invalides ; il ne les ignore pas et ne choisit aucune autre passerelle automatiquement. Sans la valeur exacte du message initial, la cause de cet incident particulier n’est pas établie.
+Les observations vides, tronquées, malformées ou contradictoires produisent un refus explicite, avant écriture lorsqu’elles sont détectées pendant la préparation. Une sortie stdout vide des commandes de mutation est normale : les codes retour et la relecture du profil/noyau font foi. `ansible_host` doit contenir l’IPv4 ADM littérale pour cette fonction. Les observations sont bornées et les commandes natives ont un délai maximal de trente secondes.
 
 Après avoir vérifié qu’aucun déploiement n’est actif et inspecté journal, profil et routes, reprendre l’hôte concerné :
 
@@ -467,7 +467,7 @@ ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml \
   --limit site1-dns01 --tags routes-recover
 ```
 
-Ne pas effacer le verrou pour contourner les contrôles. Une route ou un profil changé depuis l’interruption peut bloquer la reprise, qui conserve alors le journal. Une restauration BIND manuelle ne retire pas les routes committées. Détails : [FRONT_ROUTES.md](docs/FRONT_ROUTES.md).
+Ne pas effacer les journaux ou le fichier d’exclusion pour contourner les contrôles. Une route ou un profil changé depuis l’interruption peut bloquer la reprise, qui conserve alors le journal. Une restauration BIND manuelle ne retire pas les routes committées. Détails : [FRONT_ROUTES.md](docs/FRONT_ROUTES.md).
 
 <a id="securite"></a>
 ## 🛡️ Sécurité et pare-feu
@@ -743,7 +743,7 @@ Relever l’hôte, l’heure, la version, la dernière archive, la tâche Ansibl
 | Client reçoit `REFUSED` | Vérifier source réelle, listes, destination et autorisations récursives. Une traduction réseau peut modifier la source vue par BIND. |
 | Timeout FRONT uniquement | Contrôler UDP/TCP 53, firewalld et pare-feu externes, puis retour avec source FRONT. Les clients internes ne déclenchent aucune route FRONT. |
 | Plan de routes vide ou sortie invalide | Conserver l’erreur ; vérifier IP, profil actif, passerelle et prérequis. Les observations vides/malformées doivent échouer explicitement. |
-| Verrou de routes présent | Vérifier absence d’exécution active, inspecter journal/réseau puis `routes-recover`. Ne pas supprimer le verrou à l’aveugle. |
+| Journal de routes présent / opération occupée | Un processus actif impose d’attendre sa fin. Un journal incomplet demande inspection puis `routes-recover`. La seule présence du fichier vide `operations.flock` ne bloque pas. |
 | Journaux absents | Vérifier répertoire, droits `named`, labels et disque ; lire systemd. Sur RHEL avec l’outil disponible : `sudo ausearch -m AVC -ts recent`. |
 | Firewalld inactif/partiel | Rétablir service et zones selon votre politique ; rejouer `firewall`, vérifier runtime et permanent. Le rôle ne démarre pas un pare-feu arrêté. |
 | Assertion DNSSEC/routes | Utiliser les noms publics et types attendus ; préférer JSON pour les booléens `-e`. Ne pas retirer les assertions. |
@@ -753,11 +753,11 @@ Si la cause reste inconnue, arrêter le changement, maintenir le pair sain et ap
 <a id="validation"></a>
 ## Validation, tests du projet et limites
 
-Cette révision restaure l’archive hibernate fournie et rend le verrou commun optionnel hors hibernation, avec `bind_operation_lock_enabled: false` par défaut. Une seule opération à la fois est requise. Les sceaux, journaux de reprise et contrôles I/O du management restent présents. Les résultats courants figurent dans [VERROUS_OPERATIONS_OPTIONNELS.md](docs/VERROUS_OPERATIONS_OPTIONNELS.md) ; les autres rapports restent historiques.
+Cette révision durcit `Bind9-Ansible-routes-management.zip` : refus des passerelles correspondant aux IPv4 locales actives, initialisation concurrente du dossier privé revalidée, conservation de la propriété du verrou lors d’une tentative imbriquée et examen des autres transactions interrompues après nettoyage d’un marqueur finalisé. Templates DNS, inventaires, playbooks et fonctionnement de l’hibernation restent ceux de cette base. [Preuves et périmètre](docs/DURCISSEMENT_FINAL.md), `DELIVERY.json`.
 
 ### Preuves disponibles
 
-Les contrôles de cette révision sont détaillés dans [VERROUS_OPERATIONS_OPTIONNELS.md](docs/VERROUS_OPERATIONS_OPTIONNELS.md) et `DELIVERY.json`. Les recettes de restauration et de démons DNS réels décrites ci-dessous appartiennent aux passes historiques, conservées sans réexécution dans cette livraison.
+Les contrôles courants sont détaillés dans [DURCISSEMENT_FINAL.md](docs/DURCISSEMENT_FINAL.md) et `DELIVERY.json`. Ils comprennent les tests Python/Ansible sur Python 3.6.8, les routes avec NetworkManager EL8 et noyau réels, et le management avec BIND EL8 réel en modes DNSSEC désactivé/auto. Les anciens rapports gardent leurs preuves historiques ; ils ne remplacent pas la recette système RHEL.
 
 Les tests de restauration utilisent les vrais tar, gzip, fichiers et empreintes. Les cinq scénarios sont aussi exécutables dans la racine d’un conteneur jetable sans namespaces imbriqués ; systemd, BIND et SELinux y sont des doubles. Les recettes DNS utilisent des démons réels dans un conteneur sans réseau externe. Les assertions d’inventaire emploient des facts RHEL simulés. Aucune de ces preuves ne vaut déploiement complet sur vos serveurs.
 
@@ -851,7 +851,7 @@ Attendu : toutes les entrées correspondent. Le manifeste couvre les fichiers sa
 
 | Besoin | Document |
 |---|---|
-| Verrouillage, retrait opérateur et audit courant | [HIBERNATE_DEPLOYMENT.md](docs/HIBERNATE_DEPLOYMENT.md), [AUDIT_HIBERNATE_DEPLOYMENT.md](docs/AUDIT_HIBERNATE_DEPLOYMENT.md) |
+| Verrouillage, retrait opérateur et audit courant | [HIBERNATE_DEPLOYMENT.md](docs/HIBERNATE_DEPLOYMENT.md), [DURCISSEMENT_FINAL.md](docs/DURCISSEMENT_FINAL.md) |
 | Fiabilité des données et I/O | [FIABILITE_DONNEES_ET_IO.md](docs/FIABILITE_DONNEES_ET_IO.md), [VALIDATION_FIABILITE_IO.md](docs/VALIDATION_FIABILITE_IO.md) |
 | Préservation live et intervention manuelle | [INTEGRITE_CONFIGURATION_LIVE.md](docs/INTEGRITE_CONFIGURATION_LIVE.md), [VALIDATION_FIABILITE_IO.md](docs/VALIDATION_FIABILITE_IO.md) |
 | CRUD ciblé, checksum, sceau et reprise | [MANAGEMENT.md](docs/MANAGEMENT.md), [VALIDATION_MANAGEMENT.md](docs/VALIDATION_MANAGEMENT.md) |

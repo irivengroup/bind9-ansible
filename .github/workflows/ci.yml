@@ -50,7 +50,10 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q roles/bind9/files roles/bind9/filter_plugins roles/bind9/module_utils roles/bind9/library tests && python -m py_compile roles/bind9/files/reverse-serial.py roles/bind9/files/tsig-secret.py
       - name: Check shell syntax
-        run: bash -n roles/bind9/files/bind-configtool.sh roles/bind9/files/named-healthcheck.sh tests/run_integration_front_routes.sh tests/run_integration_loopback.sh tests/run_integration_logging.sh
+        run: |
+          for script in roles/bind9/files/*.sh tests/*.sh; do
+            bash -n "$script"
+          done
       - name: Native route task workflows on legacy Ansible
         if: matrix.ansible-version == '2.9.27'
         run: sudo --preserve-env=PATH "$(command -v python)" -m pytest -q tests/test_front_routes_ansible.py tests/test_front_route_hardening_ansible.py
@@ -58,7 +61,7 @@ jobs:
         if: matrix.ansible-version == '2.9.27'
         run: |
           python -m pip install 'coverage==7.6.1'
-          sudo --preserve-env=PATH "$(command -v python)" -m coverage run --include='*/roles/bind9/module_utils/bind9_management.py' -m pytest -q tests/test_management.py tests/test_management_refusals.py tests/test_management_hardening.py tests/test_management_ansible.py tests/test_management_batch.py tests/test_management_batch_ansible.py tests/test_management_list.py tests/test_management_live_integrity.py tests/test_management_io_safety.py tests/test_deployment_contract.py tests/test_deployment_lock_ansible.py tests/test_operation_lock_policy.py tests/test_operation_lock_bypass_ansible.py tests/test_routes_deployed_entry_ansible.py
+          sudo --preserve-env=PATH "$(command -v python)" -m coverage run --include='*/roles/bind9/module_utils/bind9_management.py' -m pytest -q tests/test_management.py tests/test_management_refusals.py tests/test_management_hardening.py tests/test_management_ansible.py tests/test_management_batch.py tests/test_management_batch_ansible.py tests/test_management_list.py tests/test_management_live_integrity.py tests/test_management_io_safety.py tests/test_deployment_contract.py tests/test_deployment_lock_ansible.py tests/test_operation_lock_policy.py tests/test_operation_lock_bypass_ansible.py tests/test_routes_deployed_entry_ansible.py tests/test_operation_resilience.py
           python -m coverage report --fail-under=98
       - name: Optional DNSSEC lifecycle workflows on legacy Ansible
         if: matrix.ansible-version == '2.9.27'

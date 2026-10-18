@@ -24,7 +24,7 @@ options:
     type: dict
     default: {}
   operation_lock:
-    description: Acquire the shared host lease. Disable only when an operator serializes all operations externally.
+    description: Also acquire the legacy deployment directory lease. The automatically released route/management process lock is always acquired.
     type: bool
     default: true
 author:
@@ -97,13 +97,14 @@ def main():
         request = module.params['request']
         manager_type = BatchManager if request.get('resource') == 'batch' else Manager
         manager = manager_type(request, context, check=module.check_mode)
-        # Keep the low-level API locked by default. The role explicitly selects
-        # the temporary operator-requested single-operation mode when disabled.
-        if module.params['operation_lock']:
-            with manager.lease():
+        # Always serialize actual transactions using the automatically released
+        # kernel lock. Retain the directory opt-in for older deployment runners.
+        with manager.operation():
+            if module.params['operation_lock']:
+                with manager.lease():
+                    result = manager.run()
+            else:
                 result = manager.run()
-        else:
-            result = manager.run()
         module.exit_json(**result)
     except ManagementError as error:
         module.fail_json(msg=str(error))
