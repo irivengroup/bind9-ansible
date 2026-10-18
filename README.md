@@ -8,7 +8,7 @@ Le rôle produit une configuration unique `/etc/named.conf`, sans vues BIND. Il 
 
 **Configuration live :** le management conserve l'existant et refuse les créations sur un nom déjà présent. Les interventions manuelles doivent partager le verrou d'opération. Les lectures et écritures sont contrôlées contre les données partielles ; voir [fiabilité des données et I/O](docs/FIABILITE_DONNEES_ET_IO.md) et [procédure opérateur](docs/INTEGRITE_CONFIGURATION_LIVE.md).
 
-**Qualification opérationnelle : NON TERMINÉE pour la production.** Aucun déploiement complet sur votre paire RHEL 8 n’a été exécuté. Voir le [diagnostic du verrou d’opération](docs/VERROU_OPERATION.md) et le [rapport de la correction courante](docs/CORRECTION_VERROU_ET_VALIDATION.md). Le [rapport de nettoyage](docs/NETTOYAGE_ET_VALIDATION.md) et les rapports de passerelle et d'hibernation concernent les livraisons précédentes.
+**Qualification opérationnelle : NON TERMINÉE pour la production.** Aucun déploiement complet sur votre paire RHEL 8 n’a été exécuté. Voir le [diagnostic du verrou d’opération](docs/VERROU_OPERATION.md) et le [rapport de la correction courante](docs/ROUTES_SEULES_ET_VERROU.md). Le [rapport de nettoyage](docs/NETTOYAGE_ET_VALIDATION.md) et les rapports de passerelle et d'hibernation concernent les livraisons précédentes.
 
 Ce guide s’adresse aux équipes d’exploitation. Les commandes du contrôleur supposent Bash sous Linux, depuis la racine du projet. Les commandes de diagnostic système s’exécutent sur le serveur DNS indiqué. Toutes les adresses et tous les domaines d’exemple doivent être adaptés avant utilisation.
 
@@ -754,11 +754,11 @@ Si la cause reste inconnue, arrêter le changement, maintenir le pair sain et ap
 <a id="validation"></a>
 ## Validation, tests du projet et limites
 
-Cette révision explicite les échecs d’acquisition du répertoire `.operation.lock` et désactive la suggestion générique du module `file` pour cette commande intentionnelle sous Ansible 2.9. L’exclusivité, la libération contrôlée et le fonctionnement DNS/routage restent conservés. Voir [VERROU_OPERATION.md](docs/VERROU_OPERATION.md).
+Cette révision observe `.operation.lock` juste avant l’acquisition et affiche, en cas d’échec, la cible Ansible, la commande, l’erreur et la présence du chemin avant/après. Le message concerne l’opération demandée, y compris le seul tag `routes`. L’incident serveur n’est pas annoncé résolu : voir [ROUTES_SEULES_ET_VERROU.md](docs/ROUTES_SEULES_ET_VERROU.md). L’exclusivité et la libération contrôlée restent conservées.
 
 ### Preuves disponibles
 
-Les contrôles de cette révision sont détaillés dans [CORRECTION_VERROU_ET_VALIDATION.md](docs/CORRECTION_VERROU_ET_VALIDATION.md) et `DELIVERY.json`. Les campagnes de passerelle, BIND, sauvegarde et couverture des rapports précédents ne sont pas présentées comme entièrement rejouées pendant cette correction.
+Les contrôles de cette révision sont détaillés dans [ROUTES_SEULES_ET_VERROU.md](docs/ROUTES_SEULES_ET_VERROU.md) et `DELIVERY.json`. Les campagnes de passerelle, BIND, sauvegarde et couverture des rapports précédents ne sont pas présentées comme entièrement rejouées pendant cette correction.
 
 Les tests de restauration utilisent les vrais tar, gzip, fichiers et empreintes. Les cinq scénarios sont aussi exécutables dans la racine d’un conteneur jetable sans namespaces imbriqués ; systemd, BIND et SELinux y sont des doubles. Les recettes DNS utilisent des démons réels dans un conteneur sans réseau externe. Les assertions d’inventaire emploient des facts RHEL simulés. Aucune de ces preuves ne vaut déploiement complet sur vos serveurs.
 
@@ -834,12 +834,12 @@ Bind9-Ansible/
 └── README.md
 ```
 
-Cette révision part de `Bind9-Ansible-nettoye.zip`, SHA-256 `a94a9acc09f964be5a38eabd06be206e519833733d04246123d87848b074e953`. Elle améliore le diagnostic du verrou sans autoriser le vol d’un verrou existant. Inventaires, templates DNS, management, hibernation et ajout strictement additif des routes sont conservés. Voir [CORRECTION_VERROU_ET_VALIDATION.md](docs/CORRECTION_VERROU_ET_VALIDATION.md) et `DELIVERY.json`.
+Cette révision part de `Bind9-Ansible-correction-verrou.zip`, SHA-256 `558886be062a5c524d4553e43e3c0468fe8e3411fcb3ad5ed555b9e901db8c2f`. Elle améliore le diagnostic du verrou sans autoriser le vol d’un verrou existant. Inventaires, templates DNS, management, hibernation et ajout strictement additif des routes sont conservés. Voir [ROUTES_SEULES_ET_VERROU.md](docs/ROUTES_SEULES_ET_VERROU.md) et `DELIVERY.json`.
 
 Le ZIP source possède une empreinte SHA-256 externe. Sur le contrôleur Linux, depuis le dossier contenant ZIP et empreinte :
 
 ```bash
-sha256sum -c Bind9-Ansible-correction-verrou.zip.sha256
+sha256sum -c Bind9-Ansible-routes-diagnostic.zip.sha256
 ```
 
 Après extraction, depuis la racine du projet :
@@ -852,7 +852,7 @@ Attendu : toutes les entrées correspondent. Le manifeste couvre les fichiers sa
 
 | Besoin | Document |
 |---|---|
-| Diagnostic du verrou et validation courante | [VERROU_OPERATION.md](docs/VERROU_OPERATION.md), [CORRECTION_VERROU_ET_VALIDATION.md](docs/CORRECTION_VERROU_ET_VALIDATION.md) |
+| Diagnostic du verrou et validation courante | [VERROU_OPERATION.md](docs/VERROU_OPERATION.md), [ROUTES_SEULES_ET_VERROU.md](docs/ROUTES_SEULES_ET_VERROU.md) |
 | Nettoyage précédent | [NETTOYAGE_ET_VALIDATION.md](docs/NETTOYAGE_ET_VALIDATION.md) |
 | Verrouillage et retrait opérateur | [HIBERNATE_DEPLOYMENT.md](docs/HIBERNATE_DEPLOYMENT.md), [AUDIT_HIBERNATE_DEPLOYMENT.md](docs/AUDIT_HIBERNATE_DEPLOYMENT.md) |
 | Fiabilité des données et I/O | [FIABILITE_DONNEES_ET_IO.md](docs/FIABILITE_DONNEES_ET_IO.md), [VALIDATION_FIABILITE_IO.md](docs/VALIDATION_FIABILITE_IO.md) |

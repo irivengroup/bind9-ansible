@@ -1,16 +1,17 @@
 {
   "project": "Bind9-Ansible",
-  "release": "2026.10.18-operation-lease.1",
-  "source_archive": "Bind9-Ansible-nettoye.zip",
-  "source_sha256": "a94a9acc09f964be5a38eabd06be206e519833733d04246123d87848b074e953",
+  "release": "2026.10.18-routes-diagnostic.1",
+  "source_archive": "Bind9-Ansible-correction-verrou.zip",
+  "source_sha256": "558886be062a5c524d4553e43e3c0468fe8e3411fcb3ad5ed555b9e901db8c2f",
   "changed_files": [
     "DELIVERY.json",
     "README.md",
     "SOURCE-MANIFEST.sha256",
-    "docs/CORRECTION_VERROU_ET_VALIDATION.md",
+    "docs/ROUTES_SEULES_ET_VERROU.md",
     "docs/VERROU_OPERATION.md",
     "roles/bind9/tasks/tasks.d/deploy/guard.yml",
-    "tests/test_deployment_lock_ansible.py"
+    "tests/test_deployment_lock_ansible.py",
+    "tests/test_routes_deployed_entry_ansible.py"
   ],
   "removed_files": [],
   "modified_production": [
@@ -54,32 +55,43 @@
         "result": {
           "passed": 964
         },
-        "sha256": "378ba42aff0482787f4dca085bc2b4ed58766ccb5d3ce01727c1e922eaacc789"
+        "sha256": "6ed8db459a9a7b28c706c724d32dec75adf66c5cad91e2303d7cce32bead9fdb"
       },
-      "final-lease-tests.log": {
+      "final-guard.log": {
         "status": "EXÉCUTÉ",
         "result": {
-          "passed": 65
+          "passed": 30,
+          "deselected": 36
         },
-        "sha256": "df577ad2e9c26bab7ba63078868905d3c44cfa06a4c76dffecb9983b86cbe274"
+        "sha256": "ea85be57ed25d4f6f96176c5e0bfca8e66c12fa5788b4434526202e519b48d92"
+      },
+      "final-routes-deployed.log": {
+        "status": "EXÉCUTÉ",
+        "result": {
+          "passed": 2
+        },
+        "sha256": "45d1127f5b52dd95b2d8a8fe75ce4f58dada78bca57f37b03eeac66dae936aea"
       },
       "final-contracts.log": {
         "status": "EXÉCUTÉ",
         "result": {
           "syntax_checks": 6,
-          "python_compiled": 70,
+          "python_compiled": 71,
           "shell_scripts": 6
         },
-        "sha256": "4a79374bd9cb1b3d37cb37a5d2aa29ad1432d925f3c8cae2ca896412fad58f52"
+        "sha256": "bc8d926e655d39aff0004cfa53ba7621270cfbe287e08789a81207a25d64d82f"
       }
     },
     "audit": {
-      "local_markdown_links": 257,
+      "local_markdown_links": 262,
       "removed_files": 0,
       "production_files": 68,
       "test_files_preserved": 64,
       "test_files_extended": [
         "tests/test_deployment_lock_ansible.py"
+      ],
+      "test_files_added": [
+        "tests/test_routes_deployed_entry_ansible.py"
       ],
       "forbidden_artifacts": 0
     },
@@ -118,7 +130,7 @@
       "roles/bind9/tasks/tasks.d/deploy/front_routes_ssh_normalize.yml": "137129879edb68b67c120b768f55ddec61e54b4f1e1ef5687d8f97533a64643a",
       "roles/bind9/tasks/tasks.d/deploy/front_routes_validate_journal.yml": "5cd82d22534b4ba4b150e58d0eb49f4712251cccb2c4b5733f550a372f019268",
       "roles/bind9/tasks/tasks.d/deploy/front_routes_verify.yml": "2587986ca5aaca3e202201c811a3a43375541929372562a771463b1ea157202c",
-      "roles/bind9/tasks/tasks.d/deploy/guard.yml": "eee30a8191ccdf8418fda94c5673d5346abc012b9171f5a04d4d5bacf479b520",
+      "roles/bind9/tasks/tasks.d/deploy/guard.yml": "e9fcd85e72b9065eadef793c02edab0f5b35dcff8b5714dd3b0bd21b3af3e37a",
       "roles/bind9/tasks/tasks.d/deploy/health.yml": "1be54eac6ce1ebb90e73bd44697e36c435dbfc82714cd554ec93ea31c55a21c7",
       "roles/bind9/tasks/tasks.d/deploy/hibernate.yml": "87e77971b9125420dabea04a435186231ce94528852c27c13b00d04841c8f0be",
       "roles/bind9/tasks/tasks.d/deploy/lease_release.yml": "e1af19b8a4576c547786d1b5f9c3024ee30e6ff4196fac7cb8221f43b3a6b642",
@@ -156,12 +168,19 @@
     "regression_before": {
       "status": "EXÉCUTÉ",
       "expected_failure": true,
-      "diagnostic_missing_on_source_release": true,
-      "sha256": "1214386b464e9654ee2d77a09437d39097d206e7af3a03e9bf89a851f1f6a9e4"
+      "structured_observations_missing_on_source_release": true,
+      "sha256": "5d4b0e439ef05e1a7890278fa8649e83e00765e7f54059c50709c4bc687da763"
+    },
+    "route_entry_before": {
+      "status": "EXÉCUTÉ",
+      "passed": 2,
+      "incident_reproduced": false,
+      "source_archive": "Bind9-Ansible-correction-verrou.zip",
+      "sha256": "fd3dc27f2dc96067a9eb1fc16daeff9d9a5b609b0387c69160e034047ef66a60"
     },
     "native_network_commands": false,
     "full_ci_matrix_replayed": false,
-    "report": "docs/CORRECTION_VERROU_ET_VALIDATION.md"
+    "report": "docs/ROUTES_SEULES_ET_VERROU.md"
   },
   "preserved": [
     "existing test scenarios and CI",
@@ -178,7 +197,7 @@
       "native user RHEL 8 NetworkManager/iproute2 and SSH workflow",
       "reboot persistence and system deployment on user servers",
       "remote CI matrix, physical concurrent operator changes",
-      "identify the operation recreating the lease on the inaccessible user server"
+      "diagnose the inconsistent observed lease state on the inaccessible user server and verify its route addition"
     ]
   }
 }

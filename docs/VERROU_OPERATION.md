@@ -20,6 +20,13 @@ sans suivre les liens ni lire le contenu du verrou. Il arrête l’opération sa
 revendiquer ni libérer un verrou dont la création a échoué. L’observation du
 chemin intervient après l’échec ; son existence peut évoluer entre les deux.
 
+La révision du parcours de routage ajoute aussi une observation juste avant
+l’acquisition et un affichage structuré : cible Ansible, commande, `rc`,
+`stderr`, `exists_before` et `exists_after`. Un chemin absent après l’échec ne
+reçoit plus l’avertissement générique sur un répertoire occupé. Pour une
+opération `routes`, aucune reconstruction DNS n’est demandée ; voir
+[ROUTES_SEULES_ET_VERROU.md](ROUTES_SEULES_ET_VERROU.md).
+
 | Observation | Action opérateur |
 |---|---|
 | `File exists`, répertoire | Rechercher une opération en cours ou une récupération interrompue. L’ancien verrou est conservé. |
@@ -83,4 +90,6 @@ différents types et la restitution d’erreurs système simulées, dans les deu
 modes Jinja d’Ansible 2.9.
 
 Les résultats de cette livraison et les contrôles restant à effectuer sont dans
-le [rapport de vérification](CORRECTION_VERROU_ET_VALIDATION.md).
+le [rapport courant du parcours routes](ROUTES_SEULES_ET_VERROU.md). Le
+[rapport de la livraison source](CORRECTION_VERROU_ET_VALIDATION.md) reste
+un historique des contrôles précédents.

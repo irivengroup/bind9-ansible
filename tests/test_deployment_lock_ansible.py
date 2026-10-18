@@ -163,6 +163,45 @@ def test_failed_acquisition_preserves_os_error_instead_of_claiming_a_busy_lease(
     assert not (lab.state / '.deployment.lock').exists()
 
 
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('scenario', ['existing', 'created-between-observations', 'system-error'])
+def test_acquisition_evidence_distinguishes_absence_from_a_competing_creation(tmp_path, native, scenario):
+    """Report observations on the Ansible target without asserting a stale owner."""
+    lab = DeploymentLab(tmp_path, native)
+    lease = lab.state / '.operation.lock'
+    path = lab.role / 'tasks/tasks.d/deploy/guard.yml'
+    tasks = yaml.safe_load(path.read_text())
+    index = next(i for i, task in enumerate(tasks) if task['name'].startswith('Acquire the shared'))
+    if scenario == 'existing':
+        lab.state.mkdir(parents=True, mode=0o700)
+        lease.mkdir(mode=0o700)
+        (lease / 'operator-evidence').write_text('preserve')
+    elif scenario == 'created-between-observations':
+        tasks.insert(index, {'file': {'path': str(lease), 'state': 'directory', 'mode': '0700'}})
+    else:
+        command = lab.bin / 'failing-mkdir'
+        command.write_text('#!/bin/sh\necho "Read-only file system" >&2\nexit 1\n')
+        command.chmod(0o700)
+        tasks[index]['block'][0]['ansible.builtin.command']['argv'][0] = str(command)
+    path.write_text(yaml.safe_dump(tasks))
+    output = lab.entry(expected_error='Cannot acquire')
+    assert 'Show acquisition evidence from this exact Ansible target and operation' in output
+    assert '"inventory_host": "localhost"' in output
+    assert '"connection_target": "localhost"' in output
+    assert '"command": [' in output and '"stderr": ' in output
+    assert '"exists_before": ' + ('true' if scenario == 'existing' else 'false') in output
+    assert '"exists_after": ' + ('false' if scenario == 'system-error' else 'true') in output
+    assert 'the requested operation has stopped' in output
+    assert 'deployment has stopped' not in output
+    if scenario == 'system-error':
+        assert 'does not establish an abandoned lease' in output and not lease.exists()
+    else:
+        assert lease.is_dir()
+        if scenario == 'existing':
+            assert (lease / 'operator-evidence').read_text() == 'preserve'
+    assert not lab.marker.exists() and not (lab.state / '.deployment.lock').exists()
+
+
 @pytest.mark.parametrize('replacement', [False, True])
 def test_release_never_recursively_deletes_a_changed_or_nonempty_lease(tmp_path, replacement):
     lab = DeploymentLab(tmp_path)
