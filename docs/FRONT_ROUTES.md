@@ -206,7 +206,7 @@ qu’aucune tâche antérieure n’a ajouté de route : lire le journal de l’o
 
 ## Vérification et limites
 
-Voir [VALIDATION_FRONT_ROUTES.md](VALIDATION_FRONT_ROUTES.md) pour les résultats
+Voir [Nettoyage et validation](NETTOYAGE_ET_VALIDATION.md) pour les résultats
 exécutés et les contrôles restant à réaliser sur le serveur RHEL.
 
 Le laboratoire NetworkManager est reproductible sur un contrôleur Linux
@@ -222,4 +222,4 @@ démarrage du service de test. Les commandes de réactivation dans ce laboratoir
 servent uniquement à prouver la persistance ; elles ne figurent pas dans les
 tâches déployées. Aucun paquet n'est installé par ce test.
 
-Adaptation du playbook fourni et résultats actuels : [VALIDATION_ROUTES_NATIVES.md](VALIDATION_ROUTES_NATIVES.md).
+Adaptation initiale du playbook fourni : [VALIDATION_ROUTES_NATIVES.md](VALIDATION_ROUTES_NATIVES.md), rapport historique. Résultats courants : [NETTOYAGE_ET_VALIDATION.md](NETTOYAGE_ET_VALIDATION.md).

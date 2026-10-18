@@ -1,5 +1,7 @@
 # Découverte et contrôles de la passerelle FRONT
 
+> Rapport de la livraison précédente `2026.10.18-front-gateway.1`. Les contrôles du nettoyage courant sont décrits dans [NETTOYAGE_ET_VALIDATION.md](NETTOYAGE_ET_VALIDATION.md).
+
 Cette révision part de `Bind9-Ansible-hibernate-deployment.zip` et corrige le
 refus imposant une propriété persistante `ipv4.gateway` non vide. Sans les
 sorties du serveur concerné, la cause exacte de son incident reste à confirmer.
@@ -102,7 +104,7 @@ Sources : [paramètres IPv4 NetworkManager](https://www.networkmanager.dev/docs/
 **EXÉCUTÉ** : reproduction sur les sources précédentes avec les nouveaux tests :
 deux refus sur la tâche signalée, avec propriété persistante vide puis `--` et
 passerelle active valide. Les résultats de la correction et leurs empreintes
-figurent dans `DELIVERY.json` et `PREUVES_PASSERELLE_FRONT.txt`.
+figurent dans `DELIVERY.json` et [l’historique des validations](NETTOYAGE_ET_VALIDATION.md#historique).
 
 **EXÉCUTÉ** : 964 tests généraux et 146 tests de routage réussis, avec recouvrement
 entre ces sélections ; six contrôles de syntaxe Ansible (deux playbooks sur

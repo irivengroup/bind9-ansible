@@ -60,10 +60,44 @@
   when: not ansible_check_mode
 
 - name: Acquire the shared deployment and management lease without stealing it
-  ansible.builtin.command:
-    argv: [mkdir, -m, '0700', /var/lib/Bind9-Ansible/.operation.lock]
-  changed_when: false
   when: not ansible_check_mode
+  # file: state=directory would accept another invocation's lease. Exclusive
+  # mkdir is the acquisition primitive; a failed acquisition grants no ownership.
+  block:
+    - name: Exclusively create the shared operation directory
+      ansible.builtin.command:
+        argv: [/usr/bin/mkdir, -m, '0700', --, /var/lib/Bind9-Ansible/.operation.lock]
+        # Ansible 2.9's file-module suggestion does not provide exclusive locking.
+        # Omit this legacy argument on other Ansible versions.
+        warn: "{{ false if ansible_version.full is version('2.10', '<') else omit }}"
+      register: bind_deployment_lease_attempt
+      changed_when: false
+  rescue:
+    - name: Inspect the failed lease path without reading or following its contents
+      ansible.builtin.stat:
+        path: /var/lib/Bind9-Ansible/.operation.lock
+        follow: false
+        get_checksum: false
+        get_mime: false
+      register: bind_deployment_failed_lease
+
+    - name: Stop with the acquisition cause while preserving any existing lease
+      ansible.builtin.fail:
+        msg: >-
+          Cannot acquire /var/lib/Bind9-Ansible/.operation.lock (directory lease).
+          rc={{ bind_deployment_lease_attempt.rc | default('unavailable') }};
+          stderr={{ bind_deployment_lease_attempt.stderr | default('unavailable', true) | trim }};
+          message={{ bind_deployment_lease_attempt.msg | default('unavailable', true) }}.
+          Path observed after failure:
+          {{ 'absent' if not bind_deployment_failed_lease.stat.exists else
+             ('symlink' if bind_deployment_failed_lease.stat.islnk | default(false) else
+              ('directory' if bind_deployment_failed_lease.stat.isdir | default(false) else
+               ('regular file' if bind_deployment_failed_lease.stat.isreg | default(false) else 'special file'))) }}.
+          No lease ownership was granted and deployment has stopped. An existing
+          directory may protect an active or interrupted operation; never remove
+          it automatically. Inspect the reported cause and recovery procedure in
+          docs/VERROU_OPERATION.md before retrying. This lease is distinct from
+          the persistent .deployment.lock hibernation seal.
 
 - name: Remember ownership of this invocation's lease
   ansible.builtin.set_fact:

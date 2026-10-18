@@ -65,7 +65,7 @@ sans capacité ajoutée, sans mode privilégié ni seccomp désactivé. Réseau 
 seule. Les démons du banc sont root et SELinux est un double explicite. Cela ne
 qualifie pas les permissions du processus named/systemd de vos serveurs.
 Les journaux bruts restent hors ZIP ; leurs empreintes sont dans
-[PREUVES_FIABILITE_IO.txt](PREUVES_FIABILITE_IO.txt).
+[Historique des validations](NETTOYAGE_ET_VALIDATION.md#historique).
 
 Les essais intermédiaires ont été utilisés pour corriger les causes, sans réduire
 les assertions de préservation ni le seuil de couverture. Le test de doublon

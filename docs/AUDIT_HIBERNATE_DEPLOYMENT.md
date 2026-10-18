@@ -67,7 +67,7 @@ aucun port publié. Les démons des bancs sont root, pas le service systemd RHEL
 | **EXÉCUTÉ** | Packaging | 212 fichiers ; source ZIP vérifiée, 67 fichiers de production comparés octet pour octet au banc final, inventaires/templates/moteur management et algorithme FRONT inchangés. Manifestes, CRC, contenu et permissions préservées ; deux constructions identiques. Caches, secrets générés et journaux bruts exclus du ZIP. |
 
 Journaux bruts hors ZIP, empreintes et sources testées dans
-[PREUVES_HIBERNATE_DEPLOYMENT.txt](PREUVES_HIBERNATE_DEPLOYMENT.txt).
+[Historique des validations](NETTOYAGE_ET_VALIDATION.md#historique).
 Les suites recouvrantes ne sont pas additionnées. Les refus attendus de l’ancienne
 version ne sont pas des échecs non résolus du code livré. Une campagne globale
 instrumentée trop coûteuse est remplacée par la suite globale et les deux mesures

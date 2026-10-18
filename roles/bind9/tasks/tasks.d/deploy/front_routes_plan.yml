@@ -5,24 +5,14 @@
   vars:
     bind_front_routes_text: '{{ bind_front_profile.results[1].stdout }}'
 
-- name: Validate routing policy and typed client inputs before planning
+- name: Validate client types route metric and profile table before planning
   ansible.builtin.assert:
     that:
       - bind_cloud_clients is sequence and bind_cloud_clients is not string and bind_cloud_clients is not mapping
       - (bind_front_route_metric | type_debug) in ['int', 'long']
       - bind_front_route_metric | int >= 1 and bind_front_route_metric | int <= 4294967295
       - bind_front_profile.results[2].stdout | trim in ['0', '254']
-      - (bind_front_kernel.results[0].stdout | from_json) is sequence and (bind_front_kernel.results[0].stdout | from_json) is not mapping
-      - (bind_front_kernel.results[1].stdout | from_json | length) == 3
-      - (bind_front_kernel.results[1].stdout | from_json | map(attribute='priority') | list | sort) == [0, 32766, 32767]
-      - (bind_front_kernel.results[1].stdout | from_json | map(attribute='src') | unique | list) == ['all']
     fail_msg: 'Only classic IPv4 main-table routing and an integer metric are supported.'
-
-- name: Require the three standard routing rules without alternate tables
-  ansible.builtin.assert:
-    that:
-      - (item.table | string) == ({0:'local', 32766:'main', 32767:'default'}[item.priority])
-  loop: '{{ bind_front_kernel.results[1].stdout | from_json }}'
 
 - name: Validate complete standard IPv4 policy before planning writes
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_policy.yml'

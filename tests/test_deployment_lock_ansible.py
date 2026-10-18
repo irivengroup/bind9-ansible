@@ -108,6 +108,61 @@ def test_auxiliary_workflows_refuse_a_busy_shared_lease(tmp_path, tags):
     assert not lab.marker.exists()
 
 
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('kind', ['directory', 'regular file', 'symlink', 'special file'])
+def test_failed_acquisition_reports_existing_path_without_claiming_or_changing_it(tmp_path, native, kind):
+    """An occupied lease must stop provisioning, even for non-directory paths."""
+    lab = DeploymentLab(tmp_path, native)
+    lab.state.mkdir(parents=True, mode=0o700)
+    lease = lab.state / '.operation.lock'
+    evidence = lab.state / 'operator-evidence'
+    evidence.write_bytes(b'preserve operator data')
+    if kind == 'directory':
+        lease.mkdir(mode=0o700)
+        evidence = lease / 'operator-evidence'
+        evidence.write_bytes(b'preserve operator data')
+    elif kind == 'regular file':
+        lease.write_bytes(b'preserve existing file')
+        lease.chmod(0o600)
+    elif kind == 'symlink':
+        lease.symlink_to(evidence)
+    else:
+        os.mkfifo(str(lease), 0o600)
+    original = lease.lstat()
+    output = lab.entry(expected_error='Cannot acquire')
+    assert 'Path observed after failure: ' + kind + '.' in output
+    assert 'rc=1;' in output and 'File exists' in output
+    assert 'No lease ownership was granted' in output
+    assert 'Consider using the file module' not in output
+    current = lease.lstat()
+    assert (current.st_dev, current.st_ino, current.st_mode, current.st_mtime_ns) == (
+        original.st_dev, original.st_ino, original.st_mode, original.st_mtime_ns)
+    assert evidence.read_bytes() == b'preserve operator data'
+    if kind == 'regular file':
+        assert lease.read_bytes() == b'preserve existing file'
+    assert not lab.marker.exists() and not (lab.state / '.deployment.lock').exists()
+
+
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('diagnostic', ['Permission denied', 'Read-only file system'])
+def test_failed_acquisition_preserves_os_error_instead_of_claiming_a_busy_lease(tmp_path, native, diagnostic):
+    """Inject an OS failure without requiring a writable host or real permissions change."""
+    lab = DeploymentLab(tmp_path, native)
+    command = lab.bin / 'failing-mkdir'
+    command.write_text('#!/bin/sh\nprintf "%s\\n" "' + diagnostic + '" >&2\nexit 1\n')
+    command.chmod(0o700)
+    path = lab.role / 'tasks/tasks.d/deploy/guard.yml'
+    tasks = yaml.safe_load(path.read_text())
+    acquisition = next(task for task in tasks if task['name'].startswith('Acquire the shared'))
+    acquisition['block'][0]['ansible.builtin.command']['argv'][0] = str(command)
+    path.write_text(yaml.safe_dump(tasks))
+    output = lab.entry(expected_error='Cannot acquire')
+    assert 'rc=1;' in output and 'stderr=' + diagnostic + ';' in output
+    assert 'Path observed after failure: absent.' in output
+    assert not lab.marker.exists() and not (lab.state / '.operation.lock').exists()
+    assert not (lab.state / '.deployment.lock').exists()
+
+
 @pytest.mark.parametrize('replacement', [False, True])
 def test_release_never_recursively_deletes_a_changed_or_nonempty_lease(tmp_path, replacement):
     lab = DeploymentLab(tmp_path)

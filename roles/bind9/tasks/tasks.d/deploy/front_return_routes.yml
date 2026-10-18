@@ -44,7 +44,7 @@
         {%- endfor -%}
         {%- if row.front | length == 1 and not row.protected and 'master' not in iface and
             (iface.get('operstate') == 'UP' or (iface.get('operstate') == 'UNKNOWN' and 'UP' in iface.get('flags', []))) -%}
-          {%- set ns.found = ns.found + [{'device':iface.ifname, 'address':bind_front_ip, 'network':row.front[0]}] -%}
+          {%- set ns.found = ns.found + [{'device':iface.ifname, 'network':row.front[0]}] -%}
         {%- endif -%}
       {%- endfor -%}
       {{ {'found':ns.found, 'present':ns.present, 'protected':ns.protected | unique | list} | to_json }}
