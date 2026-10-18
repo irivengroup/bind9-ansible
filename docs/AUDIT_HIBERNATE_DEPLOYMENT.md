@@ -1,5 +1,7 @@
 # Audit du projet et hibernation — 18 octobre 2026
 
+**Rapport historique de l’archive restaurée.** Les résultats ci-dessous ne sont pas une exécution de la révision courante. Pour le changement de verrou demandé et ses vérifications, voir [VERROUS_OPERATIONS_OPTIONNELS.md](VERROUS_OPERATIONS_OPTIONNELS.md).
+
 Révision **2026.10.18-hibernate-deployment.1**, projet **Bind9-Ansible**.
 Source : `Bind9-Ansible-management-fiabilite.zip`, SHA-256
 `212c5f983928d39972060f49a40134f36b95459199b6af823109e007d699344a`.
@@ -67,7 +69,7 @@ aucun port publié. Les démons des bancs sont root, pas le service systemd RHEL
 | **EXÉCUTÉ** | Packaging | 212 fichiers ; source ZIP vérifiée, 67 fichiers de production comparés octet pour octet au banc final, inventaires/templates/moteur management et algorithme FRONT inchangés. Manifestes, CRC, contenu et permissions préservées ; deux constructions identiques. Caches, secrets générés et journaux bruts exclus du ZIP. |
 
 Journaux bruts hors ZIP, empreintes et sources testées dans
-[Historique des validations](NETTOYAGE_ET_VALIDATION.md#historique).
+[PREUVES_HIBERNATE_DEPLOYMENT.txt](PREUVES_HIBERNATE_DEPLOYMENT.txt).
 Les suites recouvrantes ne sont pas additionnées. Les refus attendus de l’ancienne
 version ne sont pas des échecs non résolus du code livré. Une campagne globale
 instrumentée trop coûteuse est remplacée par la suite globale et les deux mesures

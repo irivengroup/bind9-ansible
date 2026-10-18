@@ -1,6 +1,8 @@
 # Verrouillage optionnel du déploiement
 
-L’unique paramètre public est `hibernate_deployment`, de type booléen, avec
+**Mode temporaire actuel :** `bind_operation_lock_enabled: false` désactive la prise du verrou commun `.operation.lock` pour les opérations ordinaires, lectures et simulations de management comprises. Un ancien verrou est ignoré et conservé. **Une seule opération à la fois**, y compris toute intervention manuelle. Avec le booléen YAML `true`, les garanties de verrou coopératif décrites ci-dessous s’appliquent de nouveau. Le tag `hibernate` et le déploiement complet avec `hibernate_deployment: yes` conservent toujours ce verrou. Les journaux de reprise, contrôles de checksum et verrous propres aux routes/sauvegardes restent actifs. [Contrat et preuves de cette révision](VERROUS_OPERATIONS_OPTIONNELS.md).
+
+Le paramètre public de scellement est `hibernate_deployment`, de type booléen, avec
 `no` par défaut dans `roles/bind9/defaults/main.yml` (booléen YAML `false`). Les chaînes CLI
 minuscules `true`, `false`, `yes`, `no` sont acceptées par Ansible 2.9.
 Les entiers, listes, mappings, valeurs nulles et autres chaînes sont refusés
@@ -101,10 +103,11 @@ verrou ; une opération concurrente peut changer le résultat après le contrôl
 ## Verrou d’opération indépendant
 
 `/var/lib/Bind9-Ansible/.operation.lock` protège les opérations coopérantes
-concurrentes. Il reste obligatoire avec `hibernate_deployment: no`, et pour
-les tags `routes`, `routes-recover` et `backup`. Un sceau existant autorise ces
-trois opérations auxiliaires sous ce verrou, mais bloque les tags de
-reconstruction DNS. Le management conserve le même protocole de verrouillage.
+concurrentes lorsqu’elles l’utilisent. Il reste obligatoire pour l’hibernation,
+mais il est ignoré par défaut pour les tags `routes`, `routes-recover`, `backup`,
+le management et les déploiements sans scellement. Définir le booléen
+`bind_operation_lock_enabled: true` pour rétablir sa prise sur ces parcours.
+Un sceau existant autorise les opérations auxiliaires mais bloque la reconstruction DNS.
 
 Le rôle libère uniquement le répertoire vide dont il a observé l’identité
 (périphérique et inode), jamais par suppression récursive. Un remplacement,
@@ -118,7 +121,7 @@ backups et éventuel journal FRONT avant une reprise ; voir
 Les contrôles `--check` du déploiement n’acquièrent pas ce verrou et ne sont
 pas une transaction ni une observation stable de l’état. Leur parcours complet
 n’est pas qualifié de bout en bout. Le management, y compris ses lectures et
-simulations, conserve son protocole propre sous verrou.
+simulations, utilise ce verrou uniquement avec `bind_operation_lock_enabled: true`.
 
 ## Retrait explicite du sceau par un opérateur
 
@@ -173,5 +176,6 @@ qui ignore ou remplace les verrous peut toujours intervenir entre deux contrôle
 Les fichiers sont remplacés atomiquement individuellement ; cela ne constitue
 pas une transaction atomique de tous les fichiers ou de la paire.
 
-Les contrôles et limites de cette révision sont détaillés dans
-[AUDIT_HIBERNATE_DEPLOYMENT.md](AUDIT_HIBERNATE_DEPLOYMENT.md).
+Les contrôles et limites actuels sont détaillés dans
+[VERROUS_OPERATIONS_OPTIONNELS.md](VERROUS_OPERATIONS_OPTIONNELS.md).
+[AUDIT_HIBERNATE_DEPLOYMENT.md](AUDIT_HIBERNATE_DEPLOYMENT.md) décrit l’archive initiale.

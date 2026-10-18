@@ -1,5 +1,7 @@
 # Opérations BIND 9 (RHEL 8+)
 
+**Mode temporaire actuel :** `bind_operation_lock_enabled: false` désactive la prise du verrou commun `.operation.lock` pour les opérations ordinaires, lectures et simulations de management comprises. Un ancien verrou est ignoré et conservé. **Une seule opération à la fois**, y compris toute intervention manuelle. Avec le booléen YAML `true`, les garanties de verrou coopératif décrites ci-dessous s’appliquent de nouveau. Le tag `hibernate` et le déploiement complet avec `hibernate_deployment: yes` conservent toujours ce verrou. Les journaux de reprise, contrôles de checksum et verrous propres aux routes/sauvegardes restent actifs. [Contrat et preuves de cette révision](VERROUS_OPERATIONS_OPTIONNELS.md).
+
 **Contrat actuel :** `hibernate_deployment: yes` génère un sceau après réussite du déploiement complet ; défaut `no`, sans nouveau sceau. Le tag isolé `hibernate`, avec ce paramètre à `yes`, permet de sceller uniquement la configuration existante sans redéploiement. Un sceau existant bloque toute reconstruction, même avec `no`, jusqu’à son [retrait explicite par un opérateur](HIBERNATE_DEPLOYMENT.md). `force` est retiré et refusé. Pour une modification ciblée préservant les autres interventions, utiliser [MANAGEMENT.md](MANAGEMENT.md), lecture et checksum obligatoires. Les procédures de reconstruction ci-dessous nécessitent le retrait préalable de tout sceau existant.
 
 Le rôle déploie **un seul fichier de configuration** : `/etc/named.conf`.

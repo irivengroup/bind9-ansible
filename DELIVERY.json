@@ -1,102 +1,132 @@
 {
   "project": "Bind9-Ansible",
-  "release": "2026.10.18-routes-diagnostic.1",
-  "source_archive": "Bind9-Ansible-correction-verrou.zip",
-  "source_sha256": "558886be062a5c524d4553e43e3c0468fe8e3411fcb3ad5ed555b9e901db8c2f",
+  "release": "2026.10.18-optional-operation-lock.1",
+  "source_archive": "Bind9-Ansible-hibernate-deployment.zip",
+  "source_sha256": "63f826d85deb0ce68ee45dbe87a77fade81df44f636e5fdd0749281d2052c992",
   "changed_files": [
+    ".github/workflows/ci.yml",
     "DELIVERY.json",
     "README.md",
     "SOURCE-MANIFEST.sha256",
-    "docs/ROUTES_SEULES_ET_VERROU.md",
-    "docs/VERROU_OPERATION.md",
+    "docs/AUDIT_HIBERNATE_DEPLOYMENT.md",
+    "docs/FIABILITE_DONNEES_ET_IO.md",
+    "docs/FRONT_ROUTES.md",
+    "docs/HIBERNATE_DEPLOYMENT.md",
+    "docs/INTEGRITE_CONFIGURATION_LIVE.md",
+    "docs/MANAGEMENT.md",
+    "docs/MANAGEMENT_LOTS_ET_LISTES.md",
+    "docs/OPERATIONS.md",
+    "docs/VERROUS_OPERATIONS_OPTIONNELS.md",
+    "roles/bind9/defaults/main.yml",
+    "roles/bind9/library/bind9_manage.py",
     "roles/bind9/tasks/tasks.d/deploy/guard.yml",
-    "tests/test_deployment_lock_ansible.py",
+    "roles/bind9/tasks/tasks.d/manage/main.yml",
+    "tests/test_management_ansible.py",
+    "tests/test_operation_lock_bypass_ansible.py",
+    "tests/test_operation_lock_policy.py",
     "tests/test_routes_deployed_entry_ansible.py"
   ],
   "removed_files": [],
   "modified_production": [
-    "roles/bind9/tasks/tasks.d/deploy/guard.yml"
+    "roles/bind9/defaults/main.yml",
+    "roles/bind9/library/bind9_manage.py",
+    "roles/bind9/tasks/tasks.d/deploy/guard.yml",
+    "roles/bind9/tasks/tasks.d/manage/main.yml"
   ],
   "new_production_dependencies": [],
-  "public_contract": {
-    "parameter": "hibernate_deployment",
-    "default": false,
-    "yaml_default": "no",
-    "enabled_value": "yes",
-    "removed_names": [
-      "force",
-      "deployment_lock",
-      "deployment_locked"
-    ],
-    "persistent_seal": "/var/lib/Bind9-Ansible/.deployment.lock",
-    "existing_seal": "blocks deployment regardless of parameter until explicit operator removal",
-    "tag": "hibernate",
-    "tag_requires_explicit_yes": true,
-    "tag_changes": "private seal from canonical live file only; no DNS provisioning or runtime health qualification",
-    "shared_operation_lease": "always required for modifying role paths independently of hibernation"
-  },
+  "entrypoints": [
+    "playbooks/bind9-deploy.yml",
+    "playbooks/bind9-management.yml"
+  ],
   "targets": {
     "os": "RHEL 8",
     "ansible": "2.9.27",
     "python_target": "3.6.8"
   },
-  "entrypoints": [
-    "playbooks/bind9-deploy.yml",
-    "playbooks/bind9-management.yml"
-  ],
+  "public_contract": {
+    "bind_operation_lock_enabled": {
+      "type": "strict YAML bool",
+      "default": false,
+      "effect": "Skip shared lease outside hibernation; operator must serialize every operation externally"
+    },
+    "hibernate_deployment": {
+      "default": false,
+      "existing_seal_blocks_redeployment": true
+    },
+    "forced_shared_lease": [
+      "isolated hibernate tag",
+      "full all/deploy with hibernate_deployment=true"
+    ],
+    "low_level_bind9_manage_operation_lock_default": true,
+    "existing_operation_directory": "ignored and preserved in unlocked mode",
+    "front_recovery_journals_and_backup_locks": "preserved"
+  },
   "validation": {
     "status": "EXÉCUTÉ",
     "python": "3.6.8",
     "ansible": "2.9.27",
     "jinja2": "2.10.3",
     "evidence": {
-      "final-general.log": {
+      "general": {
         "status": "EXÉCUTÉ",
         "result": {
-          "passed": 964
+          "passed": 960
         },
-        "sha256": "6ed8db459a9a7b28c706c724d32dec75adf66c5cad91e2303d7cce32bead9fdb"
+        "sha256": "a111ed2f16509c1237e5be0c31e7c0ae1609bf02098174439a1f31f71b1f3e0e"
       },
-      "final-guard.log": {
+      "policy-workflows": {
         "status": "EXÉCUTÉ",
         "result": {
-          "passed": 30,
-          "deselected": 36
+          "passed": 21
         },
-        "sha256": "ea85be57ed25d4f6f96176c5e0bfca8e66c12fa5788b4434526202e519b48d92"
+        "initial_test_harness_failure": "tests/test_operation_lock_bypass_ansible.py::test_hibernation_still_refuses_an_existing_operation_lease[deploy]",
+        "cause": "Dynamic include did not propagate deploy tag; no production tasks selected",
+        "resolved_by": "policy-corrected",
+        "sha256": "4b9823d9d30e8eb07d44f8c85b9107bcf58e75c96652d603bc5e1535e2f06797"
       },
-      "final-routes-deployed.log": {
+      "policy-corrected": {
+        "status": "EXÉCUTÉ",
+        "result": {
+          "passed": 1
+        },
+        "sha256": "112070c0fdeeea21e0b4e412647d0fee84ba676ac8cd24a277623aeb80f853d7"
+      },
+      "routes": {
         "status": "EXÉCUTÉ",
         "result": {
           "passed": 2
         },
-        "sha256": "45d1127f5b52dd95b2d8a8fe75ce4f58dada78bca57f37b03eeac66dae936aea"
+        "sha256": "dd386467b0c8c04313a53a2a1935cde0f191350ae65c0fc3ffd65e2fd022cd1b"
       },
-      "final-contracts.log": {
+      "contracts": {
         "status": "EXÉCUTÉ",
         "result": {
           "syntax_checks": 6,
-          "python_compiled": 71,
+          "python_compiled": 73,
           "shell_scripts": 6
         },
-        "sha256": "bc8d926e655d39aff0004cfa53ba7621270cfbe287e08789a81207a25d64d82f"
+        "sha256": "ec07ce9cfdbc0cafde67337cf31a67c4e959c35b81c480eadc6578b3ff8a4ac8"
+      },
+      "ci-audit": {
+        "status": "EXÉCUTÉ",
+        "result": {
+          "ci_yaml_parsed": true,
+          "new_tests_in_privileged_step": 3,
+          "final_test_files_compiled": 3,
+          "coverage_threshold_preserved": 98
+        },
+        "sha256": "b47af846915bbf7ea828a8f270c800b43caebdcf00e4ec2e873706f960895edb"
+      },
+      "before": {
+        "status": "EXÉCUTÉ",
+        "expected_failure": true,
+        "case": "routes blocked by an existing operation directory on original archive",
+        "remote_incident_root_cause_established": false,
+        "sha256": "ed2bc3b2c2732f829e87bd3245b0ed5d585a4a3cd710fd931ed7e559ec7767ce"
       }
     },
-    "audit": {
-      "local_markdown_links": 262,
-      "removed_files": 0,
-      "production_files": 68,
-      "test_files_preserved": 64,
-      "test_files_extended": [
-        "tests/test_deployment_lock_ansible.py"
-      ],
-      "test_files_added": [
-        "tests/test_routes_deployed_entry_ansible.py"
-      ],
-      "forbidden_artifacts": 0
-    },
     "production_sha256": {
-      "roles/bind9/defaults/main.yml": "f0a3a8186ed9aefee6f2c79604c5fac0cfc2080710a946978094847fd4317975",
+      "roles/bind9/defaults/main.yml": "98a6bd2e82b10c44d9f1cd47317ff4d794d7e1a3e9cc7ebaf7d5eb6ac5ba2190",
       "roles/bind9/files/bind-configtool.sh": "9bc5ec31eecf0e2fbc00503ec5e6a4f1b66f2bffbd0fefacea9f1bd3ea4dc411",
       "roles/bind9/files/bind-private-dnssec.py": "cb56519ab6cbc6f9a5fb13ee473e86feaf0b064e4f78cf84d15be8935a02c9a3",
       "roles/bind9/files/named-healthcheck.sh": "b57ad30aa4c44e251f4c2cb28be4def829021e7afb616a90097753e160815744",
@@ -107,7 +137,7 @@
       "roles/bind9/filter_plugins/reverse_dns.py": "cfdffa83044db0079f8663030c9f81e9fbbbf2ab38b7382acaec7edf0420ff5c",
       "roles/bind9/filter_plugins/soa_health.py": "9714df5805b987bdc930562b03ec5dd3d1caeedc1b1397489df7b149849b3530",
       "roles/bind9/handlers/main.yml": "6077a5d4870f6b7267835061f65ed1c7f08736be7e1a7c830ea8c21c2e239127",
-      "roles/bind9/library/bind9_manage.py": "15f9b8155372d7e458a7fc762e150174e3c89cf01628fe1bee667dafe2b05f08",
+      "roles/bind9/library/bind9_manage.py": "2845cbc3e9cb10a6a9d0bbd2400b98e7fe0e11326cf933edce3493e4660968ac",
       "roles/bind9/meta/main.yml": "2d41d767e4da4eca36ba365e9c3c6942c8c306933ed74aa88116bd2ebb5e11fb",
       "roles/bind9/module_utils/bind9_management.py": "a0538f003ca04a4eb530c7cd6db9160dff1eeb95362a4610c98363cd645b16ed",
       "roles/bind9/tasks/main.yml": "81a7bb3771ca9cf6ce83d93072fa0859d23ce78c3cc5285bd05d9fa4ed566c40",
@@ -116,21 +146,20 @@
       "roles/bind9/tasks/tasks.d/deploy/configuration.yml": "a80857d20c69684f1dab25800c2e370d29aff2c303ce6104333a59b718eb421b",
       "roles/bind9/tasks/tasks.d/deploy/directories.yml": "06b19318e70b603d82961a60048a478c3974a630819ab13161c6dae403e1a0b0",
       "roles/bind9/tasks/tasks.d/deploy/firewall.yml": "ca32a70fda607b94affd77cb0b77bbbe44aa233c1e8d5b17025e49248ff85be8",
-      "roles/bind9/tasks/tasks.d/deploy/front_return_routes.yml": "959e088a05be54cea11b10e0d3da1a07e7962f527e016a783ee4abe41af685bc",
-      "roles/bind9/tasks/tasks.d/deploy/front_routes_before_write.yml": "5d68a6449422bbef942edc0132af76bb15706becad5d56c65893738cd6168f2a",
+      "roles/bind9/tasks/tasks.d/deploy/front_return_routes.yml": "7f835b6fa1cae92b4b94283cac9a820d492e17b23ef55fe491a2331920095b52",
+      "roles/bind9/tasks/tasks.d/deploy/front_routes_before_write.yml": "e66ab6c808ea386037f767e1eba508cd6d081fc9ed5b50228d2e13d78416d15a",
       "roles/bind9/tasks/tasks.d/deploy/front_routes_commit.yml": "d0f1ba1a08eb67f9d8a4752b9e39945cd157abd975a87dbb566cdea0428e546c",
       "roles/bind9/tasks/tasks.d/deploy/front_routes_compare.yml": "085ed1efa229964eb6101964309e4448420c8ee044dc146268137797a4cb63e5",
-      "roles/bind9/tasks/tasks.d/deploy/front_routes_gateway.yml": "37d7a2b8adda27e55586d10eb1be5e3a36d9ad50c2d9415d871912bc9e7377a4",
       "roles/bind9/tasks/tasks.d/deploy/front_routes_ipv4.yml": "ebf17596aa80aadd3e696b43abbecbab2fd40fd72499f5b5afe786d9243d92e7",
       "roles/bind9/tasks/tasks.d/deploy/front_routes_parse_profile.yml": "abba3ffd07495ab2d71dcc24d1fef0b84d32d07c0504c1002cff519c1c5a62d9",
-      "roles/bind9/tasks/tasks.d/deploy/front_routes_plan.yml": "379a479f97dffded1bb4a2c93c849e43d752d9129bc8901a3afc01db1e2c6758",
+      "roles/bind9/tasks/tasks.d/deploy/front_routes_plan.yml": "c289e048c88836473d8a2debee0c014c3d61e23bb2d86f17b361793638653b2a",
       "roles/bind9/tasks/tasks.d/deploy/front_routes_policy.yml": "65bf87e3219dfc2d4101779455c8c2b72fe28820ef4c8f3245b5fef1d553d108",
       "roles/bind9/tasks/tasks.d/deploy/front_routes_recover.yml": "c51b81fd5d4a17dd7a45abffee5ec718d1cc23daf29c9d4ecf84cbd552469f30",
-      "roles/bind9/tasks/tasks.d/deploy/front_routes_rollback.yml": "41eb3cdd52bef3fbfeef7bd44f973b6f238a4f17b7d53616cd0aa61f5a1c8627",
+      "roles/bind9/tasks/tasks.d/deploy/front_routes_rollback.yml": "762ded3f850b6a27bdde617a82838b7acf5e6b2a704f1579a7fab4b1f19c41fa",
       "roles/bind9/tasks/tasks.d/deploy/front_routes_ssh_normalize.yml": "137129879edb68b67c120b768f55ddec61e54b4f1e1ef5687d8f97533a64643a",
       "roles/bind9/tasks/tasks.d/deploy/front_routes_validate_journal.yml": "5cd82d22534b4ba4b150e58d0eb49f4712251cccb2c4b5733f550a372f019268",
-      "roles/bind9/tasks/tasks.d/deploy/front_routes_verify.yml": "2587986ca5aaca3e202201c811a3a43375541929372562a771463b1ea157202c",
-      "roles/bind9/tasks/tasks.d/deploy/guard.yml": "e9fcd85e72b9065eadef793c02edab0f5b35dcff8b5714dd3b0bd21b3af3e37a",
+      "roles/bind9/tasks/tasks.d/deploy/front_routes_verify.yml": "398b5286c45c0366303709a7cd78921117148460432747a1d7e4993fa338a5b2",
+      "roles/bind9/tasks/tasks.d/deploy/guard.yml": "0ece897b72f940d2c24de5c7177e1225d8c2389bded3ffa37bf75d67ab941d3b",
       "roles/bind9/tasks/tasks.d/deploy/health.yml": "1be54eac6ce1ebb90e73bd44697e36c435dbfc82714cd554ec93ea31c55a21c7",
       "roles/bind9/tasks/tasks.d/deploy/hibernate.yml": "87e77971b9125420dabea04a435186231ce94528852c27c13b00d04841c8f0be",
       "roles/bind9/tasks/tasks.d/deploy/lease_release.yml": "e1af19b8a4576c547786d1b5f9c3024ee30e6ff4196fac7cb8221f43b3a6b642",
@@ -150,7 +179,7 @@
       "roles/bind9/tasks/tasks.d/dnssec_disable.yml": "f8eb93148bb7b30f6e8c4dcc7bbca2595f8250da830fd84465ee6f9c73460726",
       "roles/bind9/tasks/tasks.d/dnssec_install.yml": "3362f0e8e207b5d198f958d2d876db288ed5252cd0273da74577d190f94499bc",
       "roles/bind9/tasks/tasks.d/dnssec_settings.yml": "d3e20d58c973def9bce02bf95e1b8691bf2733b2bd4299956f94f6d55cd3cb8c",
-      "roles/bind9/tasks/tasks.d/manage/main.yml": "b886ab1d316910febabb604167bbb848f9ea96e4e2b28016b861c3f0059c079f",
+      "roles/bind9/tasks/tasks.d/manage/main.yml": "4c6106c9e05f70571868eeb619402876d47d3189c82967c904f8f4193c36bc2e",
       "roles/bind9/tasks/tasks.d/named_runtime.yml": "fe83a1860619ae53933e8b3ba0071dfcb0f2bd3496b91c9eef0298ed4ff218e8",
       "roles/bind9/tasks/tasks.d/native_loopback.yml": "816c5e4f4d036e555b7d491f84e94ca99ad6eeb6ab5165482ee43ce0a320367d",
       "roles/bind9/tasks/tasks.d/path_safety.yml": "e38443f0e085425db1c284d4091a5bbe5b35fba26b0f5e50fdf6d8441114b5aa",
@@ -165,39 +194,32 @@
       "roles/bind9/templates/named.conf.j2": "9ca21c24d40c0514127f99bdebe9010e81300630551a86b7607c7d86cfb4cac3",
       "roles/bind9/templates/reverse.zone.j2": "6dc38fbceb1697e98ef27d0bdd03450589b8e20bd49d906d51e5bc05a2d028f4"
     },
-    "regression_before": {
-      "status": "EXÉCUTÉ",
-      "expected_failure": true,
-      "structured_observations_missing_on_source_release": true,
-      "sha256": "5d4b0e439ef05e1a7890278fa8649e83e00765e7f54059c50709c4bc687da763"
-    },
-    "route_entry_before": {
-      "status": "EXÉCUTÉ",
-      "passed": 2,
-      "incident_reproduced": false,
-      "source_archive": "Bind9-Ansible-correction-verrou.zip",
-      "sha256": "fd3dc27f2dc96067a9eb1fc16daeff9d9a5b609b0387c69160e034047ef66a60"
+    "audit": {
+      "original_files": 212,
+      "removed_files": 0,
+      "production_files": 67,
+      "local_markdown_links": 256,
+      "existing_test_assertions_preserved": true,
+      "forbidden_artifacts": 0
     },
     "native_network_commands": false,
     "full_ci_matrix_replayed": false,
-    "report": "docs/ROUTES_SEULES_ET_VERROU.md"
+    "report": "docs/VERROUS_OPERATIONS_OPTIONNELS.md"
   },
   "preserved": [
-    "existing test scenarios and CI",
-    "DNS templates and Python helpers",
-    "inventories and playbooks",
-    "management",
-    "hibernation",
-    "exclusive lease creation and identity-based release",
-    "shared routing guards and recovery journal schema"
+    "all original files and test assertions",
+    "inventories and playbooks; CI extended for new tests",
+    "DNS templates and management core",
+    "original route tasks and journal schema",
+    "hibernation seal and strict lease acquisition/release semantics when enabled"
   ],
   "production_qualification": {
     "status": "NON TERMINÉE",
     "remaining": [
-      "native user RHEL 8 NetworkManager/iproute2 and SSH workflow",
-      "reboot persistence and system deployment on user servers",
-      "remote CI matrix, physical concurrent operator changes",
-      "diagnose the inconsistent observed lease state on the inaccessible user server and verify its route addition"
-    ]
+      "actual RHEL8 routing, management and hibernation acceptance",
+      "full CI matrix, load and physical crash scenarios"
+    ],
+    "operator_requirement": "one operation at a time including manual changes",
+    "remote_servers_modified": false
   }
 }

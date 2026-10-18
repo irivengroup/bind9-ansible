@@ -58,7 +58,7 @@ jobs:
         if: matrix.ansible-version == '2.9.27'
         run: |
           python -m pip install 'coverage==7.6.1'
-          sudo --preserve-env=PATH "$(command -v python)" -m coverage run --include='*/roles/bind9/module_utils/bind9_management.py' -m pytest -q tests/test_management.py tests/test_management_refusals.py tests/test_management_hardening.py tests/test_management_ansible.py tests/test_management_batch.py tests/test_management_batch_ansible.py tests/test_management_list.py tests/test_management_live_integrity.py tests/test_management_io_safety.py tests/test_deployment_contract.py tests/test_deployment_lock_ansible.py
+          sudo --preserve-env=PATH "$(command -v python)" -m coverage run --include='*/roles/bind9/module_utils/bind9_management.py' -m pytest -q tests/test_management.py tests/test_management_refusals.py tests/test_management_hardening.py tests/test_management_ansible.py tests/test_management_batch.py tests/test_management_batch_ansible.py tests/test_management_list.py tests/test_management_live_integrity.py tests/test_management_io_safety.py tests/test_deployment_contract.py tests/test_deployment_lock_ansible.py tests/test_operation_lock_policy.py tests/test_operation_lock_bypass_ansible.py tests/test_routes_deployed_entry_ansible.py
           python -m coverage report --fail-under=98
       - name: Optional DNSSEC lifecycle workflows on legacy Ansible
         if: matrix.ansible-version == '2.9.27'

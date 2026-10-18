@@ -43,7 +43,7 @@ Pendant les recettes natives : seul réseau effectif `none`, aucune route extern
 aucun port publié, source montée en lecture seule. Les démons du banc s'exécutent
 sous root dans le conteneur ; cela ne qualifie pas l'identité et les politiques
 du service systemd réel. Les empreintes des sorties sont conservées dans
-[Historique des validations](NETTOYAGE_ET_VALIDATION.md#historique), les journaux bruts hors ZIP.
+[PREUVES_INTEGRITE_LIVE.txt](PREUVES_INTEGRITE_LIVE.txt), les journaux bruts hors ZIP.
 
 Une première mesure de couverture était à 97,83 % : les scénarios d'erreurs de
 lecture/reprise ont été complétés, sans réduire le seuil. La première préparation

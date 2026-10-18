@@ -11,6 +11,7 @@
       - bind_manage_checksums | default({}) is mapping
       - bind_manage_plan_checksums | default({}) is mapping
       - bind_manage_show_values | default(false) | type_debug == 'bool'
+      - bind_operation_lock_enabled | default(false) | type_debug == 'bool'
     fail_msg: 'Supply a CRUD request or a batch read/apply envelope on an existing RHEL 8+ BIND host. Use read before writing.'
 
 - name: Require the primary batch phase before a secondary with record operations
@@ -30,6 +31,7 @@
   block:
     - name: Run the private management transaction
       bind9_manage:
+        operation_lock: '{{ bind_operation_lock_enabled | default(false) }}'
         request: >-
           {{ bind_manage | combine({'expected_checksum':
              (bind_manage_checksums | default({})).get(inventory_hostname, bind_manage.expected_checksum | default(''))}) |

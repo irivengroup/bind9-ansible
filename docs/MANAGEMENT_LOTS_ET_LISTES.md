@@ -1,5 +1,7 @@
 # Management de plusieurs ressources et découverte de l’existant
 
+**Mode temporaire actuel :** `bind_operation_lock_enabled: false` désactive la prise du verrou commun `.operation.lock` pour les opérations ordinaires, lectures et simulations de management comprises. Un ancien verrou est ignoré et conservé. **Une seule opération à la fois**, y compris toute intervention manuelle. Avec le booléen YAML `true`, les garanties de verrou coopératif décrites ci-dessous s’appliquent de nouveau. Le tag `hibernate` et le déploiement complet avec `hibernate_deployment: yes` conservent toujours ce verrou. Les journaux de reprise, contrôles de checksum et verrous propres aux routes/sauvegardes restent actifs. [Contrat et preuves de cette révision](VERROUS_OPERATIONS_OPTIONNELS.md).
+
 Le format unitaire existant reste disponible. Cette révision ajoute `action: list` aux ressources `option`, `zone` et `record`, ainsi qu’une enveloppe `resource: batch` avec `action: read` ou `apply`. Un lot applique des actions ordonnées sur plusieurs types de ressources dans une transaction locale commune.
 
 Le [durcissement de l'intégrité live](INTEGRITE_CONFIGURATION_LIVE.md) s'applique aux lots et opérations unitaires. `create` n'est jamais un upsert : options et zones existantes sont refusées, et tout nom de record déjà présent dans sa zone est refusé quel que soit son type DNS. Les autres ressources manuelles sont conservées ; un conflit observé impose une nouvelle lecture.
@@ -10,7 +12,7 @@ Les [protections I/O et limites de données](FIABILITE_DONNEES_ET_IO.md) s’app
 
 Utiliser le contrôleur Linux/Bash, depuis la racine du projet, avec une paire déjà déployée et les prérequis du [guide de management](MANAGEMENT.md). Les exemples emploient `site1-dns01` et `site1-dns02`, dans le groupe `site1`. Adapter les adresses, domaines et noms d’hôtes avant exécution. Aucun paquet ou service supplémentaire n’est requis.
 
-Toutes les observations prennent le verrou exclusif existant. Lecture, listing et simulation peuvent créer le répertoire d’état privé et prennent une lease temporaire ; ils ne publient pas de fichier DNS, ne créent pas de sauvegarde et ne rechargent pas BIND. Une lease interrompue bloque aussi ces actions et nécessite la reprise documentée.
+En mode strict (`bind_operation_lock_enabled: true`), toutes les observations prennent le verrou exclusif existant. Lecture, listing et simulation peuvent créer le répertoire d’état privé et prennent une lease temporaire ; ils ne publient pas de fichier DNS, ne créent pas de sauvegarde et ne rechargent pas BIND. Une lease interrompue bloque aussi ces actions et nécessite la reprise documentée.
 
 ## Lister les zones, avec leur type et leurs options
 
@@ -180,7 +182,7 @@ ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-management.yml \
 
 Ne lancer l’application qu’après réussite et examen de la simulation. Le playbook effectue d’abord une prévalidation sans publication sur tous les hôtes ciblés ; une erreur de checksum ou de candidat sur le secondaire arrête le parcours avant l’écriture du primaire. Il recontrôle ensuite chaque hôte au moment de son application.
 
-Sur chaque serveur : une lease, un candidat final, une sauvegarde complète et un journal ciblé, publication gardée de tous les fichiers concernés, labels, un rechargement BIND, réconciliation DNSSEC et expiration de chaque suffixe modifié, puis contrôles UDP/TCP/SOA. Les fichiers primaires existants avancent d’un seul serial par lot ; une nouvelle zone conserve son serial initial demandé, même si ses records sont ajoutés dans le même lot. Un lot sans différence ne crée pas de sauvegarde et ne recharge pas le service.
+Sur chaque serveur : une lease uniquement en mode strict, un candidat final, une sauvegarde complète et un journal ciblé, publication gardée de tous les fichiers concernés, labels, un rechargement BIND, réconciliation DNSSEC et expiration de chaque suffixe modifié, puis contrôles UDP/TCP/SOA. Les fichiers primaires existants avancent d’un seul serial par lot ; une nouvelle zone conserve son serial initial demandé, même si ses records sont ajoutés dans le même lot. Un lot sans différence ne crée pas de sauvegarde et ne recharge pas le service.
 
 Les records s’écrivent uniquement sur le primaire. Sur le secondaire, ces opérations sont explicitement marquées `skipped: true`, `reason: primary-only` ; les options et déclarations de zones du lot sont appliquées. Un lot contenant des records doit inclure le primaire avant le secondaire, avec le même lot et la même phase. Le secondaire contrôle ensuite les serials reçus du primaire.
 

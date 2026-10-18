@@ -23,6 +23,10 @@ options:
     description: Existing site identities; never a new secret or desired full configuration.
     type: dict
     default: {}
+  operation_lock:
+    description: Acquire the shared host lease. Disable only when an operator serializes all operations externally.
+    type: bool
+    default: true
 author:
   - Bind9-Ansible maintainers
 '''
@@ -86,15 +90,19 @@ def main():
     """Keep sensitive transport output hidden; return only controlled errors."""
     module = AnsibleModule(argument_spec={
         'request': {'type': 'dict', 'required': True},
-        'context': {'type': 'dict', 'default': {}}}, supports_check_mode=True)
+        'context': {'type': 'dict', 'default': {}},
+        'operation_lock': {'type': 'bool', 'default': True}}, supports_check_mode=True)
     try:
         context = dict(module.params['context'], named_gid=grp.getgrnam('named').gr_gid)
         request = module.params['request']
         manager_type = BatchManager if request.get('resource') == 'batch' else Manager
         manager = manager_type(request, context, check=module.check_mode)
-        # Reads and simulations must not race a cooperative deployment/write.
-        # The transient lease protects observation without publishing DNS files.
-        with manager.lease():
+        # Keep the low-level API locked by default. The role explicitly selects
+        # the temporary operator-requested single-operation mode when disabled.
+        if module.params['operation_lock']:
+            with manager.lease():
+                result = manager.run()
+        else:
             result = manager.run()
         module.exit_json(**result)
     except ManagementError as error:

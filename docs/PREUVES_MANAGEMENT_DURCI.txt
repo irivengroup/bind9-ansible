@@ -1,0 +1,33 @@
+Bind9-Ansible — 2026.10.17-management-hardened.1
+Statut des contrôles ci-dessous : EXÉCUTÉ
+Runtimes contrôleur (Python / Ansible / Jinja2) :
+3.8.20 2.9.27 2.10.3
+3.8.20 2.9.27 3.0.3
+pytest management + hardening + transport + deployment_contract : 212 passed
+pytest hardening, second Jinja2 : 37 passed
+pytest management + refusals, named-checkconf EL8 réel : 155 passed
+Reproduction sur source inchangée : 18 failed, 4 passed, 9 deselected
+Couverture moteur : 925/943 = 98.09 %, seuil inchangé 98 %
+BIND EL8 natif, DNSSEC no : 10 transactions + rollback upstream indisponible
+BIND EL8 natif, DNSSEC auto : 10 transactions + rollback upstream indisponible
+Python cible : 3.6.8 ; compilation et scénario de transaction, commandes doublées
+Syntaxe Ansible : 2 playbooks x 3 inventaires
+Compilation : 61 fichiers Python ; syntaxe shell réussie
+Pyflakes et Bandit ciblé : sorties vides, codes de retour 0
+Paquet : manifeste, CRC, octets source, chemins, modes et double construction vérifiés
+Qualification réelle RHEL 8 / SELinux enforcing / boot / crash / charge / CI distante : NON EXÉCUTÉ
+Les limites et procédures correspondantes figurent dans DURCISSEMENT_MANAGEMENT.md.
+
+Empreintes SHA-256 des journaux locaux de contrôle (journaux hors archive) :
+aaa374cd64412c047478bc0e148464141a97554016ee68c0a93a618c48b04b2c  runtime.log
+7d4dac1b94ae28987bf701f3c2eb12a299ab7c3aadcee851e16d3468344b3a2e  final-tests.log
+c658c33300f76fd256491b74eb15f3a1c7edf450e1388cf0655eb4513d275556  modern.log
+2a0ee6c5bf6b079deee1febcf1f87487dca419a843be257523bbffcad9c8bb5f  coverage.log
+45f487b6e12d995e8e7b5d0c8225669952b6d7c0afbfe817f30024c3a8465a3b  baseline.log
+05f2cfb3c33ac28cbd155e12ce4b5db4ca886bc2941a6831075efcbedb74d8d9  management-native.log
+7d5cf4a8951317b26f395e88557ebd353437d3912811ede5f9117827051b8e69  live-management-no.log
+5f8d7dd85ed3aaf45ecad7a9bfa98e419f60e377bcb4083e745bdee7c1054c57  live-management-auto.log
+55ea72c0d5fa67155e4b3f04c95970d14d1ba3135e38e3756861e2863e91c50d  python36.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  pyflakes.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  bandit-management.log
+d455cd01d94d753a7f4f35dab901ba6b4bfc98a354422b0bdedace15ada3095b  compile.log

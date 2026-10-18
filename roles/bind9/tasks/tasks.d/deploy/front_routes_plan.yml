@@ -5,14 +5,24 @@
   vars:
     bind_front_routes_text: '{{ bind_front_profile.results[1].stdout }}'
 
-- name: Validate client types route metric and profile table before planning
+- name: Validate routing policy and typed client inputs before planning
   ansible.builtin.assert:
     that:
       - bind_cloud_clients is sequence and bind_cloud_clients is not string and bind_cloud_clients is not mapping
       - (bind_front_route_metric | type_debug) in ['int', 'long']
       - bind_front_route_metric | int >= 1 and bind_front_route_metric | int <= 4294967295
       - bind_front_profile.results[2].stdout | trim in ['0', '254']
+      - (bind_front_kernel.results[0].stdout | from_json) is sequence and (bind_front_kernel.results[0].stdout | from_json) is not mapping
+      - (bind_front_kernel.results[1].stdout | from_json | length) == 3
+      - (bind_front_kernel.results[1].stdout | from_json | map(attribute='priority') | list | sort) == [0, 32766, 32767]
+      - (bind_front_kernel.results[1].stdout | from_json | map(attribute='src') | unique | list) == ['all']
     fail_msg: 'Only classic IPv4 main-table routing and an integer metric are supported.'
+
+- name: Require the three standard routing rules without alternate tables
+  ansible.builtin.assert:
+    that:
+      - (item.table | string) == ({0:'local', 32766:'main', 32767:'default'}[item.priority])
+  loop: '{{ bind_front_kernel.results[1].stdout | from_json }}'
 
 - name: Validate complete standard IPv4 policy before planning writes
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_policy.yml'
@@ -22,21 +32,22 @@
 - name: Normalize the actual SSH peer for FRONT protection
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_ssh_normalize.yml'
 
-- name: Reconcile existing FRONT gateway observations
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_gateway.yml'
-  vars:
-    bind_front_gateway_profile_value: '{{ bind_front_profile.results[0].stdout }}'
-    bind_front_gateway_active_value: '{{ bind_front_active_gateway.stdout }}'
-    bind_front_gateway_kernel_value: '{{ bind_front_kernel.results[0].stdout }}'
-    bind_front_gateway_device: '{{ bind_front_interface.device }}'
+- name: Require an explicit IPv4 gateway on the active FRONT profile
+  ansible.builtin.assert:
+    that:
+      - bind_front_profile.results[0].stdout | trim is match('^(0|[1-9][0-9]{0,2})[.](0|[1-9][0-9]{0,2})[.](0|[1-9][0-9]{0,2})[.](0|[1-9][0-9]{0,2})$')
+    fail_msg: >-
+      FRONT profile {{ bind_front_uuid }} property ipv4.gateway is empty or is not an IPv4 address
+      (observed {{ bind_front_profile.results[0].stdout | trim | to_json }}).
+      No routes were changed. Inspect this profile only; no default/global gateway fallback is used.
 
 - name: Normalize client networks, gateway, runtime and protected ranges
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_ipv4.yml'
   vars:
-    bind_front_ipv4_context: 'FRONT plan: clients, reconciled FRONT gateway, inventory ADM/BACK, SSH peer and kernel destinations'
+    bind_front_ipv4_context: 'FRONT plan: clients, ipv4.gateway, inventory ADM/BACK, SSH peer and kernel destinations'
     bind_front_ipv4_values: >-
       {%- set ns = namespace(values=bind_cloud_clients + bind_front_interface.protected_networks +
-          [bind_front_interface.network, bind_front_gateway, ansible_host, bind_back_ip,
+          [bind_front_interface.network, bind_front_profile.results[0].stdout | trim, ansible_host, bind_back_ip,
            hostvars[bind_primary_host].bind_back_ip, hostvars[bind_secondary_host].bind_back_ip,
            '0.0.0.0/8','127.0.0.0/8','169.254.0.0/16','224.0.0.0/4','240.0.0.0/4']) -%}
       {%- if bind_front_ssh_ipv4 -%}{%- set ns.values = ns.values + [bind_front_ssh_ipv4] -%}{%- endif -%}
@@ -59,7 +70,7 @@
   ansible.builtin.set_fact:
     bind_front_plan_json: >-
       {%- set ns = namespace(errors=[], wanted=[], probes=[], profile=[], runtime=[]) -%}
-      {%- set gateway = bind_front_gateway -%}
+      {%- set gateway = bind_front_profile.results[0].stdout | trim -%}
       {%- set front = bind_front_interface.network -%}
       {%- if '/' in gateway or not ((bind_front_ipv4_data[gateway].lo >= bind_front_ipv4_data[front].lo and bind_front_ipv4_data[gateway].hi <= bind_front_ipv4_data[front].hi)) or gateway in
           [bind_front_ipv4_data[front].network, bind_front_ipv4_data[front].broadcast, bind_front_ip] -%}

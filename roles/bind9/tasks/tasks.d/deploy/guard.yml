@@ -15,8 +15,17 @@
       - force is not defined
       - deployment_lock is not defined
       - deployment_locked is not defined
+      - (bind_operation_lock_enabled | default(false) | type_debug) == 'bool'
       - (hibernate_deployment | default(false) | type_debug) == 'bool' or (hibernate_deployment | default(false) is string and hibernate_deployment in ['yes', 'no', 'true', 'false'])
     fail_msg: 'Use hibernate_deployment as a YAML boolean or lowercase yes/no/true/false (default no). The force, deployment_lock and deployment_locked inputs are not accepted; existing seals require explicit operator removal.'
+
+- name: Require the shared lease only for explicit locking or a hibernation action
+  ansible.builtin.set_fact:
+    bind_deployment_lease_required: >-
+      {{ (bind_operation_lock_enabled | default(false) | bool) or
+         ('hibernate' in (ansible_run_tags | default(['all']))) or
+         ((hibernate_deployment | default(false) | bool) and
+          ((ansible_run_tags | default(['all']) | intersect(['all', 'deploy']) | length) > 0)) }}
 
 - name: Require isolated explicit hibernation instead of mixing it with provisioning
   ansible.builtin.assert:
@@ -57,84 +66,24 @@
     owner: root
     group: root
     mode: '0700'
-  when: not ansible_check_mode
-
-- name: Observe the shared lease immediately before the acquisition attempt
-  ansible.builtin.stat:
-    path: /var/lib/Bind9-Ansible/.operation.lock
-    follow: false
-    get_checksum: false
-    get_mime: false
-  register: bind_deployment_lease_before_attempt
-  when: not ansible_check_mode
+  when: not ansible_check_mode and (bind_deployment_lease_required | bool)
 
 - name: Acquire the shared deployment and management lease without stealing it
-  when: not ansible_check_mode
-  # file: state=directory would accept another invocation's lease. Exclusive
-  # mkdir is the acquisition primitive; a failed acquisition grants no ownership.
-  block:
-    - name: Exclusively create the shared operation directory
-      ansible.builtin.command:
-        argv: [/usr/bin/mkdir, -m, '0700', --, /var/lib/Bind9-Ansible/.operation.lock]
-        # Ansible 2.9's file-module suggestion does not provide exclusive locking.
-        # Omit this legacy argument on other Ansible versions.
-        warn: "{{ false if ansible_version.full is version('2.10', '<') else omit }}"
-      register: bind_deployment_lease_attempt
-      changed_when: false
-  rescue:
-    - name: Inspect the failed lease path without reading or following its contents
-      ansible.builtin.stat:
-        path: /var/lib/Bind9-Ansible/.operation.lock
-        follow: false
-        get_checksum: false
-        get_mime: false
-      register: bind_deployment_failed_lease
-
-    - name: Show acquisition evidence from this exact Ansible target and operation
-      ansible.builtin.debug:
-        msg:
-          inventory_host: '{{ inventory_hostname }}'
-          connection_target: '{{ ansible_host | default(inventory_hostname) }}'
-          target_nodename: '{{ ansible_facts.nodename | default(ansible_nodename | default("unavailable")) }}'
-          operation_tags: '{{ ansible_run_tags }}'
-          command: '{{ bind_deployment_lease_attempt.cmd | default([]) }}'
-          rc: '{{ bind_deployment_lease_attempt.rc | default("unavailable") }}'
-          stderr: '{{ bind_deployment_lease_attempt.stderr | default("unavailable", true) }}'
-          exists_before: '{{ bind_deployment_lease_before_attempt.stat.exists }}'
-          exists_after: '{{ bind_deployment_failed_lease.stat.exists }}'
-          directory_after: '{{ bind_deployment_failed_lease.stat.isdir | default(false) }}'
-          symlink_after: '{{ bind_deployment_failed_lease.stat.islnk | default(false) }}'
-
-    - name: Stop with the acquisition cause while preserving any existing lease
-      ansible.builtin.fail:
-        msg: >-
-          Cannot acquire /var/lib/Bind9-Ansible/.operation.lock (directory lease).
-          rc={{ bind_deployment_lease_attempt.rc | default('unavailable') }};
-          stderr={{ bind_deployment_lease_attempt.stderr | default('unavailable', true) | trim }};
-          message={{ bind_deployment_lease_attempt.msg | default('unavailable', true) }}.
-          Path observed after failure:
-          {{ 'absent' if not bind_deployment_failed_lease.stat.exists else
-             ('symlink' if bind_deployment_failed_lease.stat.islnk | default(false) else
-              ('directory' if bind_deployment_failed_lease.stat.isdir | default(false) else
-               ('regular file' if bind_deployment_failed_lease.stat.isreg | default(false) else 'special file'))) }}.
-          No lease ownership was granted; the requested operation has stopped.
-          {{ 'An existing path was preserved; inspect its owner before recovery.'
-             if bind_deployment_failed_lease.stat.exists else
-             'The path was absent after the failure; this observation does not establish an abandoned lease.' }}
-          Inspect the evidence above and recovery procedure in
-          docs/VERROU_OPERATION.md before retrying. This lease is distinct from
-          the persistent .deployment.lock hibernation seal.
+  ansible.builtin.command:
+    argv: [mkdir, -m, '0700', /var/lib/Bind9-Ansible/.operation.lock]
+  changed_when: false
+  when: not ansible_check_mode and (bind_deployment_lease_required | bool)
 
 - name: Remember ownership of this invocation's lease
   ansible.builtin.set_fact:
-    bind_deployment_lease_acquired: '{{ not ansible_check_mode }}'
+    bind_deployment_lease_acquired: '{{ not ansible_check_mode and (bind_deployment_lease_required | bool) }}'
 
 - name: Record the acquired operation directory identity without following links
   ansible.builtin.stat:
     path: /var/lib/Bind9-Ansible/.operation.lock
     follow: false
   register: bind_deployment_owned_lease
-  when: not ansible_check_mode
+  when: not ansible_check_mode and (bind_deployment_lease_required | bool)
 
 # The first observation can precede a different deployment's commit/release.
 # Recheck under the shared lease before allowing any provisioning writes.

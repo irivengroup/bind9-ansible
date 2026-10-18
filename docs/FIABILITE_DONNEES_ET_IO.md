@@ -1,5 +1,7 @@
 # Fiabilité des données récupérées et des écritures
 
+**Mode temporaire actuel :** `bind_operation_lock_enabled: false` désactive la prise du verrou commun `.operation.lock` pour les opérations ordinaires, lectures et simulations de management comprises. Un ancien verrou est ignoré et conservé. **Une seule opération à la fois**, y compris toute intervention manuelle. Avec le booléen YAML `true`, les garanties de verrou coopératif décrites ci-dessous s’appliquent de nouveau. Le tag `hibernate` et le déploiement complet avec `hibernate_deployment: yes` conservent toujours ce verrou. Les journaux de reprise, contrôles de checksum et verrous propres aux routes/sauvegardes restent actifs. [Contrat et preuves de cette révision](VERROUS_OPERATIONS_OPTIONNELS.md).
+
 Révision `2026.10.17-management-io-safety.1`. Les contrôles ci-dessous complètent
 la [préservation de la configuration live](INTEGRITE_CONFIGURATION_LIVE.md).
 Ils protègent le workflow de management, sans reconstruire depuis l'inventaire

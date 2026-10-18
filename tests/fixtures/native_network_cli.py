@@ -55,14 +55,6 @@ class NativeNetworkDouble:
             args = args[2:]
         if args[:2] == ['-g', 'GENERAL.CON-UUID']:
             return self.state['uuid']
-        if args == ['-g', 'IP4.GATEWAY', 'device', 'show', 'front0']:
-            # Observation counters are private to scenarios explicitly testing drift.
-            if self.state.get('drift_active_gateway_on_read'):
-                self.state['active_gateway_reads'] = self.state.get('active_gateway_reads', 0) + 1
-                if self.state['drift_active_gateway_on_read'] == self.state['active_gateway_reads']:
-                    self.state['active_gateway'] = '198.51.100.254'
-                self.save()
-            return self.state.get('active_gateway', self.state['gateway'])
         if args[:1] == ['-g'] and args[2:6] == ['connection', 'show', 'uuid', self.state['uuid']]:
             if args[1] == 'ipv4.gateway':
                 if self.state.get('drift_gateway_on_second_read'):

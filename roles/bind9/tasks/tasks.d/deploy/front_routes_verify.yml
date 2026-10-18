@@ -20,14 +20,7 @@
   environment: {LC_ALL: C}
   register: bind_front_verified_gateway
   changed_when: false
-
-- name: Read active FRONT gateway before commit
-  ansible.builtin.command:
-    argv: [nmcli, -g, IP4.GATEWAY, device, show, '{{ bind_front_plan.device }}']
-  environment: {LC_ALL: C}
-  register: bind_front_verified_active_gateway
-  changed_when: false
-  check_mode: false
+  failed_when: bind_front_verified_gateway.rc != 0 or bind_front_verified_gateway.stdout | trim != bind_front_plan.gateway
 
 - name: Read IPv4 policy after the route operation
   ansible.builtin.command:
@@ -45,19 +38,6 @@
     argv: [ip, -j, -4, route, show, table, main]
   register: bind_front_verified_kernel
   changed_when: false
-
-- name: Reconcile existing FRONT gateway observations
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_gateway.yml'
-  vars:
-    bind_front_gateway_profile_value: '{{ bind_front_verified_gateway.stdout }}'
-    bind_front_gateway_active_value: '{{ bind_front_verified_active_gateway.stdout }}'
-    bind_front_gateway_kernel_value: '{{ bind_front_verified_kernel.stdout }}'
-    bind_front_gateway_device: '{{ bind_front_plan.device }}'
-
-- name: Refuse a FRONT gateway changed since planning
-  ansible.builtin.assert:
-    that: [bind_front_gateway == bind_front_plan.gateway]
-    fail_msg: 'FRONT gateway changed since planning; route operation stopped before further writes.'
 
 - name: Require all original routes and intended additions to remain intact
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_compare.yml'

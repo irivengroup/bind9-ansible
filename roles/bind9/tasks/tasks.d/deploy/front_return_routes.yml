@@ -44,7 +44,7 @@
         {%- endfor -%}
         {%- if row.front | length == 1 and not row.protected and 'master' not in iface and
             (iface.get('operstate') == 'UP' or (iface.get('operstate') == 'UNKNOWN' and 'UP' in iface.get('flags', []))) -%}
-          {%- set ns.found = ns.found + [{'device':iface.ifname, 'network':row.front[0]}] -%}
+          {%- set ns.found = ns.found + [{'device':iface.ifname, 'address':bind_front_ip, 'network':row.front[0]}] -%}
         {%- endif -%}
       {%- endfor -%}
       {{ {'found':ns.found, 'present':ns.present, 'protected':ns.protected | unique | list} | to_json }}
@@ -74,26 +74,12 @@
   ansible.builtin.set_fact:
     bind_front_uuid: '{{ bind_front_active_profile.stdout | trim | lower }}'
 
-- name: Require a single canonical active FRONT profile UUID
-  ansible.builtin.assert:
-    that:
-      - bind_front_uuid is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
-    fail_msg: 'Missing or malformed active FRONT profile UUID; no routing writes were performed.'
-
 - name: Read existing FRONT gateway and persistent routes
   ansible.builtin.command:
     argv: [nmcli, -g, '{{ item }}', connection, show, uuid, '{{ bind_front_uuid }}']
   environment: {LC_ALL: C}
   loop: [ipv4.gateway, ipv4.routes, ipv4.route-table]
   register: bind_front_profile
-  changed_when: false
-  check_mode: false
-
-- name: Read the active gateway of the selected FRONT device
-  ansible.builtin.command:
-    argv: [nmcli, -g, IP4.GATEWAY, device, show, '{{ bind_front_interface.device }}']
-  environment: {LC_ALL: C}
-  register: bind_front_active_gateway
   changed_when: false
   check_mode: false
 

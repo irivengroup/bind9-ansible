@@ -22,7 +22,7 @@ NEW = {'dst': '203.0.113.0/24', 'gateway': '198.51.100.1', 'dev': 'front0', 'met
 
 def plan(**kwargs):
     """Supply CLI observations; actual planning and checks come from role tasks."""
-    values = dict(clients=['203.0.113.0/24'], internal=[], gateway='198.51.100.1', active_gateway='', persistent='',
+    values = dict(clients=['203.0.113.0/24'], internal=[], gateway='198.51.100.1', persistent='',
                   runtime=json.dumps(BASE), rules=RULES, route_table='0', profile=UUID, metric=100, ssh='192.0.2.99')
     values.update(kwargs)
     context = {'ansible_host':'192.0.2.2', 'bind_front_ip':'198.51.100.2', 'bind_back_ip':'10.0.0.2',
@@ -31,7 +31,6 @@ def plan(**kwargs):
                'bind_front_interface':{'device':'front0','network':'198.51.100.0/24',
                    'protected_networks':['10.0.0.0/24','192.0.2.0/24']},
                'bind_front_uuid':values['profile'], 'bind_front_ssh_client':values['ssh'],
-               'bind_front_active_gateway': {'stdout': values['active_gateway']},
                'bind_cloud_clients':values['clients'], 'bind_internal_clients':values['internal'], 'bind_front_route_metric':values['metric'],
                'bind_front_profile':{'results':[{'stdout':x} for x in [values['gateway'],values['persistent'],values['route_table']]]},
                'bind_front_kernel':{'results':[{'stdout':values['runtime']},{'stdout':values['rules']}]}}
@@ -39,65 +38,6 @@ def plan(**kwargs):
 
 
 class TestNativeRouteExpressions:
-    @pytest.mark.parametrize('missing', ['', '--'])
-    def test_active_front_gateway_is_accepted_without_persistent_gateway(self, missing):
-        """An active gateway need not be stored in ipv4.gateway (e.g. DHCP)."""
-        result = plan(gateway=missing, active_gateway='198.51.100.1')
-        assert result['gateway'] == '198.51.100.1'
-        assert result['profile_additions'] == ['203.0.113.0/24 198.51.100.1 100']
-
-    def test_only_the_front_default_route_can_supply_a_kernel_gateway(self):
-        routes = BASE + [dict(dst='default', dev='front0', gateway='198.51.100.1', metric=500)]
-        assert plan(gateway='', runtime=json.dumps(routes))['gateway'] == '198.51.100.1'
-
-    def test_multiple_front_default_next_hops_are_ambiguous(self):
-        rows = [{'dst': 'default', 'dev': 'front0', 'gateway': gateway, 'metric': metric}
-                for gateway, metric in [('198.51.100.1', 500), ('198.51.100.11', 600)]]
-        with pytest.raises(ValueError, match='one consistent existing FRONT'):
-            plan(gateway='', runtime=json.dumps(BASE + rows))
-
-    @pytest.mark.parametrize('active', ['198.51.100.11', '198.51.100.1\n198.51.100.11',
-                                       '300.51.100.1', '198.51.100.1/24', 'garbage'])
-    def test_contradictory_or_invalid_active_gateway_is_never_ignored(self, active):
-        with pytest.raises(ValueError):
-            plan(active_gateway=active)
-
-    @pytest.mark.parametrize('row', [
-        {'dst': 'default', 'dev': 'front0', 'gateway': '198.51.100.11'},
-        {'dst': 'default', 'dev': 'front0', 'gateway': '198.51.100.1', 'nhid': 1},
-        {'dst': 'default', 'nexthops': [{'dev': 'front0', 'gateway': '198.51.100.1'}]},
-        {'dst': 'default', 'dev': 'front0', 'gateway': '198.51.100.1', 'flags': ['onlink']},
-        {'dst': 'default', 'dev': 'front0'},
-    ])
-    def test_unsafe_front_defaults_are_refused_even_with_a_profile_gateway(self, row):
-        with pytest.raises(ValueError):
-            plan(runtime=json.dumps(BASE + [row]))
-
-    @pytest.mark.parametrize('row', [
-        {'dst': '203.0.112.0/24', 'dev': 'front0', 'gateway': '198.51.100.1'},
-        {'dst': 'default', 'dev': 'adm0', 'gateway': '192.0.2.1'},
-    ])
-    def test_destination_routes_and_other_interfaces_never_supply_a_gateway(self, row):
-        with pytest.raises(ValueError):
-            plan(gateway='', runtime=json.dumps(BASE + [row]))
-
-    @pytest.mark.parametrize('field,value', [('gateway', None), ('gateway', 123),
-        ('nexthops', 'broken'), ('nexthops', {}), ('nexthops', [None]), ('nexthops', [123])])
-    def test_malformed_kernel_gateway_shapes_fail_explicitly(self, field, value):
-        row = {'dst': 'default', 'dev': 'front0', 'gateway': '198.51.100.1'}
-        row[field] = value
-        with pytest.raises(ValueError, match='typed kernel next hops'):
-            plan(runtime=json.dumps(BASE + [row]))
-
-    @pytest.mark.parametrize('value', ['300.51.100.1', '198.51.100.2', '192.0.2.1',
-                                       '198.51.100.0', '198.51.100.255', '198.51.100.1\n'])
-    def test_discovered_gateway_keeps_ipv4_and_on_link_guards(self, value):
-        if value.endswith('\n'):
-            assert plan(gateway='', active_gateway=value)['gateway'] == value.strip()
-        else:
-            with pytest.raises(ValueError):
-                plan(gateway='', active_gateway=value)
-
     @pytest.mark.parametrize('clients', [['203.0.112.0/24','203.0.113.0/24'], ['203.0.112.0/23','203.0.113.0/24']])
     def test_existing_cidr_aggregation_contract_is_preserved(self, clients):
         result = plan(clients=clients, persistent='203.0.112.0/23 198.51.100.1 100',

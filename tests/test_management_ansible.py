@@ -56,6 +56,8 @@ class Runner:
 
     def run(self, tasks, variables=None, check=False, tags=None, success=True):
         scope = dict(ansible_python_interpreter=str(self.python), ansible_distribution='RedHat', ansible_distribution_major_version='8',
+                     # Existing transport tests continue to exercise strict lease guarantees.
+                     bind_operation_lock_enabled=True,
                      bind_primary_host='localhost', bind_secondary_host='peer', bind_tsig_key_name='site-transfer')
         scope.update(variables or {})
         inventory = self.folder / 'hosts.ini'

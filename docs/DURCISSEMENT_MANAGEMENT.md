@@ -20,7 +20,7 @@ Le template `named.conf.j2`, les tâches de déploiement, les variables DNSSEC, 
 
 ## Vérifications de cette révision
 
-Les sorties synthétiques correspondantes sont dans [Historique des validations](NETTOYAGE_ET_VALIDATION.md#historique). Les chiffres des rapports antérieurs ne sont pas additionnés aux résultats de cette révision.
+Les sorties synthétiques correspondantes sont dans [PREUVES_MANAGEMENT_DURCI.txt](PREUVES_MANAGEMENT_DURCI.txt). Les chiffres des rapports antérieurs ne sont pas additionnés aux résultats de cette révision.
 
 | Statut | Contrôle | Résultat et périmètre |
 |---|---|---|
