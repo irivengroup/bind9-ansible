@@ -25,7 +25,7 @@ check_front_axfr() {
   dig_help=$(dig -h 2>&1) || true
   # Never echo the key or use dig -y: the secret must not appear in process arguments.
   for label in unsigned signed; do
-    local -a args=(+time=3 +tries=1 -b "$source" "@$server" "$zone" AXFR)
+    local -a args=(-r -4 +time=3 +tries=1 -b "$source" "@$server" "$zone" AXFR)
     # Recent dig exposes the actual AXFR response RCODE in YAML. Older dig
     # can print only "Transfer failed"; that is deliberately inconclusive.
     [[ $dig_help == *'+[no]yaml'* || $dig_help == *'+yaml'* ]] && args+=(+yaml)

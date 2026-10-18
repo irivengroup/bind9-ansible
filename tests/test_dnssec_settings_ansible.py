@@ -47,16 +47,16 @@ class TestDnssecPolicyRunner:
     @pytest.mark.parametrize('native',[False,True])
     def test_public_modes_ignore_stale_high_precedence_internal_state(self,native):
         runner=DnssecPolicyRunner()
-        main=yaml.safe_load((ROOT/'roles/bind9/tasks/main.yml').read_text())
+        main=yaml.safe_load((ROOT/'roles/bind9/tasks/tasks.d/deploy/main.yml').read_text())
         deployment=next(task for task in main if 'rescue' in task)
         imports={task['ansible.builtin.import_tasks']:task for task in deployment['block'] if 'ansible.builtin.import_tasks' in task}
         plays=[]
         for value,active,default in [(False,False,False),('false',False,False),
-                                     (True,True,False),('true',True,False),('auto',True,False),(False,False,True)]:
+                                     (True,True,False),('true',True,False),('auto',True,False),('auto',True,True)]:
             assertions=[]
             for name in ('dnssec_install.yml','dnssec_activate.yml','dnssec_disable.yml'):
                 expected=not active if name=='dnssec_disable.yml' else active
-                condition=imports['tasks.d/'+name]['when']
+                condition=imports['{{ role_path }}/tasks/tasks.d/'+name]['when']
                 assertions.append('('+condition+') == '+str(expected).lower())
             plays.append(runner.play(value,[runner.validation(),{'assert':{'that':assertions}}],default))
         runner.run(plays,native)

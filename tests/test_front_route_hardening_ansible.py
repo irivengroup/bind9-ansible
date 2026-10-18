@@ -27,7 +27,7 @@ class TestFrontRecoveryPreconditions:
         sandbox, journal, _ = self.prepare(tmp_path)
         sandbox.data['runtime'][-1]['metric'] = 200
         sandbox.save()
-        result = sandbox.run('tasks.d/front_routes_recover.yml')
+        result = sandbox.run('tasks.d/deploy/front_routes_recover.yml')
         assert result.returncode != 0, result.stdout
         assert sandbox.read() == sandbox.data
         assert journal.is_dir()
@@ -36,7 +36,7 @@ class TestFrontRecoveryPreconditions:
         sandbox, journal, path = self.prepare(tmp_path)
         os.link(path, tmp_path / 'journal-link.json')
         sandbox.save()
-        result = sandbox.run('tasks.d/front_routes_recover.yml')
+        result = sandbox.run('tasks.d/deploy/front_routes_recover.yml')
         assert result.returncode != 0, result.stdout
         assert sandbox.read() == sandbox.data
         assert journal.is_dir()

@@ -1,5 +1,7 @@
 name: CI
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   validation:
     runs-on: ubuntu-latest
@@ -36,26 +38,34 @@ jobs:
             python -m pip install 'ansible-core==${{ matrix.ansible-version }}' pytest pyyaml
           fi
       - name: Ansible syntax check
-        run: ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --syntax-check
+        run: |
+          ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --syntax-check
+          ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-management.yml --syntax-check
       - name: Detect unused Python imports and undefined names
         run: |
           python -m pip install 'pyflakes==3.2.0'
-          python -m pyflakes roles/bind9/filter_plugins roles/bind9/files tests
+          python -m pyflakes roles/bind9/filter_plugins roles/bind9/files roles/bind9/module_utils roles/bind9/library tests
       - name: Unit tests
         run: python -m pytest -q tests
       - name: Compile Python sources
-        run: python -m compileall -q roles/bind9/files roles/bind9/filter_plugins tests && python -m py_compile roles/bind9/files/reverse-serial.py roles/bind9/files/tsig-secret.py
+        run: python -m compileall -q roles/bind9/files roles/bind9/filter_plugins roles/bind9/module_utils roles/bind9/library tests && python -m py_compile roles/bind9/files/reverse-serial.py roles/bind9/files/tsig-secret.py
       - name: Check shell syntax
         run: bash -n roles/bind9/files/bind-configtool.sh roles/bind9/files/named-healthcheck.sh tests/run_integration_front_routes.sh tests/run_integration_loopback.sh tests/run_integration_logging.sh
       - name: Native route task workflows on legacy Ansible
         if: matrix.ansible-version == '2.9.27'
         run: sudo --preserve-env=PATH "$(command -v python)" -m pytest -q tests/test_front_routes_ansible.py tests/test_front_route_hardening_ansible.py
+      - name: Targeted management, deployment seal and transport on legacy Ansible
+        if: matrix.ansible-version == '2.9.27'
+        run: |
+          python -m pip install 'coverage==7.6.1'
+          sudo --preserve-env=PATH "$(command -v python)" -m coverage run --include='*/roles/bind9/module_utils/bind9_management.py' -m pytest -q tests/test_management.py tests/test_management_refusals.py tests/test_management_hardening.py tests/test_management_ansible.py tests/test_management_batch.py tests/test_management_batch_ansible.py tests/test_management_list.py tests/test_management_live_integrity.py tests/test_management_io_safety.py tests/test_deployment_contract.py tests/test_deployment_lock_ansible.py
+          python -m coverage report --fail-under=98
       - name: Optional DNSSEC lifecycle workflows on legacy Ansible
         if: matrix.ansible-version == '2.9.27'
         run: sudo --preserve-env=PATH "$(command -v python)" -m pytest -q tests/test_dnssec_workflows.py
       - name: Backup and restore security in isolated mount namespaces
         if: matrix.ansible-version == '2.9.27'
-        run: sudo --preserve-env=PATH "$(command -v python)" -m pytest -q tests/test_configtool_workflows.py
+        run: sudo --preserve-env=PATH BIND_TEST_REQUIRE_MOUNT_NS=1 "$(command -v python)" -m pytest -q tests/test_configtool_workflows.py
       - name: Preflight all delivered inventories on legacy Ansible
         if: matrix.ansible-version == '2.9.27'
         run: python tests/integration_preflight.py
@@ -63,10 +73,10 @@ jobs:
         if: matrix.ansible-version == '2.9.27'
         run: |
           python -m pip install 'coverage==7.6.1'
-          sudo --preserve-env=PATH "$(command -v python)" -m coverage run --include='*/roles/bind9/filter_plugins/dns_topology.py,*/roles/bind9/filter_plugins/soa_health.py,*/roles/bind9/filter_plugins/client_acl.py,*/roles/bind9/files/bind-private-dnssec.py,*/roles/bind9/files/tsig-secret.py' -m pytest -q tests/test_native_front_routes.py tests/test_front_route_hardening.py tests/test_dns_topology.py tests/test_soa_health.py tests/test_security_remediation.py tests/test_private_dnssec.py tests/test_private_dnssec_hardening.py tests/test_global_review.py tests/test_tsig_hardening.py tests/test_tsig_provisioning.py
+          sudo --preserve-env=PATH "$(command -v python)" -m coverage run --include='*/roles/bind9/filter_plugins/dns_topology.py,*/roles/bind9/filter_plugins/soa_health.py,*/roles/bind9/filter_plugins/client_acl.py,*/roles/bind9/files/bind-private-dnssec.py,*/roles/bind9/files/tsig-secret.py' -m pytest -q tests/test_native_front_routes.py tests/test_front_route_hardening.py tests/test_dns_topology.py tests/test_soa_health.py tests/test_dns_probe_hardening.py tests/test_security_remediation.py tests/test_private_dnssec.py tests/test_private_dnssec_hardening.py tests/test_global_review.py tests/test_tsig_hardening.py tests/test_tsig_provisioning.py
           python -m coverage report --fail-under=98
       - name: Analyze modified production Python code
         if: matrix.ansible-version == '2.9.27'
         run: |
           python -m pip install 'bandit==1.7.10'
-          python -m bandit -q roles/bind9/filter_plugins/dns_topology.py roles/bind9/filter_plugins/soa_health.py roles/bind9/files/reverse-serial.py roles/bind9/filter_plugins/client_acl.py roles/bind9/files/bind-private-dnssec.py roles/bind9/files/tsig-secret.py
+          python -m bandit -q roles/bind9/filter_plugins/dns_topology.py roles/bind9/filter_plugins/soa_health.py roles/bind9/files/reverse-serial.py roles/bind9/filter_plugins/client_acl.py roles/bind9/files/bind-private-dnssec.py roles/bind9/files/tsig-secret.py roles/bind9/module_utils/bind9_management.py roles/bind9/library/bind9_manage.py

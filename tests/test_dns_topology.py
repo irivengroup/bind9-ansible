@@ -154,7 +154,7 @@ class TestDnsTopology:
         ('2001:db8::53',53,True),('::1',5353,True),('192.0.2.53',53,True),
         ('::1',53,False),('127.0.0.1',53,False),('::ffff:192.0.2.53',53,False)])
     def test_real_forwarder_task_supports_ipv6_without_local_endpoint_bypass(self,address,port,accepted):
-        tasks=yaml.safe_load((ROLE/'tasks/tasks.d/validate.yml').read_text())
+        tasks=yaml.safe_load((ROLE/'tasks/tasks.d/deploy/validate.yml').read_text())
         task=next(item for item in tasks if item['name']=='Validate each forwarding destination')
         variables=dict(bind_forward_zones=[forwarding(forwarders=[{'address':address,'port':port}])],
                        bind_front_ip='192.0.2.11',bind_back_ip='10.0.0.11',
@@ -163,10 +163,10 @@ class TestDnsTopology:
                                  's':{'bind_front_ip':'192.0.2.12','bind_back_ip':'10.0.0.12'}})
         runner=TaskExpressions(variables)
         if accepted:
-            runner.run('validate.yml',tasks=[task])
+            runner.run('deploy/validate.yml',tasks=[task])
         else:
             with pytest.raises(ValueError,match='Validate each forwarding destination'):
-                runner.run('validate.yml',tasks=[task])
+                runner.run('deploy/validate.yml',tasks=[task])
 
     def test_long_zone_cannot_generate_an_invalid_nameserver_name(self):
         long_name = '.'.join(['a' * 60] * 4 + ['test'])

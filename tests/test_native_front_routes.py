@@ -34,7 +34,7 @@ def plan(**kwargs):
                'bind_cloud_clients':values['clients'], 'bind_internal_clients':values['internal'], 'bind_front_route_metric':values['metric'],
                'bind_front_profile':{'results':[{'stdout':x} for x in [values['gateway'],values['persistent'],values['route_table']]]},
                'bind_front_kernel':{'results':[{'stdout':values['runtime']},{'stdout':values['rules']}]}}
-    return TaskExpressions(context).run('front_routes_plan.yml')['bind_front_plan']
+    return TaskExpressions(context).run('deploy/front_routes_plan.yml')['bind_front_plan']
 
 
 class TestNativeRouteExpressions:
@@ -58,7 +58,7 @@ class TestNativeRouteExpressions:
         if secondary:
             addresses[0]['addr_info'].insert(0, {'family':'inet','local':'198.51.100.10','prefixlen':24})
             addresses[0]['addr_info'][1]['secondary'] = True
-        tasks = yaml.safe_load((TaskExpressions.TASKS/'front_return_routes.yml').read_text())[2:6]
+        tasks = yaml.safe_load((TaskExpressions.TASKS/'deploy/front_return_routes.yml').read_text())[2:6]
         result = TaskExpressions({'bind_front_addresses':{'stdout':json.dumps(addresses)}, 'bind_front_ip':'198.51.100.2',
                                   'bind_back_ip':'10.0.0.2','ansible_host':'192.0.2.2'}).run('', tasks=tasks)
         assert result['bind_front_interface']['device'] == 'front0'
@@ -71,7 +71,7 @@ class TestNativeRouteExpressions:
         elif change == 'duplicate-front': addresses.append(copy.deepcopy(addresses[0]))
         elif change == 'missing-back': addresses[1]['addr_info'] = []
         else: addresses[0]['addr_info'].extend(addresses[1]['addr_info'])
-        tasks = yaml.safe_load((TaskExpressions.TASKS/'front_return_routes.yml').read_text())[2:6]
+        tasks = yaml.safe_load((TaskExpressions.TASKS/'deploy/front_return_routes.yml').read_text())[2:6]
         with pytest.raises(ValueError):
             TaskExpressions({'bind_front_addresses':{'stdout':json.dumps(addresses)}, 'bind_front_ip':'198.51.100.2',
                              'bind_back_ip':'10.0.0.2','ansible_host':'192.0.2.2'}).run('', tasks=tasks)
@@ -81,17 +81,17 @@ class TestNativeRouteExpressions:
         routes = BASE + [NEW]
         TaskExpressions({'bind_front_plan':plan(), 'bind_front_compare_profile':'203.0.113.0/24 198.51.100.1 100',
                          'bind_front_compare_runtime':routes if typed else json.dumps(routes),
-                         'bind_front_compare_applied':True}).run('front_routes_compare.yml')
+                         'bind_front_compare_applied':True}).run('deploy/front_routes_compare.yml')
 
     @pytest.mark.parametrize('routes', [[NEW], BASE, BASE+[dict(NEW,dst='8.8.8.8/32')]])
     def test_route_loss_or_unrelated_changes_are_explicit_failures(self, routes):
         with pytest.raises(ValueError):
             TaskExpressions({'bind_front_plan':plan(), 'bind_front_compare_profile':'203.0.113.0/24 198.51.100.1 100',
-                             'bind_front_compare_runtime':routes,'bind_front_compare_applied':True}).run('front_routes_compare.yml')
+                             'bind_front_compare_runtime':routes,'bind_front_compare_applied':True}).run('deploy/front_routes_compare.yml')
 
     @pytest.mark.parametrize('metric', [100, 200])
     def test_owned_active_route_identity_is_checked_before_removal(self, metric):
-        all_tasks = yaml.safe_load((TaskExpressions.TASKS/'front_routes_rollback.yml').read_text())
+        all_tasks = yaml.safe_load((TaskExpressions.TASKS/'deploy/front_routes_rollback.yml').read_text())
         start = next(index for index,task in enumerate(all_tasks) if task['name']=='Normalize active destinations being inspected')
         runner = TaskExpressions({'bind_front_plan':plan(), 'bind_front_rollback_kernel':{'stdout':json.dumps(BASE+[dict(NEW,metric=metric)])}})
         if metric == 200:
@@ -103,7 +103,7 @@ class TestNativeRouteExpressions:
 
     def test_no_custom_routing_python_or_external_filter_dependency(self):
         assert not (ROOT/'roles/bind9/filter_plugins/front_routes.py').exists()
-        for path in (ROOT/'roles/bind9/tasks/tasks.d').glob('front*.yml'):
+        for path in (ROOT/'roles/bind9/tasks/tasks.d/deploy').glob('front*.yml'):
             text = path.read_text()
             assert '| ipv4' not in text and '| ipaddr' not in text and 'front_route_plan(' not in text
             commands = '\n'.join(line for line in text.splitlines() if not line.lstrip().startswith('#'))
@@ -171,7 +171,7 @@ class TestNativeRouteExpressions:
         ('runtime_additions',['192.0.2.99/32 198.51.100.1 100'])])
     def test_corrupted_recovery_cannot_remove_a_route(self,field,value):
         corrupted=copy.deepcopy(plan()); corrupted[field]=value
-        with pytest.raises(ValueError): TaskExpressions({'bind_front_plan':corrupted}).run('front_routes_validate_journal.yml')
+        with pytest.raises(ValueError): TaskExpressions({'bind_front_plan':corrupted}).run('deploy/front_routes_validate_journal.yml')
 
     def test_policy_routes_and_duplicate_entries_refused(self):
         with pytest.raises(ValueError): plan(route_table='100')
@@ -180,4 +180,4 @@ class TestNativeRouteExpressions:
 
     def test_existing_journal_cannot_claim_preexisting_routes(self):
         corrupted=plan(); corrupted['runtime_before'].append(NEW)
-        with pytest.raises(ValueError): TaskExpressions({'bind_front_plan':corrupted}).run('front_routes_validate_journal.yml')
+        with pytest.raises(ValueError): TaskExpressions({'bind_front_plan':corrupted}).run('deploy/front_routes_validate_journal.yml')

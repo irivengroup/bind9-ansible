@@ -116,10 +116,10 @@ pas automatiquement une règle potentiellement préexistante.
 | Fichier | Modification nécessaire |
 |---|---|
 | `roles/bind9/templates/named.conf.j2` | Canaux, catégories, désactivation explicite des requêtes ; renommage de l’ACL et de ses deux références |
-| `roles/bind9/tasks/tasks.d/directories.yml` | Répertoire privé et préparation non destructive des trois fichiers |
+| `roles/bind9/tasks/tasks.d/deploy/directories.yml` | Répertoire privé et préparation non destructive des trois fichiers |
 | `roles/bind9/tasks/tasks.d/path_safety.yml` | Protection des nouveaux chemins contre les liens symboliques |
-| `roles/bind9/tasks/tasks.d/security.yml` | Règle SELinux persistante, relabel récursif et contrôle des labels |
-| `roles/bind9/tasks/main.yml`, `roles/bind9/tasks/tasks.d/firewall.yml` | Import et ajout idempotent du service DNS runtime/permanent dans les zones FRONT/BACK ; détails dans [FIREWALLD.md](FIREWALLD.md) |
+| `roles/bind9/tasks/tasks.d/deploy/security.yml` | Règle SELinux persistante, relabel récursif et contrôle des labels |
+| `roles/bind9/tasks/main.yml`, `roles/bind9/tasks/tasks.d/deploy/firewall.yml` | Import et ajout idempotent du service DNS runtime/permanent dans les zones FRONT/BACK ; détails dans [FIREWALLD.md](FIREWALLD.md) |
 | `examples/deux-zones-forwardees/` | Deux configurations régénérées et texte aligné sur l’ACL |
 | `tests/` | Tests des tâches, de l’idempotence, des canaux réels, de la rotation et de l’ACL ; adaptation des chemins du laboratoire et du test restorecon |
 | `.github/workflows/ci.yml` | Ajout du script d’intégration logging au contrôle de syntaxe shell existant |

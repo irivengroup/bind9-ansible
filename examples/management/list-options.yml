@@ -1,0 +1,6 @@
+---
+bind_manage:
+  resource: option
+  action: list
+  offset: 0
+  limit: 100

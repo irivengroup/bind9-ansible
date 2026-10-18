@@ -1,0 +1,93 @@
+---
+# A completion seal prevents an accidental re-render after manual maintenance.
+# It is not an access-control mechanism against an administrator with root.
+- name: Reset lease ownership before checking this deployment invocation
+  ansible.builtin.set_fact:
+    bind_deployment_lease_acquired: false
+    bind_deployment_health_completed: false
+    bind_deployment_retain_lease: false
+    bind_deployment_config_checked: false
+    bind_deployment_seal_applies: "{{ (ansible_run_tags | default(['all']) | intersect(['all', 'deploy', 'install', 'configure', 'zones', 'records', 'services', 'firewall', 'monitor']) | length) > 0 }}"
+
+- name: Validate the optional deployment lock and reject the removed force input
+  ansible.builtin.assert:
+    that:
+      - force is not defined
+      - deployment_lock is not defined
+      - deployment_locked is not defined
+      - (hibernate_deployment | default(false) | type_debug) == 'bool' or (hibernate_deployment | default(false) is string and hibernate_deployment in ['yes', 'no', 'true', 'false'])
+    fail_msg: 'Use hibernate_deployment as a YAML boolean or lowercase yes/no/true/false (default no). The force, deployment_lock and deployment_locked inputs are not accepted; existing seals require explicit operator removal.'
+
+- name: Require isolated explicit hibernation instead of mixing it with provisioning
+  ansible.builtin.assert:
+    that:
+      - hibernate_deployment | bool
+      - (ansible_run_tags | difference(['hibernate', 'always']) | length) == 0
+    fail_msg: 'Use --tags hibernate -e hibernate_deployment=yes by itself. Hibernation must not be mixed with deployment or other actions.'
+  when: "'hibernate' in (ansible_run_tags | default(['all']))"
+
+- name: Inspect deployment seal directory and hidden completion file
+  ansible.builtin.stat:
+    path: '{{ item }}'
+    follow: false
+  loop:
+    - /var/lib/Bind9-Ansible
+    - /var/lib/Bind9-Ansible/.deployment.lock
+  register: bind_deployment_seal_stat
+
+- name: Reject unsafe deployment seal paths regardless of the requested policy
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (not (item.stat.islnk | default(false)) and item.stat.uid == 0)
+      - not item.stat.exists or (item.stat.isdir | default(false) if item.item == '/var/lib/Bind9-Ansible' else ((item.stat.isreg | default(false)) and item.stat.nlink == 1))
+      - not item.stat.exists or item.stat.mode == ('0700' if item.item == '/var/lib/Bind9-Ansible' else '0600')
+    fail_msg: 'Unsafe deployment seal path. Inspect owner, type, permissions and links before proceeding.'
+  loop: '{{ bind_deployment_seal_stat.results }}'
+
+- name: Refuse another deployment whenever a completion seal exists
+  ansible.builtin.assert:
+    that:
+      - not (bind_deployment_seal_applies | bool) or not bind_deployment_seal_stat.results[1].stat.exists
+    fail_msg: 'This host has a completed deployment seal. Use bind9-management.yml for targeted changes. Only explicit operator removal of /var/lib/Bind9-Ansible/.deployment.lock permits redeployment; hibernate_deployment=false does not bypass it.'
+
+- name: Prepare the private operation state directory after path validation
+  ansible.builtin.file:
+    path: /var/lib/Bind9-Ansible
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  when: not ansible_check_mode
+
+- name: Acquire the shared deployment and management lease without stealing it
+  ansible.builtin.command:
+    argv: [mkdir, -m, '0700', /var/lib/Bind9-Ansible/.operation.lock]
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Remember ownership of this invocation's lease
+  ansible.builtin.set_fact:
+    bind_deployment_lease_acquired: '{{ not ansible_check_mode }}'
+
+- name: Record the acquired operation directory identity without following links
+  ansible.builtin.stat:
+    path: /var/lib/Bind9-Ansible/.operation.lock
+    follow: false
+  register: bind_deployment_owned_lease
+  when: not ansible_check_mode
+
+# The first observation can precede a different deployment's commit/release.
+# Recheck under the shared lease before allowing any provisioning writes.
+- name: Recheck completion seal after acquiring the operation lease
+  ansible.builtin.stat:
+    path: /var/lib/Bind9-Ansible/.deployment.lock
+    follow: false
+  register: bind_deployment_seal_after_acquire
+  when: not ansible_check_mode
+
+- name: Reject a deployment sealed between observation and lease acquisition
+  ansible.builtin.assert:
+    that:
+      - not (bind_deployment_seal_applies | bool) or not bind_deployment_seal_after_acquire.stat.exists
+    fail_msg: 'A completion seal exists after operation lease acquisition; no deployment changes are allowed. Inspect the seal or use targeted management.'
+  when: not ansible_check_mode

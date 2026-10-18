@@ -23,7 +23,7 @@ class TestTsigFilesystem:
     def run(path):
         try:
             return subprocess.run([sys.executable, str(SCRIPT), str(path)],
-                                  capture_output=True, text=True, timeout=2)
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=2)
         except subprocess.TimeoutExpired:
             pytest.fail('TSIG provisioning blocked on an unsafe filesystem object')
 
@@ -132,7 +132,7 @@ class TestTsigFilesystem:
         tmp_path.chmod(0o700)
         key = tmp_path / 'site.key'
         children = [subprocess.Popen([sys.executable, str(SCRIPT), str(key)], stdout=subprocess.PIPE,
-                                     stderr=subprocess.PIPE, text=True) for _ in range(6)]
+                                     stderr=subprocess.PIPE, universal_newlines=True) for _ in range(6)]
         outputs = [child.communicate(timeout=10) for child in children]
         assert all(child.returncode == 0 for child in children)
         assert [stdout.strip() for stdout, _ in outputs].count('CREATED') == 1
@@ -200,7 +200,7 @@ class TestTsigFilesystem:
         assert self.module().TsigSecretStore(key, create_parent=True).provision() is True
         for expected in ('UNCHANGED', 'UNCHANGED'):
             result = subprocess.run([sys.executable, str(SCRIPT), str(key), '--create-parent'],
-                                    capture_output=True, text=True, timeout=5)
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=5)
             assert result.returncode == 0 and result.stdout.strip() == expected
         assert stat.S_IMODE(key.parent.stat().st_mode) == 0o700
         assert stat.S_IMODE(key.parent.parent.stat().st_mode) == 0o700
@@ -210,7 +210,7 @@ class TestTsigFilesystem:
         target.mkdir(mode=0o755)
         (tmp_path / 'alias').symlink_to(target, target_is_directory=True)
         result = subprocess.run([sys.executable, str(SCRIPT), str(tmp_path / 'alias/private/site.key'),
-                                 '--create-parent'], capture_output=True, text=True, timeout=5)
+                                 '--create-parent'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=5)
         assert result.returncode != 0
         assert stat.S_IMODE(target.stat().st_mode) == 0o755
         assert list(target.iterdir()) == []
@@ -227,12 +227,12 @@ class TestTsigFilesystem:
             'vars': {'role_path': str(role), 'ansible_python_interpreter': str(interpreter),
                      'bind_tsig_key_name': 'test-site',
                      'bind_tsig_algorithm': 'hmac-sha256', 'bind_tsig_secret_file': str(key)},
-            'tasks': [{'import_tasks': str(role / 'tasks/tasks.d/tsig.yml')}]
+            'tasks': [{'import_tasks': str(role / 'tasks/tasks.d/deploy/tsig.yml')}]
         }]))
         contents = []
         for _ in range(2):
             result = subprocess.run(['ansible-playbook', '-i', 'localhost,', '-c', 'local', str(playbook)],
-                                    capture_output=True, text=True, timeout=60)
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=60)
             assert result.returncode == 0, result.stdout + result.stderr
             contents.append(key.read_bytes())
             assert key.read_text().strip() not in result.stdout + result.stderr
@@ -254,10 +254,10 @@ class TestTsigFilesystem:
                      'bind_tsig_key_name': 'test-site',
                      'bind_tsig_algorithm': 'hmac-sha256',
                      'bind_tsig_secret_file': str(tmp_path / 'alias/private/site.key')},
-            'tasks': [{'import_tasks': str(role / 'tasks/tasks.d/tsig.yml')}]
+            'tasks': [{'import_tasks': str(role / 'tasks/tasks.d/deploy/tsig.yml')}]
         }]))
         result = subprocess.run(['ansible-playbook', '-i', 'localhost,', '-c', 'local', str(playbook)],
-                                capture_output=True, text=True, timeout=60)
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=60)
         assert result.returncode != 0
         assert stat.S_IMODE(target.stat().st_mode) == 0o755
         assert list(target.iterdir()) == []

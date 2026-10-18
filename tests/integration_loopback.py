@@ -148,9 +148,9 @@ class LoopbackIntegration:
         Direct DNS queries alone missed Jinja's interpretation of the task's
         regular expression. Exercise the actual runner in both typing modes.
         """
-        task = yaml.safe_load((self.role / 'tasks/tasks.d/health.yml').read_text())[0]
-        readiness = yaml.safe_load((self.role / 'tasks/tasks.d/primary_readiness.yml').read_text())[1]
-        verification = yaml.safe_load((self.role / 'tasks/tasks.d/verify.yml').read_text())
+        task = yaml.safe_load((self.role / 'tasks/tasks.d/deploy/health.yml').read_text())[0]
+        readiness = yaml.safe_load((self.role / 'tasks/tasks.d/deploy/primary_readiness.yml').read_text())[1]
+        verification = yaml.safe_load((self.role / 'tasks/tasks.d/deploy/verify.yml').read_text())
         # Rebase only tool/file locations. Preserve deployed verification logic.
         for check in verification:
             if 'ansible.builtin.command' in check:
@@ -191,6 +191,7 @@ class LoopbackIntegration:
         inventory.write_text('[dns_primary]\nlocalhost ansible_connection=local\n')
         for native in ('false', 'true'):
             environment = dict(os.environ, ANSIBLE_CONFIG=str(self.root / 'ansible.cfg'),
+                               ANSIBLE_FILTER_PLUGINS=str(self.role / 'filter_plugins'),
                                ANSIBLE_JINJA2_NATIVE=native,
                                PATH=str(binaries) + os.pathsep + os.environ['PATH'])
             result = subprocess.run(['ansible-playbook', '-i', str(inventory), str(path)],
@@ -442,6 +443,17 @@ class LoopbackIntegration:
                         result = subprocess.check_output(command, universal_newlines=True).strip()
                         assert result == expected, (name, kind, result)
                         checks += 1
+                # Omit empty-zones-enable and prove the native automatic zone is
+                # still authoritative, rather than accepting NXDOMAIN from ".".
+                for transport in ('+notcp', '+tcp'):
+                    answer = subprocess.check_output([
+                        str(self.bin_dir / 'dig'), '@127.0.0.1', '-p', str(port), transport,
+                        '+time=2', '+tries=1', '+noall', '+comments', '+authority',
+                        '250.255.255.10.in-addr.arpa', 'PTR'], universal_newlines=True)
+                    assert 'status: NXDOMAIN' in answer, answer
+                    assert re.search(r';; flags: [^;]*\baa\b', answer), answer
+                    assert re.search(r'^10\.in-addr\.arpa\.\s+\d+\s+IN\s+SOA\s', answer, re.M | re.I), answer
+                    checks += 1
                 denied = subprocess.check_output([str(self.bin_dir / 'dig'), '@127.0.0.1', '-p', str(port), '-b', '127.0.0.9', '+time=2', '+tries=1', 'localhost', 'A'], universal_newlines=True)
                 assert 'status: REFUSED' in denied
                 # Business-zone access remains available through localhost.
@@ -641,6 +653,7 @@ class LoopbackIntegration:
             count += 1
         assert native == {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in self.native_dir.iterdir() if p.is_file()}
         print(json.dumps({'configurations_loaded': count, 'dns_checks': queries, 'native_files_unchanged': True,
+                          'native_automatic_empty_zone_udp_tcp': True,
                           'ipv6_udp_tcp_forwarding':True,'ipv6_dns_listener_absent':True,
                           'ansible_loopback_checks': 8,
                           'ansible_primary_soa_checks': 2 * len(context['bind_managed_zones']),

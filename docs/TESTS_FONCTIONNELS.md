@@ -23,7 +23,7 @@ sudo ss -lnutp 'sport = :53'
 sudo journalctl -u named --since '-10 minutes' --no-pager
 ```
 
-Attendu : configuration et zones sans erreur, service actif, UDP/TCP sur 127.0.0.1 et ses FRONT/BACK locales, aucune écoute DNS IPv6. Le service impose `-4`. Ne pas publier une configuration complète contenant les secrets TSIG/RNDC. DNSSEC est désactivé par défaut. RNDC reste administratif dans tous les modes ; les commandes NTA/timer suivantes s’appliquent uniquement à `true`/`auto` :
+Attendu : configuration et zones sans erreur, service actif, UDP/TCP sur 127.0.0.1 et ses FRONT/BACK locales, aucune écoute DNS IPv6. Le service conserve son lancement natif IPv4/IPv6 ; seule l’écoute DNS IPv6 est désactivée. Ne pas publier une configuration complète contenant les secrets TSIG/RNDC. DNSSEC est activé en mode `auto` par défaut. RNDC reste administratif dans tous les modes ; les commandes NTA/timer suivantes s’appliquent uniquement à `true`/`auto` :
 
 ```bash
 sudo rndc -s 127.0.0.1 -k /etc/rndc.key status

@@ -33,7 +33,7 @@ class InventoryPreflight:
                          {'include_role': {'name': 'bind9', 'tasks_from': 'tasks.d/clients.yml'}},
                          {'include_role': {'name': 'bind9', 'tasks_from': 'tasks.d/site_peers.yml'}},
                          {'set_fact': {'bind_managed_zones': '{{ bind_authoritative_zones + (bind_authoritative_zones | automatic_reverse_zones) }}'}},
-                         {'include_role': {'name': 'bind9', 'tasks_from': 'tasks.d/validate.yml'}}]}]
+                         {'include_role': {'name': 'bind9', 'tasks_from': 'tasks.d/deploy/validate.yml'}}]}]
             path.write_text(yaml.safe_dump(play))
             for name in ('dev', 'preprod', 'prod'):
                 result = subprocess.run(['ansible-playbook', '-i', str(root / 'inventory' / name / 'hosts.ini'), str(path)],

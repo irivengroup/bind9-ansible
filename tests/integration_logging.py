@@ -67,16 +67,16 @@ class LoggingIntegration(LoopbackIntegration):
                     else:
                         raise AssertionError('File-logging BIND did not start')
                     dig = [str(self.bin_dir / 'dig'), '-p', str(port), '+time=3', '+tries=1']
-                    refused = subprocess.check_output(dig + ['-b', '127.0.0.9', '@127.0.0.1', 'localhost', 'A'], text=True)
+                    refused = subprocess.check_output(dig + ['-b', '127.0.0.9', '@127.0.0.1', 'localhost', 'A'], universal_newlines=True)
                     assert 'status: REFUSED' in refused, refused
                     zone = context['bind_managed_zones'][0]['domain']
-                    transfer = subprocess.check_output(dig + ['-b', '127.0.0.5', '@127.0.0.3', '-k', str(key), zone, 'AXFR'], text=True)
+                    transfer = subprocess.check_output(dig + ['-b', '127.0.0.5', '@127.0.0.3', '-k', str(key), zone, 'AXFR'], universal_newlines=True)
                     assert transfer.count(' IN SOA ') == 2 or transfer.count('\tSOA\t') == 2, transfer
                     probe = 'quiet-logging-probe.example.invalid'
-                    answer = subprocess.check_output(dig + ['-b', '127.0.0.1', '@127.0.0.1', probe, 'A'], text=True)
+                    answer = subprocess.check_output(dig + ['-b', '127.0.0.1', '@127.0.0.1', probe, 'A'], universal_newlines=True)
                     assert 'status: NXDOMAIN' in answer, answer
                     status = subprocess.check_output([str(self.bin_dir / 'rndc'), '-s', '127.0.0.1', '-p',
-                                                      str(self.control_ports[config]), '-k', str(sandbox / 'rndc.key'), 'status'], text=True)
+                                                      str(self.control_ports[config]), '-k', str(sandbox / 'rndc.key'), 'status'], universal_newlines=True)
                     assert 'query logging is OFF' in status, status
                     for _ in range(30):
                         records = {name: (logs / name).read_text() for name in ('default.log', 'security.log', 'xfer.log')}

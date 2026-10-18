@@ -1,8 +1,11 @@
 ---
+# Seal a successful full deployment or the explicit hibernate-only path.
+# An existing seal always blocks redeployment until an operator removes it.
+hibernate_deployment: no
 bind_cloud_clients: []
 bind_internal_clients: []
-# YAML true/false or auto. false deploys no DNSSEC-specific runtime assets.
-bind_dnssec_active: false
+# Automatic validation by default; explicit false deploys no DNSSEC runtime assets.
+bind_dnssec_active: auto
 bind_forward_zones: []
 bind_authoritative_zones: []
 bind_backup_root: /var/backups/Bind9-Ansible/bind

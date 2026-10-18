@@ -21,7 +21,7 @@ class TestDnssecReadSafety:
                 'm=importlib.util.module_from_spec(s);s.loader.exec_module(m);m.PrivateDnssec.read(m.Path(sys.argv[2]))')
         try:
             result = subprocess.run([sys.executable, '-c', code, str(SCRIPT), str(fifo)],
-                                    capture_output=True, text=True, timeout=2)
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=2)
         except subprocess.TimeoutExpired:
             pytest.fail('DNSSEC reader blocked on a FIFO before validating its type')
         assert result.returncode != 0

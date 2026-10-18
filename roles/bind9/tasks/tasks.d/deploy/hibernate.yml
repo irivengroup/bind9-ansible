@@ -1,0 +1,58 @@
+---
+# This opt-in path never imports provisioning or trusts inventory zone lists.
+# A seal is a persistent deployment barrier, not a full runtime health report.
+- name: Determine whether the observed completion seal already protects the host
+  ansible.builtin.set_fact:
+    bind_hibernation_seal_exists: >-
+      {{ bind_deployment_seal_stat.results[1].stat.exists if ansible_check_mode else
+         bind_deployment_seal_after_acquire.stat.exists }}
+
+- name: Check the actual existing configuration before hibernation
+  block:
+    - name: Inspect canonical configuration without opening an unsafe object
+      ansible.builtin.stat:
+        path: /etc/named.conf
+        follow: false
+        get_checksum: false
+      register: bind_hibernation_config_stat
+    - name: Require a bounded private canonical configuration before native parsing
+      ansible.builtin.assert:
+        that:
+          - bind_hibernation_config_stat.stat.exists and (bind_hibernation_config_stat.stat.isreg | default(false))
+          - not (bind_hibernation_config_stat.stat.islnk | default(false))
+          - bind_hibernation_config_stat.stat.uid == 0 and bind_hibernation_config_stat.stat.nlink == 1
+          - bind_hibernation_config_stat.stat.mode is match('^0[0-7][0145][0145]$')
+          - bind_hibernation_config_stat.stat.size > 0 and bind_hibernation_config_stat.stat.size <= 16777216
+        fail_msg: 'Hibernation requires a singly linked root-owned canonical file, not group/world writable, at most 16 MiB.'
+    - name: Validate live BIND syntax without exposing configuration contents
+      ansible.builtin.command:
+        argv: [/usr/bin/timeout, --signal=TERM, --kill-after=5s, 60s, /usr/sbin/named-checkconf, /etc/named.conf]
+      changed_when: false
+      check_mode: false
+      no_log: true
+  rescue:
+    - name: Refuse hibernation after a controlled syntax check failure
+      ansible.builtin.fail:
+        msg: 'Current named.conf safety or syntax check failed or exceeded its time limit; no deployment seal was created. Inspect named-checkconf locally with root access.'
+  when: not (bind_hibernation_seal_exists | bool)
+
+- name: Record only the successful hibernation syntax check
+  ansible.builtin.set_fact:
+    bind_deployment_config_checked: true
+  when: not (bind_hibernation_seal_exists | bool)
+
+- name: Seal only the live canonical configuration without deploying DNS
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/seal.yml'
+  vars:
+    bind_deployment_seal_kind: hibernate
+  when:
+    - not ansible_check_mode
+    - not (bind_hibernation_seal_exists | bool)
+
+- name: Report the isolated hibernation result without configuration contents
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'Existing deployment seal preserved without modification.' if (bind_hibernation_seal_exists | bool)
+         else ('Check mode: a deployment seal would be created; configuration syntax checked, no runtime health qualification.'
+               if ansible_check_mode else 'Deployment seal created from the live configuration; no provisioning or runtime health qualification performed.') }}
+  changed_when: ansible_check_mode and not (bind_hibernation_seal_exists | bool)

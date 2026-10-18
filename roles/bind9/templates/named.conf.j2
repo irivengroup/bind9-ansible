@@ -2,7 +2,7 @@
 {% set primary_role = (bind_primary_group | default("dns_primary")) in group_names %}
 {% set local_front_acl = "bind_primary_front_ip" if primary_role else "bind_secondary_front_ip" %}
 {% set local_back_acl = "bind_primary_back_ip" if primary_role else "bind_secondary_back_ip" %}
-{% set validation_mode = bind_dnssec_active | default(false) | string | lower %}
+{% set validation_mode = bind_dnssec_active | default('auto') | string | lower %}
 {% set dnssec_mode = 'auto' if validation_mode == 'auto' else ('yes' if validation_mode == 'true' else 'no') %}
 {% set client_networks = bind_allowed_clients %}
 {% set cloud_networks = bind_cloud_clients | default([], true) %}
@@ -115,7 +115,6 @@ options {
 {% endif %}
     managed-keys-directory "/var/named/dynamic";
 {% endif %}
-    empty-zones-enable yes;
     minimal-responses yes;
     // A queries category exists below; explicitly avoid per-query processing.
     querylog no;

@@ -144,6 +144,19 @@ pour examen. Ne pas supprimer le verrou d'une opération encore active. Un
 verrou sans journal exploitable exige une inspection manuelle ; aucune route
 n'est supprimée à l'aveugle.
 
+**Verrou commun de la révision courante :** les tags `routes` et
+`routes-recover` acquièrent aussi `/var/lib/Bind9-Ansible/.operation.lock`.
+Une restauration DNS/FRONT incomplète conserve ce verrou et bloque la reprise
+automatique. Suspendre les autres automatisations, confirmer l’absence de tout
+processus propriétaire, inspecter et rétablir DNS si nécessaire. Conserver le
+journal `front-routes.lock`. Après ces contrôles, un opérateur peut retirer
+uniquement le répertoire d’opération vide avec `rmdir`, puis lancer immédiatement
+`routes-recover` sous le nouveau verrou commun. Un répertoire non vide, remplacé
+ou dont le propriétaire est incertain ne doit pas être supprimé ; il exige
+une analyse manuelle. Ce retrait n’est pas une autorisation de redéploiement.
+Le sceau `.deployment.lock` est indépendant et reste en place ; voir
+[HIBERNATE_DEPLOYMENT.md](HIBERNATE_DEPLOYMENT.md).
+
 Avec `--tags deploy` ou l'exécution complète, les nouveaux ajouts restent
 journalisés jusqu'à la réussite des contrôles DNS et de la vérification réseau
 finale. Un échec dans ce bloc retire les ajouts persistants et actifs de cette

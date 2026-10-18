@@ -10,7 +10,7 @@ pytest.importorskip('ansible')
 from route_task_expressions import TaskExpressions
 
 ROOT = Path(__file__).resolve().parents[1]
-TASKS = yaml.safe_load((ROOT / 'roles/bind9/tasks/tasks.d/firewall.yml').read_text())
+TASKS = yaml.safe_load((ROOT / 'roles/bind9/tasks/tasks.d/deploy/firewall.yml').read_text())
 
 
 class TestDnsFirewall:
@@ -88,8 +88,8 @@ class TestDnsFirewall:
         assert TaskExpressions(scope).condition([TASKS[11]['failed_when']], scope) is failed
 
     def test_entry_point_and_commands_never_reload_or_reassign_zones(self):
-        main = yaml.safe_load((ROOT / 'roles/bind9/tasks/main.yml').read_text())
-        imported = next(t for t in main if t.get('ansible.builtin.import_tasks') == 'tasks.d/firewall.yml')
+        main = yaml.safe_load((ROOT / 'roles/bind9/tasks/tasks.d/deploy/main.yml').read_text())
+        imported = next(t for t in main if t.get('ansible.builtin.import_tasks') == '{{ role_path }}/tasks/tasks.d/deploy/firewall.yml')
         assert imported['tags'] == ['deploy', 'firewall']
         assert imported['environment'] == {'LC_ALL': 'C'}
         source = yaml.safe_dump(TASKS)

@@ -9,7 +9,7 @@ pytest.importorskip('ansible')
 from route_task_expressions import TaskExpressions
 
 ROOT = Path(__file__).resolve().parents[1]
-TASK = yaml.safe_load((ROOT / 'roles/bind9/tasks/tasks.d/health.yml').read_text())[0]
+TASK = yaml.safe_load((ROOT / 'roles/bind9/tasks/tasks.d/deploy/health.yml').read_text())[0]
 ITEMS = TASK['loop']
 
 
@@ -75,10 +75,10 @@ class TestOtherDnsHealthConditions:
     def test_other_query_conditions(self, kind, scenario):
         tasks = ROOT / 'roles/bind9/tasks/tasks.d'
         if kind == 'primary_readiness':
-            task = yaml.safe_load((tasks / 'primary_readiness.yml').read_text())[1]
+            task = yaml.safe_load((tasks / 'deploy/primary_readiness.yml').read_text())[1]
             register = 'bind_primary_soa'
         else:
-            task = next(t for t in yaml.safe_load((tasks / 'health.yml').read_text())
+            task = next(t for t in yaml.safe_load((tasks / 'deploy/health.yml').read_text())
                         if t.get('register') == ('bind_soa_checks' if kind == 'authoritative' else 'bind_forward_health'))
             register = task['register']
         output = (';; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 1\n'
@@ -126,7 +126,7 @@ class TestDeployedConfigurationConditions:
         ('allow-transfer { 192.0.2.2; };', True),
     ])
     def test_direct_wildcard_transfer_is_rejected_in_canonical_output(self, configuration, safe):
-        tasks = yaml.safe_load((ROOT / 'roles/bind9/tasks/tasks.d/verify.yml').read_text())
+        tasks = yaml.safe_load((ROOT / 'roles/bind9/tasks/tasks.d/deploy/verify.yml').read_text())
         task = next(t for t in tasks if 'ansible.builtin.assert' in t)
         scope = {'bind_checked_configuration': {'stdout': configuration}}
         assert TaskExpressions(scope).condition(task['ansible.builtin.assert']['that'], scope) is safe

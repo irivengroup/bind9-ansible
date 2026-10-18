@@ -12,6 +12,21 @@ pytestmark = pytest.mark.skipif(os.name != 'posix' or not hasattr(os, 'geteuid')
                              os.geteuid() != 0 or not shutil.which('unshare'),
                              reason='Requires disposable Linux root and mount namespaces')
 
+
+@pytest.fixture(scope='module', autouse=True)
+def require_working_mount_namespaces():
+    """Report unavailable isolation rather than running mounts on the host.
+
+    A root UID and an installed unshare do not imply CAP_SYS_ADMIN. The tests
+    still run unchanged on a namespace-capable CI runner.
+    """
+    result = subprocess.run(['unshare', '--mount', '--fork', 'true'],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=10)
+    if result.returncode:
+        if os.environ.get('BIND_TEST_REQUIRE_MOUNT_NS') == '1':
+            pytest.fail('Required mount namespace isolation is unavailable: ' + result.stderr.strip())
+        pytest.skip('Mount namespaces unavailable in this environment: ' + result.stderr.strip())
+
 SETUP = r'''
 set -euo pipefail
 tool=$1
@@ -48,7 +63,7 @@ class TestConfigtoolWorkflows:
     @staticmethod
     def execute(tmp_path, body):
         result = subprocess.run(['unshare', '--mount', '--fork', 'bash', '-s', '--', str(SCRIPT), str(tmp_path)],
-                                input=SETUP + body, capture_output=True, text=True, timeout=30)
+                                input=SETUP + body, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=30)
         assert result.returncode == 0, result.stdout + result.stderr
 
     def test_backup_restore_preserves_unrelated_files(self, tmp_path):

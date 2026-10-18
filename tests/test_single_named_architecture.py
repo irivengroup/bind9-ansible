@@ -1,5 +1,6 @@
 """Regression tests for the intentionally non-modular named.conf architecture."""
 from pathlib import Path
+import sys
 import ast
 
 from jinja2 import Environment, StrictUndefined
@@ -77,7 +78,7 @@ def test_named_conf_render_secondary_front_only():
 
 
 def test_configuration_task_deploys_single_file_and_removes_old_fragments():
-    s = (ROLE / 'tasks/tasks.d/configuration.yml').read_text()
+    s = (ROLE / 'tasks/tasks.d/deploy/configuration.yml').read_text()
     assert 'src: named.conf.j2' in s
     assert 'dest: /etc/named.conf' in s
     assert 'no_log: true' in s
@@ -89,13 +90,13 @@ def test_backup_only_no_transaction_controller():
     assert not (ROLE / 'files/named-transaction.py').exists()
     assert not (ROLE / 'tasks/tasks.d/transaction.yml').exists()
     assert 'snapshot' not in (ROLE / 'files/bind-configtool.sh').read_text().lower()
-    assert '--force' in (ROLE / 'tasks/tasks.d/migration.yml').read_text()
-    assert 'bind_recovery_archive' in (ROLE / 'tasks/main.yml').read_text()
+    assert '--force' in (ROLE / 'tasks/tasks.d/deploy/migration.yml').read_text()
+    assert 'bind_recovery_archive' in (ROLE / 'tasks/tasks.d/deploy/main.yml').read_text()
 
 
 def test_recovery_uses_pre_deployment_archive():
-    s = (ROLE / 'tasks/main.yml').read_text()
-    assert s.index('tasks.d/migration.yml') < s.index('tasks.d/configuration.yml')
+    s = (ROLE / 'tasks/tasks.d/deploy/main.yml').read_text()
+    assert s.index('tasks.d/deploy/migration.yml') < s.index('tasks.d/deploy/configuration.yml')
     assert 'bind-configtool' in s and 'restore' in s
     assert 'bind_recovery_archive | basename' in s
     assert 'named-transaction' not in s
@@ -105,7 +106,7 @@ def test_reverse_serial_uses_backup_not_snapshot():
     s = (ROLE / 'files/reverse-serial.py').read_text()
     assert "parser.add_argument('--backup'" in s
     assert '--snapshot' not in s
-    assert "'--backup', bind_recovery_archive" in (ROLE / 'tasks/tasks.d/zones.yml').read_text()
+    assert "'--backup', bind_recovery_archive" in (ROLE / 'tasks/tasks.d/deploy/zones.yml').read_text()
 
 
 def test_only_new_inventory_architecture():
@@ -120,10 +121,13 @@ def test_only_new_inventory_architecture():
 
 def test_python_files_parse_on_python38_grammar():
     for p in list((ROLE / 'files').glob('*.py')) + list((ROLE / 'filter_plugins').glob('*.py')):
-        ast.parse(p.read_text(), filename=str(p), feature_version=(3, 8))
+        if sys.version_info < (3, 8):
+            ast.parse(p.read_text(), filename=str(p))
+        else:
+            ast.parse(p.read_text(), filename=str(p), feature_version=(3, 8))
 
 
 def test_no_config_include_directories_managed():
-    s = (ROLE / 'tasks/tasks.d/directories.yml').read_text()
+    s = (ROLE / 'tasks/tasks.d/deploy/directories.yml').read_text()
     assert '/etc/named/zones' not in s
     assert '/var/named/zones' in s

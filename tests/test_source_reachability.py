@@ -54,7 +54,7 @@ class TestSourceReachability:
         assert not [name for name, count in definitions.items() if occurrences[name] <= count]
 
     def test_every_task_file_is_reachable_from_the_role_entry_point(self):
-        pending = [self.ROLE / 'tasks/main.yml']
+        pending = [self.ROLE / 'tasks/main.yml', self.ROLE / 'tasks/manage.yml']
         visited = set()
         while pending:
             path = pending.pop()

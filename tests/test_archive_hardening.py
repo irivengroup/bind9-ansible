@@ -41,7 +41,7 @@ class ArchiveVerifier:
         helpers = text.split('# BEGIN ARCHIVE SAFETY HELPERS\n', 1)[-1].split('# END ARCHIVE SAFETY HELPERS\n', 1)[0] if '# BEGIN ARCHIVE SAFETY HELPERS\n' in text else ''
         program = 'set -Eeuo pipefail\nexport LC_ALL=C\nroot=$(dirname -- "$1")\n' + helpers + function + '\nverify "$1"\n'
         return subprocess.run(['bash', '-c', program, 'archive-test', str(self.path)],
-                              capture_output=True, text=True, timeout=10)
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=10)
 
 
 class TestArchiveRejection:

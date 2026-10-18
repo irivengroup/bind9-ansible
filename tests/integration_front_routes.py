@@ -39,7 +39,7 @@ class NativeRouteIntegration:
         """Run a native lab command and expose failures rather than guessing."""
         return subprocess.check_output(list(argv), universal_newlines=True).strip()
 
-    def role(self, tasks='tasks.d/front_return_routes.yml'):
+    def role(self, tasks='tasks.d/deploy/front_return_routes.yml'):
         playbook = self.workarea / 'play.yml'
         playbook.write_text(yaml.safe_dump([{'hosts': 'localhost', 'gather_facts': False,
             'vars': self.variables, 'tasks': [{'include_role': {'name': 'bind9', 'tasks_from': tasks}}]}]))
@@ -81,7 +81,7 @@ class NativeRouteIntegration:
         file = journal / 'plan.json'
         file.write_text(json.dumps(plan))
         file.chmod(0o600)
-        self.role('tasks.d/front_routes_recover.yml')
+        self.role('tasks.d/deploy/front_routes_recover.yml')
         assert json.loads(runtime_before) == json.loads(self.routes())
         assert profile_before == self.command('nmcli', '-g', 'ipv4.routes', 'connection', 'show', 'front')
         assert not journal.exists()

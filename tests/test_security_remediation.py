@@ -54,11 +54,11 @@ def test_record_validator_rejects_invalid_shapes_empty_data_and_control_characte
 
 
 def test_bind_restore_is_independent_of_committed_native_network_routes():
-    main = (ROOT / 'tasks/main.yml').read_text()
-    assert 'tasks.d/front_return_routes.yml' in main
+    main = (ROOT / 'tasks/tasks.d/deploy/main.yml').read_text()
+    assert 'tasks.d/deploy/front_return_routes.yml' in main
     assert 'bind-front-routes' not in main
     assert 'bind_recovery_archive | basename' in main
-    assert main.index('tasks.d/migration.yml') < main.index('tasks.d/configuration.yml')
+    assert main.index('tasks.d/deploy/migration.yml') < main.index('tasks.d/deploy/configuration.yml')
 
 
 def test_backups_have_collision_resistant_names_and_owned_cleanup():
@@ -75,7 +75,7 @@ def test_restorecon_succeeds_with_canonical_layout_and_no_legacy_directory(tmp_p
     This checks the missing-directory regression; it does not emulate SELinux
     policy or prove the labels applied by restorecon on RHEL.
     """
-    tasks = yaml.safe_load((ROOT / 'tasks/tasks.d/security.yml').read_text())
+    tasks = yaml.safe_load((ROOT / 'tasks/tasks.d/deploy/security.yml').read_text())
     task = next(task for task in tasks if task['name'] == 'Restore SELinux contexts')
     argv = task['ansible.builtin.command']['argv']
     (tmp_path / 'etc').mkdir()
@@ -86,6 +86,6 @@ def test_restorecon_succeeds_with_canonical_layout_and_no_legacy_directory(tmp_p
     double.write_text('for path do\n  [ "$path" = "-RF" ] && continue\n'
                       '  [ -e "$path" ] || exit 1\ndone\n')
     paths = [str(tmp_path / path.lstrip('/')) if path.startswith('/') else path for path in argv[1:]]
-    result = subprocess.run(['sh', str(double)] + paths, capture_output=True, text=True)
+    result = subprocess.run(['sh', str(double)] + paths, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     assert result.returncode == 0, 'restorecon must not target absent legacy files'
     assert set(argv[2:]) == {'/etc/named.conf', '/var/named', '/var/log/named'}

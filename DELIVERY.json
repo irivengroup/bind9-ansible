@@ -1,316 +1,186 @@
 {
   "project": "Bind9-Ansible",
-  "playbook": "playbooks/bind9-deploy.yml",
-  "logging_contract": {
-    "directory": "/var/log/named",
-    "owner": "named:named",
-    "directory_mode": "0750",
-    "prepared_file_mode": "0640",
-    "rotated_file_mode": "Native daemon behavior; protected by directory 0750",
-    "files": {
-      "default.log": {
-        "archives": 5,
-        "size_mib": 10
-      },
-      "security.log": {
-        "archives": 5,
-        "size_mib": 10
-      },
-      "xfer.log": {
-        "archives": 3,
-        "size_mib": 5
-      }
-    },
-    "query_logging": false,
-    "selinux_type": "named_log_t",
-    "persistent_fcontext": "/var/log/named(/.*)?",
-    "rollback_keeps_logs_and_context_rule": true,
-    "calendar_retention_guaranteed": false
+  "release": "2026.10.18-hibernate-deployment.1",
+  "source_archive": "Bind9-Ansible-management-fiabilite.zip",
+  "source_sha256": "212c5f983928d39972060f49a40134f36b95459199b6af823109e007d699344a",
+  "changed_files": [
+    ".github/workflows/ci.yml",
+    "DELIVERY.json",
+    "README.md",
+    "SOURCE-MANIFEST.sha256",
+    "docs/AUDIT_HIBERNATE_DEPLOYMENT.md",
+    "docs/FRONT_ROUTES.md",
+    "docs/HIBERNATE_DEPLOYMENT.md",
+    "docs/IMPACTS_MANAGEMENT.md",
+    "docs/MANAGEMENT.md",
+    "docs/OPERATIONS.md",
+    "docs/PREUVES_HIBERNATE_DEPLOYMENT.txt",
+    "docs/VALIDATION_FIABILITE_IO.md",
+    "docs/VALIDATION_MANAGEMENT.md",
+    "roles/bind9/defaults/main.yml",
+    "roles/bind9/files/bind-configtool.sh",
+    "roles/bind9/files/named-healthcheck.sh",
+    "roles/bind9/filter_plugins/soa_health.py",
+    "roles/bind9/tasks/main.yml",
+    "roles/bind9/tasks/tasks.d/deploy/guard.yml",
+    "roles/bind9/tasks/tasks.d/deploy/health.yml",
+    "roles/bind9/tasks/tasks.d/deploy/hibernate.yml",
+    "roles/bind9/tasks/tasks.d/deploy/lease_release.yml",
+    "roles/bind9/tasks/tasks.d/deploy/main.yml",
+    "roles/bind9/tasks/tasks.d/deploy/primary_readiness.yml",
+    "roles/bind9/tasks/tasks.d/deploy/seal.yml",
+    "roles/bind9/tasks/tasks.d/manage/main.yml",
+    "tests/integration_backup_container.py",
+    "tests/integration_hibernate.py",
+    "tests/integration_logging.py",
+    "tests/integration_loopback.py",
+    "tests/test_archive_hardening.py",
+    "tests/test_configtool_axfr.py",
+    "tests/test_configtool_workflows.py",
+    "tests/test_deployment_contract.py",
+    "tests/test_deployment_lock_ansible.py",
+    "tests/test_dns_probe_hardening.py",
+    "tests/test_firewall_ansible.py",
+    "tests/test_logging_ansible.py",
+    "tests/test_management_ansible.py",
+    "tests/test_management_batch_ansible.py",
+    "tests/test_native_loopback.py",
+    "tests/test_private_dnssec.py",
+    "tests/test_private_dnssec_hardening.py",
+    "tests/test_security_remediation.py",
+    "tests/test_single_named_architecture.py",
+    "tests/test_soa_health.py",
+    "tests/test_tsig_hardening.py",
+    "tests/test_tsig_provisioning.py"
+  ],
+  "new_production_dependencies": [],
+  "entrypoints": [
+    "playbooks/bind9-deploy.yml",
+    "playbooks/bind9-management.yml"
+  ],
+  "targets": {
+    "os": "RHEL 8",
+    "ansible": "2.9.27",
+    "python_target": "3.6.8"
   },
-  "bind_client_acl": "user_defined_clients",
-  "calculated_client_variable": "bind_allowed_clients",
-  "firewall_contract": {
-    "service": "dns",
-    "standard_ports": [
-      "53/udp",
-      "53/tcp"
-    ],
-    "scope": [
-      "runtime",
-      "permanent"
-    ],
-    "zones": "Existing FRONT/BACK interface zones; existing default for unbound interfaces",
-    "runtime_permanent_zone_drift_handled": true,
-    "reload_or_binding_changes": false,
-    "already_running_firewalld_required": true,
-    "installed_or_started_by_role": false,
-    "tag": "firewall",
-    "rollback_keeps_requested_authorizations": true,
-    "source_based_zones_and_custom_policies": "Require target-specific acceptance; not changed automatically"
-  },
-  "dnssec_contract": {
-    "variable": "bind_dnssec_active",
+  "public_contract": {
+    "parameter": "hibernate_deployment",
     "default": false,
-    "accepted": [
-      false,
-      true,
-      "auto",
-      "false",
-      "true"
+    "yaml_default": "no",
+    "enabled_value": "yes",
+    "removed_names": [
+      "force",
+      "deployment_lock",
+      "deployment_locked"
     ],
-    "bind_directives": {
-      "false": "no",
-      "true": "yes",
-      "auto": "auto"
-    },
-    "disabled_assets_deployed": false,
-    "previous_owned_dnssec_assets_removed_when_disabled": true,
-    "runtime_ipv4_and_rndc_independent": true,
-    "runtime_rollback": "Six root-owned regular files and prior timer state, captured in controller memory",
-    "persistent_runtime_backup_in_bind_archive": false,
-    "derived_policy_facts": false,
-    "activation": "public input equals auto, or bool(public input), after strict validation"
+    "persistent_seal": "/var/lib/Bind9-Ansible/.deployment.lock",
+    "existing_seal": "blocks deployment regardless of parameter until explicit operator removal",
+    "tag": "hibernate",
+    "tag_requires_explicit_yes": true,
+    "tag_changes": "private seal from canonical live file only; no DNS provisioning or runtime health qualification",
+    "shared_operation_lease": "always required for modifying role paths independently of hibernation"
   },
-  "client_contract": {
-    "inputs": [
-      "bind_cloud_clients",
-      "bind_internal_clients"
-    ],
-    "type": "flat lists of IPv4 addresses or canonical CIDRs",
-    "constraint": "Either list may be empty, never both, before any role tag changes the server",
-    "computed_union": "bind_allowed_clients",
-    "deduplication": "identical entries, cloud then internal",
-    "front_route_input": "bind_cloud_clients only",
-    "internal_routes_created": false,
-    "strict_source_destination_isolation": false,
-    "isolation_limit": "Without views, source and destination ACLs are independent; existing network must enforce arrival path"
-  },
-  "transport_contract": {
-    "startup": "Inherited native named.service ExecStart",
-    "dns_listen_ipv6": false,
-    "outgoing_families": [
-      "IPv4",
-      "IPv6"
-    ],
-    "forwarder_families": [
-      "IPv4",
-      "IPv6"
-    ],
-    "delegation_glue": [
-      "A",
-      "AAAA"
-    ],
-    "client_and_return_route_family": "IPv4",
-    "system_ipv6_configuration_changed": false,
-    "external_options_prerequisite": "No contradicting -4/-6 option in external service options or drop-ins"
-  },
-  "release": "2026.10.16-durcissement-securite-routes",
-  "source_archive": "Bind9-Ansible-readme-exploitation.zip",
-  "source_sha256": "918b49f30fa9cbcb18842bf9862e3c82ff295fee5d2ce6b3a81b0b877cc75262",
-  "changes": {
-    "modified": [
-      ".github/workflows/ci.yml",
-      "README.md",
-      "docs/FRONT_ROUTES.md",
-      "docs/OPERATIONS.md",
-      "roles/bind9/files/bind-configtool.sh",
-      "roles/bind9/files/bind-private-dnssec.py",
-      "roles/bind9/files/tsig-secret.py",
-      "roles/bind9/tasks/main.yml",
-      "roles/bind9/tasks/tasks.d/front_return_routes.yml",
-      "roles/bind9/tasks/tasks.d/front_routes_compare.yml",
-      "roles/bind9/tasks/tasks.d/front_routes_ipv4.yml",
-      "roles/bind9/tasks/tasks.d/front_routes_parse_profile.yml",
-      "roles/bind9/tasks/tasks.d/front_routes_plan.yml",
-      "roles/bind9/tasks/tasks.d/front_routes_recover.yml",
-      "roles/bind9/tasks/tasks.d/front_routes_rollback.yml",
-      "roles/bind9/tasks/tasks.d/front_routes_validate_journal.yml",
-      "roles/bind9/tasks/tasks.d/front_routes_verify.yml",
-      "roles/bind9/tasks/tasks.d/migration.yml",
-      "roles/bind9/tasks/tasks.d/path_safety.yml",
-      "roles/bind9/tasks/tasks.d/runtime_snapshot.yml",
-      "roles/bind9/tasks/tasks.d/tsig.yml",
-      "tests/fixtures/native_network_cli.py",
-      "tests/test_configtool_axfr.py"
-    ],
-    "added": [
-      "docs/DURCISSEMENT_SECURITE.md",
-      "roles/bind9/tasks/tasks.d/front_routes_before_write.yml",
-      "roles/bind9/tasks/tasks.d/front_routes_policy.yml",
-      "roles/bind9/tasks/tasks.d/front_routes_ssh_normalize.yml",
-      "tests/test_archive_hardening.py",
-      "tests/test_configtool_workflows.py",
-      "tests/test_front_route_hardening.py",
-      "tests/test_front_route_hardening_ansible.py",
-      "tests/test_path_hardening.py",
-      "tests/test_private_dnssec_hardening.py",
-      "tests/test_tsig_hardening.py"
-    ],
-    "removed": [],
-    "unchanged_files": 124,
-    "regenerated_metadata": [
-      "DELIVERY.json",
-      "SOURCE-MANIFEST.sha256"
-    ]
-  },
-  "checks": {
+  "validation": {
     "status": "EXÉCUTÉ",
-    "fast_tests_per_engine": 548,
-    "engines": [
-      "Ansible 2.9.27 / Jinja 2.10.3",
-      "Ansible 2.9.27 / Jinja 3.0.3"
+    "global_suite": {
+      "passed": 1046,
+      "skipped": 5
+    },
+    "lock_route_suite": {
+      "passed": 99,
+      "skipped": 0
+    },
+    "last_guards": {
+      "passed": 19,
+      "skipped": 0
+    },
+    "scope_note": "Overlapping suites. Last standalone pending-route guard scenario added after global collection and covered by final targeted runs.",
+    "management_suite": {
+      "passed": 352,
+      "skipped": 0
+    },
+    "management_coverage_percent": 98.20493642483171,
+    "management_statements": 1337,
+    "management_missing": 24,
+    "dns_secret_suite": {
+      "passed": 265,
+      "skipped": 0
+    },
+    "dns_secret_coverage_percent": 99.74489795918367,
+    "dns_secret_statements": 392,
+    "dns_secret_missing": 1,
+    "minimum_coverage_percent": 98,
+    "native_hibernation": {
+      "configurations_loaded": 108,
+      "ansible_native_loopback_probes": 8,
+      "periodic_monitor_wire_check": true,
+      "systemctl_monitor_double": true,
+      "hibernate_public_playbook_native_checker": true,
+      "check_then_create_then_idempotent": true,
+      "disabled_setting_cannot_bypass_seal": true,
+      "native_files_unchanged": true
+    },
+    "native_management": [
+      {
+        "transactions": 12,
+        "dnssec": "no",
+        "native_validation_reload_wire_dns": true,
+        "real_archives": true,
+        "unavailable_forwarder_rollback_after_cached_answer": true,
+        "mixed_batch_transactions": 2,
+        "joint_batch_rollback": true,
+        "invalid_late_batch_rdata_refused": true,
+        "catalogs_native": true,
+        "selinux_double": true
+      },
+      {
+        "transactions": 12,
+        "dnssec": "auto",
+        "native_validation_reload_wire_dns": true,
+        "real_archives": true,
+        "unavailable_forwarder_rollback_after_cached_answer": true,
+        "mixed_batch_transactions": 2,
+        "joint_batch_rollback": true,
+        "invalid_late_batch_rdata_refused": true,
+        "catalogs_native": true,
+        "selinux_double": true
+      }
     ],
-    "controller_python": "3.8.20",
-    "additional_privileged_route_workflows": 18,
-    "additional_dnssec_workflows": 8,
-    "additional_isolated_backup_workflows": 5,
-    "distinct_pytest_cases_executed_this_revision": 579,
-    "native_jinja_route_subset": 90,
-    "coverage": {
-      "covered_lines": 389,
-      "num_statements": 391,
-      "percent_covered": 99.48849104859335,
-      "percent_covered_display": "99",
-      "missing_lines": 2,
-      "excluded_lines": 0,
-      "scope": "Five measured Python modules; not YAML/system coverage",
-      "threshold": 98
-    },
-    "syntax_inventories_per_engine": 3,
-    "preflight_hosts_per_engine": 12,
-    "source_audit": {
-      "assets_referenced": 12,
-      "task_files_referenced": 38,
-      "handlers_notified": 1,
-      "defaults_consumed": 11,
-      "filters_consumed": 11,
-      "yaml_files_parsed": 66,
-      "restorecon_baseline_exit": 1,
-      "restorecon_current_exit": 0
-    },
-    "documentation": {
-      "status": "EXÉCUTÉ",
-      "links": 56,
-      "explicit_anchors": 16,
-      "defaults": 11,
-      "tags": [
-        "always",
-        "backup",
-        "configure",
-        "deploy",
-        "firewall",
-        "health",
-        "install",
-        "monitor",
-        "preflight",
-        "records",
-        "routes",
-        "routes-recover",
-        "services",
-        "validate",
-        "zones"
+    "native_backups": {
+      "existing_workflow_assertions_executed": [
+        "test_backup_restore_preserves_unrelated_files",
+        "test_active_named_is_rejected_before_overwriting_configuration",
+        "test_symlink_destination_never_deletes_an_external_owned_zone",
+        "test_general_directory_is_not_chmodded_as_backup_root",
+        "test_label_failure_is_fatal_and_preserves_safety_archive"
       ],
-      "bash_examples_parsed": 23,
-      "operational_commands_executed": false,
-      "yaml_snippets": 5,
-      "inventory_hosts": 2,
-      "actual_role_assertion_cases": 3,
-      "target_facts_simulated": true,
-      "target_changes": false
+      "isolation": "disposable standard container root; no nested mounts",
+      "systemd_bind_selinux_doubles": true
     },
-    "pyflakes_bandit_python_compile_bash_syntax": "EXÉCUTÉ",
-    "dns": {
-      "el8-dns": {
-        "configurations_loaded": 109,
-        "dns_checks": 282,
-        "native_files_unchanged": true,
-        "ipv6_udp_tcp_forwarding": true,
-        "ipv6_dns_listener_absent": true,
-        "ansible_loopback_checks": 8,
-        "ansible_primary_soa_checks": 4,
-        "ansible_deployed_configuration_checked": true,
-        "direct_wildcard_transfer_rejected": true
-      },
-      "dns-integration": {
-        "configurations_loaded": 109,
-        "dns_checks": 282,
-        "native_files_unchanged": true,
-        "ipv6_udp_tcp_forwarding": true,
-        "ipv6_dns_listener_absent": true,
-        "ansible_loopback_checks": 8,
-        "ansible_primary_soa_checks": 4,
-        "ansible_deployed_configuration_checked": true,
-        "direct_wildcard_transfer_rejected": true
-      }
-    },
-    "networkmanager_isolated": {
-      "networkmanager": "1.46.0",
-      "ansible_workflows": 4,
-      "idempotence": true,
-      "selective_recovery": true,
-      "profile_reload_persistence": true,
-      "pending_dns_unapplied": true,
-      "original_routes_back_adm_and_default_preserved": true
-    },
-    "python36_isolated": {
-      "tsig_atomic_create_reuse": true,
-      "private_dnssec_reconciles": true,
-      "python": "3.6.8",
-      "all_production_python_compiles": true,
-      "routing_python_absent": true,
-      "dual_stack_forwarder_validation": true,
-      "ipv6_glue": true
-    },
-    "before_after_ipv4_json": {
-      "baseline": {
-        "accepted": false,
-        "failed_task": "Reject invalid IPv4 observations before any routing write"
-      },
-      "current": {
-        "accepted": true
-      }
-    },
-    "before_after_tsig_parent": {
-      "baseline": {
-        "refusal_without_side_effect": false
-      },
-      "current": {
-        "refusal_without_side_effect": true
-      }
-    },
-    "native_ipv6_ssh_regression": {
-      "before_failed": 3,
-      "after_passed": 3
-    },
-    "rhel_actual_deployment": "NON EXÉCUTÉ",
-    "production_qualification": "NON TERMINÉE",
-    "missing_checks_reason_procedure_prerequisites_expected_risk": "docs/DURCISSEMENT_SECURITE.md"
+    "syntax_checks": 6,
+    "preflight_inventories": 3,
+    "preflight_hosts": 12,
+    "static_analysis": [
+      "Bandit 1.7.10",
+      "Pyflakes 3.2.0"
+    ],
+    "production_bytes_compared": 67,
+    "report": "docs/AUDIT_HIBERNATE_DEPLOYMENT.md",
+    "proof": "docs/PREUVES_HIBERNATE_DEPLOYMENT.txt"
   },
-  "impact_report": "docs/DURCISSEMENT_SECURITE.md",
-  "documentation": "README.md",
-  "security_contract": {
-    "routes": "Native YAML/Jinja only; checked observations; revalidated under lock; exact identity before selective rollback; legacy journal schema retained",
-    "gateway_configuration_changed": false,
-    "tsig": "Private checked directory descriptors; no pre-check chmod; bounded nonblocking file reads and lock; atomic complete publication",
-    "archives": "Private single-link files; exact single digest; complete canonical TAR; inactive named required; failed safety recovery retained",
-    "private_dnssec_reader": "Nonblocking open and single regular link required",
-    "no_production_dependency_added": true
-  },
-  "inherited_validation": {
-    "source_archive": "Bind9-Ansible-journalisation-selinux-firewalld.zip",
-    "source_sha256": "fb44f93aaf2cc19be98d48555c2c93388a2655a526eccb707625a010b672489d",
-    "rerun_this_revision": false,
-    "logging_selinux_workflows": 12,
-    "firewall_workflows": 8,
-    "reason": "Relevant logging, SELinux and firewall task sources unchanged"
-  },
-  "archive_checks": {
-    "status": "EXÉCUTÉ",
-    "manifest": true,
-    "crc": true,
-    "source_only": true,
-    "markdown_links": true,
-    "same_runtime_reproducibility": true,
-    "exact_diff_against_verified_source": true
+  "preserved": [
+    "management engine and module",
+    "inventories",
+    "DNS templates",
+    "native FRONT route algorithm"
+  ],
+  "production_qualification": {
+    "status": "NON TERMINÉE",
+    "remaining": [
+      "user RHEL pair deployment",
+      "real systemd/SELinux/firewalld/NetworkManager",
+      "physical storage/crash/load qualification",
+      "remote CI matrix and long DNSSEC lifecycle"
+    ]
   }
 }

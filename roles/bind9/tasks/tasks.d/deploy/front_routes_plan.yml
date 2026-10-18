@@ -1,7 +1,7 @@
 ---
 # All calculations use standard Ansible/Jinja expressions; no custom filter or package.
 - name: Parse FRONT profile before planning additions
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_parse_profile.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_parse_profile.yml'
   vars:
     bind_front_routes_text: '{{ bind_front_profile.results[1].stdout }}'
 
@@ -25,12 +25,12 @@
   loop: '{{ bind_front_kernel.results[1].stdout | from_json }}'
 
 - name: Validate complete standard IPv4 policy before planning writes
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_policy.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_policy.yml'
   vars:
     bind_front_rule_observation: '{{ bind_front_kernel.results[1].stdout }}'
 
 - name: Normalize the actual SSH peer for FRONT protection
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ssh_normalize.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_ssh_normalize.yml'
 
 - name: Require an explicit IPv4 gateway on the active FRONT profile
   ansible.builtin.assert:
@@ -42,7 +42,7 @@
       No routes were changed. Inspect this profile only; no default/global gateway fallback is used.
 
 - name: Normalize client networks, gateway, runtime and protected ranges
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_ipv4.yml'
   vars:
     bind_front_ipv4_context: 'FRONT plan: clients, ipv4.gateway, inventory ADM/BACK, SSH peer and kernel destinations'
     bind_front_ipv4_values: >-
@@ -167,4 +167,4 @@
     bind_front_plan: '{{ ((bind_front_plan_json | from_json if bind_front_plan_json is string else bind_front_plan_json)).plan }}'
 
 - name: Validate the recovery contract before any mutation
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_validate_journal.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_validate_journal.yml'

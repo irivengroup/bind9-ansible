@@ -9,7 +9,7 @@ class FindCompatibilityTests(unittest.TestCase):
 
     def test_reverse_discovery_uses_legacy_compatible_parameters(self):
         """Reject the unsupported argument while retaining the ownership marker."""
-        source = (Path(__file__).resolve().parents[1] / 'roles/bind9/tasks/main.yml').read_text(encoding='utf-8')
+        source = (Path(__file__).resolve().parents[1] / 'roles/bind9/tasks/tasks.d/deploy/main.yml').read_text(encoding='utf-8')
         block = source.split('  ansible.builtin.find:', 1)[1].split('  register:', 1)[0]
         self.assertIsNone(re.search(r'^\s*read_whole_file\s*:', block, re.MULTILINE))
         self.assertIn('paths: /var/named/zones', block)

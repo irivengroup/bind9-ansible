@@ -29,7 +29,7 @@
   changed_when: false
 
 - name: Require the unchanged classic policy before FRONT commit
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_policy.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_policy.yml'
   vars:
     bind_front_rule_observation: '{{ bind_front_verified_rules.stdout }}'
 
@@ -40,7 +40,7 @@
   changed_when: false
 
 - name: Require all original routes and intended additions to remain intact
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_compare.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_compare.yml'
   vars:
     bind_front_compare_profile: '{{ bind_front_verified_profile.stdout }}'
     bind_front_compare_runtime: '{{ bind_front_verified_kernel.stdout }}'

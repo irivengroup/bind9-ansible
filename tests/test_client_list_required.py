@@ -14,7 +14,7 @@ class TestClientList:
 
     @classmethod
     def validate(cls, clients, internal=None):
-        tasks = yaml.safe_load((cls.ROOT / 'roles/bind9/tasks/tasks.d/validate.yml').read_text())
+        tasks = yaml.safe_load((cls.ROOT / 'roles/bind9/tasks/tasks.d/deploy/validate.yml').read_text())
         names = {'Validate template input types before rendering',
                  'Require at least one configured DNS client network'}
         scope = dict(bind_cloud_clients=clients, bind_internal_clients=[] if internal is None else internal,
@@ -23,7 +23,7 @@ class TestClientList:
                      bind_front_ip='192.0.2.11', bind_back_ip='10.20.1.11')
         runner = TaskExpressions(scope)
         runner.run('clients.yml')
-        runner.run('validate.yml', tasks=[t for t in tasks if t['name'] in names])
+        runner.run('deploy/validate.yml', tasks=[t for t in tasks if t['name'] in names])
         return runner.variables
 
     @pytest.mark.parametrize('clients', [['192.0.2.0/24'], ['10.150.1.23'],
@@ -71,6 +71,6 @@ class TestClientList:
         assert defaults['bind_internal_clients'] == []
 
     def test_union_is_prepared_for_all_role_tags_before_template_validation(self):
-        main = yaml.safe_load((self.ROOT / 'roles/bind9/tasks/main.yml').read_text())
-        assert main[1]['ansible.builtin.import_tasks'] == 'tasks.d/clients.yml'
+        main = yaml.safe_load((self.ROOT / 'roles/bind9/tasks/tasks.d/deploy/main.yml').read_text())
+        assert main[1]['ansible.builtin.import_tasks'] == '{{ role_path }}/tasks/tasks.d/clients.yml'
         assert main[1]['tags'] == ['always']

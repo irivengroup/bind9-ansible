@@ -1,0 +1,5 @@
+---
+- name: Resolve the existing local site identities without provisioning anything
+  ansible.builtin.import_tasks: tasks.d/site_peers.yml
+- name: Execute the dedicated management workflow
+  ansible.builtin.import_tasks: tasks.d/manage/main.yml

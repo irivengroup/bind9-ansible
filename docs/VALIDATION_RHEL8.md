@@ -2,11 +2,11 @@
 
 Projet **Bind9-Ansible**, playbook `playbooks/bind9-deploy.yml`, cible RHEL 8, Ansible 2.9 et Python serveur 3.6.8. Source de cette livraison : `Bind9-Ansible-correction-controles-dns.zip`, SHA-256 `62fcc29eb0c4bd3a8688ab3c0909f888d8ee3556be5fbc80fd8d2e104a60f918`. Le fichier original sur D: n’a pas été relu. Différences et preuves exactes : `DELIVERY.json` ; contenu : `SOURCE-MANIFEST.sha256`.
 
-Le routage a été remplacé par des tâches Ansible natives sans dépendance ajoutée. Le filtre Python correspondant a été supprimé ; les scripts nécessaires au DNS restent présents. Structure BIND sans vues, ACL techniques, zones natives et tags sont conservés ; DNSSEC devient optionnel, défaut `false` ; les inventaires déclarent deux listes plates IPv4 ; `bind_allowed_clients` est leur fusion calculée, jamais une troisième entrée. Les corrections de cycle de vie de la livraison précédente restent couvertes. Voir [VALIDATION_ROUTES_NATIVES.md](VALIDATION_ROUTES_NATIVES.md) et [VERIFICATION_GLOBALE.md](VERIFICATION_GLOBALE.md).
+Le routage a été remplacé par des tâches Ansible natives sans dépendance ajoutée. Le filtre Python correspondant a été supprimé ; les scripts nécessaires au DNS restent présents. Structure BIND sans vues, ACL techniques, zones natives et tags sont conservés ; DNSSEC est configurable, défaut actuel `auto` ; les inventaires déclarent deux listes plates IPv4 ; `bind_allowed_clients` est leur fusion calculée, jamais une troisième entrée. Les corrections de cycle de vie de la livraison précédente restent couvertes. Voir [VALIDATION_ROUTES_NATIVES.md](VALIDATION_ROUTES_NATIVES.md) et [VERIFICATION_GLOBALE.md](VERIFICATION_GLOBALE.md).
 
 ## Contrôles du durcissement
 
-`bind_dnssec_active` est l’unique entrée DNSSEC, défaut `false`. Les faits
+`bind_dnssec_active` est l’unique entrée DNSSEC, défaut actuel `auto`. Les faits
 intermédiaires et leur assertion sont supprimés ; les décisions utilisent
 l’entrée validée. Les contrôles `boolean` et `integer` nécessitant Jinja 2.11
 sont remplacés par `type_debug`, y compris dans le routage. Les valeurs
@@ -37,7 +37,7 @@ Les dépréciations du vieux runtime sont affichées, pas masquées.
 | Python 3.6.8 extrait EL8 | **EXÉCUTÉ** | Compilation de tous les Python de production restants et réconciliation DNSSEC isolée ; aucun module Ansible/DNF exécuté sur un serveur RHEL |
 | Qualité | **EXÉCUTÉ** | Pyflakes, Bandit, compilation, syntaxe shell ; 62 YAML, 34 fichiers de tâches accessibles, 12 assets, un handler, onze variables par défaut et 11 filtres restants référencés |
 | IPv6 sortant / écoute | **EXÉCUTÉ** | Client IPv4 vers upstream IPv6, UDP et repli TCP prouvés par le journal upstream ; absence de listener DNS IPv6 en UDP/TCP, processus sans famille forcée |
-| Exemples DNS | **EXÉCUTÉ** | Deux zones forwardées, validation désactivée par défaut, rendus des deux rôles contrôlés par named-checkconf -z EL8 |
+| Exemples DNS | **EXÉCUTÉ** | Campagne antérieure : deux zones forwardées, validation désactivée, rendus des deux rôles contrôlés par named-checkconf -z EL8. Le défaut actuel `auto` et ses preuves sont décrits dans [DEFAUT_DNSSEC_AUTO.md](DEFAUT_DNSSEC_AUTO.md). |
 
 La suite complète et ses nombres exacts figurent dans `DELIVERY.json`. Les binaires EL8 sont des RPM AlmaLinux extraits sans installation/scriptlets et exécutés sous WSL Ubuntu avec leurs bibliothèques. La crypto-policy DEFAULT de laboratoire n’est pas la preuve d’une politique effective RHEL/FIPS. Les unités systemd, SELinux et le réseau de production ne sont pas qualifiés par ces essais.
 
@@ -55,7 +55,7 @@ Prérequis : cible de recette avec sauvegardes BIND et runtime, RNDC local,
 ancres officielles actualisées pour les modes activés. Procédure : appliquer
 successivement `false`, `auto`, `true`, puis `false` ; inspecter `systemctl cat
 named`, vérifier les fichiers gérés et l’état du timer, les réponses DNS et
-le défaut `false` après restart. Injecter ensuite un échec contrôlé après
+le mode explicite `false` après restart, puis le défaut `auto` sans surcharge. Injecter ensuite un échec contrôlé après
 configuration : les fichiers, permissions, activation et activité du timer
 doivent revenir à leur état initial. Risques : comportement systemd cible,
 politique SELinux, confiance/rotation réelle des ancres et coupure du contrôleur.

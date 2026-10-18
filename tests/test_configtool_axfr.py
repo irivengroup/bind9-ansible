@@ -17,7 +17,7 @@ def invoke(tmp_path, dig_body, signed_key=True, key_mode=0o600):
     env = dict(os.environ, PATH=str(tmp_path) + os.pathsep + os.environ['PATH'])
     return subprocess.run(['bash', str(SCRIPT), 'check-front-axfr', '192.0.2.1',
                            'example.test', '192.0.2.20', str(key)],
-                          capture_output=True, text=True, env=env)
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, env=env)
 
 
 def test_explicit_refusal_for_both(tmp_path):

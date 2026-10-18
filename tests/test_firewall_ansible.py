@@ -90,7 +90,7 @@ class FirewallRunner:
         for name in ('firewall-cmd', 'ip'):
             (binaries / name).symlink_to(double)
         plays = []
-        source_tasks = yaml.safe_load((ROOT / 'roles/bind9/tasks/tasks.d/firewall.yml').read_text())
+        source_tasks = yaml.safe_load((ROOT / 'roles/bind9/tasks/tasks.d/deploy/firewall.yml').read_text())
         for repeat in (False, True):
             tasks = source_tasks
             if repeat:
@@ -105,7 +105,7 @@ class FirewallRunner:
                            BIND_FIREWALL_TEST_STATE=str(path), ANSIBLE_CONFIG=str(ROOT / 'ansible.cfg'),
                            ANSIBLE_JINJA2_NATIVE=str(native).lower())
         result = subprocess.run(['ansible-playbook', '-i', 'localhost,', str(playbook)], env=environment,
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=120)
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, timeout=120)
         after = json.loads(path.read_text())
         mutations = [args for args in after['calls'] if '--add-service=dns' in args]
         assert after['zones'] == state['zones'] and after['addresses'] == state['addresses']

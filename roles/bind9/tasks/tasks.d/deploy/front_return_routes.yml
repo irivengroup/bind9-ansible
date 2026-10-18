@@ -14,7 +14,7 @@
   check_mode: false
 
 - name: Normalize live primary and secondary IPv4 addresses
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_ipv4.yml'
   vars:
     bind_front_ipv4_context: 'ip -j -4 address show and inventory FRONT/BACK/ADM'
     bind_front_ipv4_values: >-
@@ -112,7 +112,7 @@
       if (ansible_connection | default('ssh')) != 'local' else '' }}
 
 - name: Build and validate the route plan using native Ansible tasks
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_plan.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_plan.yml'
 
 - name: Show calculated FRONT route plan with verbose diagnostics
   ansible.builtin.debug:
@@ -195,7 +195,7 @@
         group: root
 
     - name: Revalidate the route baseline while holding the operation lock
-      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_before_write.yml'
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_before_write.yml'
       environment: {LC_ALL: C}
 
     - name: Mark route additions pending until their owning operation succeeds
@@ -218,15 +218,15 @@
       loop: '{{ bind_front_plan.runtime_additions }}'
 
     - name: Verify route persistence and preservation
-      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_verify.yml'
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_verify.yml'
 
     - name: Commit successful route operation
-      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_commit.yml'
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_commit.yml'
       when: not (bind_front_routes_defer_commit | default(false) | bool)
 
   rescue:
     - name: Roll back owned route additions while preserving the original failure
-      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_rollback.yml'
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_rollback.yml'
       when:
         - bind_front_lock_acquired is defined and bind_front_lock_acquired is succeeded
         - bind_front_route_transaction_pending | default(false) | bool
@@ -248,7 +248,7 @@
     - bind_front_plan.profile_additions | length > 0 or bind_front_plan.runtime_additions | length > 0
 
 - name: Verify existing return paths when no modification is needed
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_verify.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_verify.yml'
   when:
     - not ansible_check_mode
     - bind_front_plan.profile_additions | length == 0

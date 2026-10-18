@@ -48,7 +48,7 @@
   loop: '{{ bind_front_plan.profile_additions + bind_front_plan.runtime_additions }}'
 
 - name: Normalize journal addresses before ownership checks
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_ipv4.yml'
   vars:
     bind_front_ipv4_context: 'saved FRONT recovery journal addresses and snapshots'
     bind_front_ipv4_values: >-

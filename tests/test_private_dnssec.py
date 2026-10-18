@@ -196,11 +196,11 @@ def test_single_client_acl_preserves_dnssec_and_front_only_recursion(clients):
 
 
 def test_start_reload_timer_and_health_order_are_integrated():
-    tasks = yaml.safe_load((ROLE / 'tasks/main.yml').read_text())
+    tasks = yaml.safe_load((ROLE / 'tasks/tasks.d/deploy/main.yml').read_text())
     deployment = next(task for task in tasks if task['name'] == 'Apply DNS changes with rollback on failure')
     imports = [task.get('ansible.builtin.import_tasks') for task in deployment['block']]
-    assert imports.index('tasks.d/dnssec_install.yml') < imports.index('tasks.d/verify.yml')
-    assert imports.index('tasks.d/service.yml') < imports.index('tasks.d/dnssec_activate.yml') < imports.index('tasks.d/health.yml')
+    assert imports.index('{{ role_path }}/tasks/tasks.d/dnssec_install.yml') < imports.index('{{ role_path }}/tasks/tasks.d/deploy/verify.yml')
+    assert imports.index('{{ role_path }}/tasks/tasks.d/deploy/service.yml') < imports.index('{{ role_path }}/tasks/tasks.d/dnssec_activate.yml') < imports.index('{{ role_path }}/tasks/tasks.d/deploy/health.yml')
     dropin = (ROLE / 'templates/named-dnssec-override.j2').read_text()
     assert 'ExecStartPost=' in dropin and 'ExecReload=' in dropin
     runtime = (ROLE / 'templates/named-runtime-override.j2').read_text()
@@ -216,6 +216,6 @@ def test_script_cli_entrypoint_runs_real_files_without_rndc_when_policy_is_empty
     config = tmp_path / 'named.conf'
     config.write_text('options {};\n')
     result = subprocess.run([sys.executable, str(SCRIPT), '--config', str(config),
-                             '--state', str(tmp_path / 'state/owned.json')], capture_output=True, text=True)
+                             '--state', str(tmp_path / 'state/owned.json')], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {'renewed': [], 'removed': []}

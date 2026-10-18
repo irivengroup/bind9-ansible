@@ -1,0 +1,35 @@
+---
+# Never recursively delete a replacement lease or recovery evidence.
+# Cooperating deploy/management operations all acquire the same mkdir lease.
+- name: Preserve the operation lease if recovery did not complete
+  ansible.builtin.assert:
+    that:
+      - not (bind_deployment_retain_lease | default(false) | bool)
+      - not (bind_front_route_transaction_pending | default(false) | bool)
+    fail_msg: 'Deployment recovery is incomplete; the operation lease is retained. Inspect DNS, FRONT journals and backups before explicit operator recovery.'
+
+- name: Observe the operation lease before release without following links
+  ansible.builtin.stat:
+    path: /var/lib/Bind9-Ansible/.operation.lock
+    follow: false
+  register: bind_deployment_release_lease
+
+- name: Require the exact private directory acquired by this invocation
+  ansible.builtin.assert:
+    that:
+      - bind_deployment_owned_lease is defined and bind_deployment_owned_lease.stat is defined
+      - bind_deployment_release_lease.stat.exists and (bind_deployment_release_lease.stat.isdir | default(false))
+      - not (bind_deployment_release_lease.stat.islnk | default(false))
+      - bind_deployment_release_lease.stat.uid == 0 and bind_deployment_release_lease.stat.mode == '0700'
+      - bind_deployment_release_lease.stat.dev == bind_deployment_owned_lease.stat.dev
+      - bind_deployment_release_lease.stat.inode == bind_deployment_owned_lease.stat.inode
+    fail_msg: 'Operation lease disappeared or ownership changed; preserve it and inspect the host before recovery.'
+
+- name: Remove only our empty operation lease without recursive deletion
+  ansible.builtin.command:
+    argv: [rmdir, /var/lib/Bind9-Ansible/.operation.lock]
+  changed_when: false
+
+- name: Clear operation lease ownership after successful release
+  ansible.builtin.set_fact:
+    bind_deployment_lease_acquired: false

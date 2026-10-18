@@ -40,18 +40,18 @@ class DnssecRuntimeSandbox:
             tasks=yaml.safe_load(text)
             self.adapt(tasks)
             path.write_text(yaml.safe_dump(tasks,sort_keys=False))
-        main=yaml.safe_load((self.role/'tasks/main.yml').read_text())
+        main=yaml.safe_load((self.role/'tasks/tasks.d/deploy/main.yml').read_text())
         deployment=next(t for t in main if 'rescue' in t)
         selected={'tasks.d/named_runtime.yml',
                   'tasks.d/dnssec_disable.yml','tasks.d/dnssec_install.yml','tasks.d/dnssec_activate.yml'}
-        block=[t for t in deployment['block'] if t.get('ansible.builtin.import_tasks') in selected]
+        block=[t for t in deployment['block'] if t.get('ansible.builtin.import_tasks', '').replace('{{ role_path }}/tasks/', '') in selected]
         block.append({'name':'Inject a post-configuration failure','ansible.builtin.fail':{'msg':'Controlled runtime rollback test'},'when':'test_rollback'})
         names={'Inspect managed renewal units before DNS restoration','Pause private DNSSEC renewal during restoration',
                'Stop named before restoring files and journals','Restore managed runtime files from before the failed deployment',
                'Restart restored BIND configuration','Resume previously active private DNSSEC renewal'}
         rescue=[t for t in deployment['rescue'] if t['name'] in names]
         rescue.append({'ansible.builtin.set_fact':{'test_runtime_restored':True}})
-        snapshot=next(t for t in main if t.get('ansible.builtin.import_tasks')=='tasks.d/runtime_snapshot.yml')
+        snapshot=next(t for t in main if t.get('ansible.builtin.import_tasks')=='{{ role_path }}/tasks/tasks.d/runtime_snapshot.yml')
         program=[{'ansible.builtin.import_tasks':'tasks.d/dnssec_settings.yml'}, snapshot,
                  {'name':'Exercise actual runtime transaction','block':block,'rescue':rescue}]
         (self.role/'tasks/test_runtime.yml').write_text(yaml.safe_dump(program,sort_keys=False))
@@ -84,12 +84,14 @@ class DnssecRuntimeSandbox:
         return {p.relative_to(self.tree).as_posix():(p.read_bytes(),p.stat().st_mode&0o777)
                 for p in self.tree.rglob('*') if p.is_file() and p.name!='rndc.key'}
 
-    def run(self,mode,rollback=False):
+    def run(self,mode='__default__',rollback=False):
         play=[{'hosts':'localhost','connection':'local','gather_facts':False,
                'vars':{'ansible_python_interpreter':str(self.interpreter),'bind_dnssec_active':mode,
                        'test_rollback':rollback,'bind_rollback':{'rc':0}},
                'tasks':[{'include_role':{'name':'bind9','tasks_from':'test_runtime.yml'}},
                         {'assert':{'that':['test_runtime_restored | default(false) == test_rollback']}}]}]
+        if mode == '__default__':
+            play[0]['vars'].pop('bind_dnssec_active')
         path=self.folder/'play.yml'
         path.write_text(yaml.safe_dump(play))
         result=subprocess.run(['ansible-playbook','-i','localhost,',str(path)],env=self.environment,
@@ -124,10 +126,12 @@ class TestDnssecRuntime:
         sandbox.run(False)
         assert set(sandbox.assets())=={'etc/systemd/system/named.service.d/bind9-runtime.conf'}
 
-    @pytest.mark.parametrize('mode',[False,True,'auto'])
+    @pytest.mark.parametrize('mode',[False,True,'auto','__default__'])
     def test_fresh_modes_and_file_idempotence(self,tmp_path,mode):
         sandbox=DnssecRuntimeSandbox(tmp_path)
-        sandbox.run(mode)
+        state=sandbox.run(mode)
+        if mode == '__default__':
+            assert state['units']['named-private-dnssec.timer'] == {'active':True,'enabled':True}
         files=sandbox.assets()
         paths=set(files)
         assert 'etc/systemd/system/named.service.d/bind9-runtime.conf' in paths

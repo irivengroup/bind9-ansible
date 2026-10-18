@@ -42,10 +42,11 @@ son contrat : entier ou chaîne décimale de 1 à 65535, jamais un booléen.
 Les délégations privées utilisent A pour IPv4 et AAAA pour IPv6.
 
 ```yaml
-bind_dnssec_active: false
+bind_dnssec_active: auto
 bind_forward_zones:
   - domain: corp.example.test
     policy: only
+    dnssec_validate: false
     forwarders:
       - address: 192.0.2.53
         port: 53

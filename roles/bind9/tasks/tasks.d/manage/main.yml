@@ -1,0 +1,103 @@
+---
+- name: Validate the management platform and explicit request envelope
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == 'RedHat' and (ansible_distribution_major_version | int) >= 8
+      - bind_manage is defined and bind_manage is mapping
+      - bind_manage.resource | default('') in ['option', 'zone', 'record', 'batch']
+      - >-
+        (bind_manage.resource | default('') == 'batch' and bind_manage.action | default('') in ['read', 'apply']) or
+        (bind_manage.resource | default('') != 'batch' and bind_manage.action | default('') in ['create', 'read', 'list', 'update', 'delete'])
+      - bind_manage_checksums | default({}) is mapping
+      - bind_manage_plan_checksums | default({}) is mapping
+      - bind_manage_show_values | default(false) | type_debug == 'bool'
+    fail_msg: 'Supply a CRUD request or a batch read/apply envelope on an existing RHEL 8+ BIND host. Use read before writing.'
+
+- name: Require the primary batch phase before a secondary with record operations
+  ansible.builtin.assert:
+    that:
+      - hostvars[bind_primary_host].bind_management_result is defined
+      - hostvars[bind_primary_host].bind_management_result.resource | default('') == 'batch'
+      - hostvars[bind_primary_host].bind_management_result.action | default('') == bind_manage.action
+      - hostvars[bind_primary_host].bind_management_result.batch_digest | default('') == (bind_manage.operations | to_json(sort_keys=True) | hash('sha256'))
+    fail_msg: 'A batch containing records must include its primary first, with the same batch and phase.'
+  when:
+    - bind_manage.resource == 'batch'
+    - bind_secondary_group in group_names
+    - bind_manage.operations | default([]) | selectattr('resource', 'defined') | selectattr('resource', 'equalto', 'record') | list | length > 0
+
+- name: Execute only the requested targeted action on the appropriate host
+  block:
+    - name: Run the private management transaction
+      bind9_manage:
+        request: >-
+          {{ bind_manage | combine({'expected_checksum':
+             (bind_manage_checksums | default({})).get(inventory_hostname, bind_manage.expected_checksum | default(''))}) |
+             combine(({'expected_plan_checksum': (bind_manage_plan_checksums | default({})).get(inventory_hostname,
+             bind_manage.expected_plan_checksum | default(''))}) if bind_manage.resource == 'batch' else {}) }}
+        context:
+          primary: '{{ bind_primary_group in group_names }}'
+          primary_front: '{{ hostvars[bind_primary_host].bind_front_ip }}'
+          secondary_front: '{{ hostvars[bind_secondary_host].bind_front_ip }}'
+          primary_back: '{{ hostvars[bind_primary_host].bind_back_ip }}'
+          secondary_back: '{{ hostvars[bind_secondary_host].bind_back_ip }}'
+          tsig_key_name: '{{ bind_tsig_key_name }}'
+          backup_root: '{{ bind_backup_root }}'
+      register: bind_management_result
+      no_log: true
+  rescue:
+    - name: Report the controlled management refusal without configuration content
+      ansible.builtin.fail:
+        msg: '{{ bind_management_result.msg | default("Management transport failed; inspect the protected host state and Ansible connectivity.") }}'
+  when: bind_manage.resource != 'record' or bind_primary_group in group_names
+
+- name: Report the safe management outcome and revision
+  ansible.builtin.debug:
+    msg:
+      host: '{{ inventory_hostname }}'
+      changed: '{{ bind_management_result.changed }}'
+      checksum: '{{ bind_management_result.checksum }}'
+      found: '{{ bind_management_result.found | default(omit) }}'
+      paths: '{{ bind_management_result.paths | default([]) }}'
+      backup: '{{ bind_management_result.backup | default(omit) }}'
+      plan_checksum: '{{ bind_management_result.plan_checksum | default(omit) }}'
+      batch_digest: '{{ bind_management_result.batch_digest | default(omit) }}'
+      operations_count: '{{ bind_management_result.operations_count | default(omit) }}'
+      catalog: '{{ bind_management_result.catalog | default(omit) }}'
+      total: '{{ bind_management_result.total | default(omit) }}'
+      count: '{{ bind_management_result.count | default(omit) }}'
+      next_offset: '{{ bind_management_result.next_offset | default(omit) }}'
+  when: not (bind_management_result.skipped | default(false))
+
+- name: Show only the selected object's values when explicitly requested
+  ansible.builtin.debug:
+    msg: '{{ bind_management_result }}'
+  when:
+    - bind_manage_show_values | default(false) | bool
+    - not (bind_management_result.skipped | default(false))
+
+- name: Require a primary record operation before checking its secondary
+  ansible.builtin.assert:
+    that:
+      - hostvars[bind_primary_host].bind_management_result is defined
+      - not (hostvars[bind_primary_host].bind_management_result.skipped | default(false))
+    fail_msg: 'Record maintenance targets the primary. Include it first, or limit this invocation to that primary.'
+  when: bind_manage.resource == 'record' and bind_secondary_group in group_names
+
+- name: Verify the secondary received changed primary zone SOAs
+  ansible.builtin.command:
+    argv: [/usr/bin/dig, -r, '-4', '@127.0.0.1', '+tcp', '+time=2', '+tries=1', '+norecurse', '+noall', '+comments', '+answer', '{{ item.key }}', SOA]
+  loop: '{{ hostvars[bind_primary_host].bind_management_result.serials | default({}) | dict2items | rejectattr("key", "equalto", ".") | list }}'
+  register: bind_management_secondary_check
+  changed_when: false
+  until: >-
+    bind_management_secondary_check.rc == 0 and
+    bind_management_secondary_check.stdout is search('status: NOERROR') and
+    (bind_management_secondary_check.stdout | soa_matches(item.key | regex_replace('[.]$', ''), item.value))
+  retries: 10
+  delay: 2
+  when:
+    - not ansible_check_mode
+    - not (_bind_manage_preflight | default(false) | bool)
+    - bind_manage.resource in ['record', 'zone', 'batch']
+    - bind_secondary_group in group_names

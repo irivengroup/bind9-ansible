@@ -31,12 +31,12 @@
   changed_when: false
 
 - name: Require unchanged standard policy before adding routes
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_policy.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_policy.yml'
   vars:
     bind_front_rule_observation: '{{ bind_front_before_write_kernel.results[1].stdout }}'
 
 - name: Require the exact planned baseline before any route mutation
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_compare.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_compare.yml'
   vars:
     bind_front_compare_profile: '{{ bind_front_before_write_profile.results[1].stdout }}'
     bind_front_compare_runtime: '{{ bind_front_before_write_kernel.results[0].stdout }}'

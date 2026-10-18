@@ -21,7 +21,7 @@ class TestStrictFrontRoutes:
 
     @pytest.mark.parametrize('attributes', [{'nhid': 12}, {'flags': ['onlink']}, {'prefsrc': '198.51.100.9'}])
     def test_route_with_changed_attributes_is_not_owned(self, attributes):
-        tasks = yaml.safe_load((TaskExpressions.TASKS / 'front_routes_rollback.yml').read_text())
+        tasks = yaml.safe_load((TaskExpressions.TASKS / 'deploy/front_routes_rollback.yml').read_text())
         first = next(i for i, task in enumerate(tasks) if task['name'] == 'Normalize active destinations being inspected')
         context = {'bind_front_plan': plan(), 'bind_front_rollback_kernel': {'stdout': json.dumps(BASE + [dict(NEW, **attributes)])}}
         with pytest.raises(ValueError):
@@ -32,18 +32,18 @@ class TestStrictFrontRoutes:
         with pytest.raises(ValueError):
             TaskExpressions({'bind_front_plan': wanted, 'bind_front_compare_profile': '203.0.113.0/24 198.51.100.1',
                              'bind_front_compare_runtime': BASE + [dict(NEW, metric=200)],
-                             'bind_front_compare_applied': True}).run('front_routes_compare.yml')
+                             'bind_front_compare_applied': True}).run('deploy/front_routes_compare.yml')
 
     def test_duplicate_owned_journal_entries_are_rejected(self):
         journal = copy.deepcopy(plan())
         journal['runtime_additions'] *= 2
         with pytest.raises(ValueError):
-            TaskExpressions({'bind_front_plan': journal}).run('front_routes_validate_journal.yml')
+            TaskExpressions({'bind_front_plan': journal}).run('deploy/front_routes_validate_journal.yml')
 
     @pytest.mark.parametrize('serialized', [False, True])
     def test_ipv4_normalizer_accepts_native_or_json_lists(self, serialized):
         values = ['198.51.100.1', '203.0.113.0/24']
-        result = TaskExpressions({'bind_front_ipv4_values': json.dumps(values) if serialized else values}).run('front_routes_ipv4.yml')
+        result = TaskExpressions({'bind_front_ipv4_values': json.dumps(values) if serialized else values}).run('deploy/front_routes_ipv4.yml')
         assert result['bind_front_ipv4_data']['203.0.113.0/24']['prefix'] == 24
         assert result['bind_front_ipv4_data']['198.51.100.1']['prefix'] == 32
 

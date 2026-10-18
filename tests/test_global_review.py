@@ -67,7 +67,7 @@ class TestGlobalReview:
         assert override['register'] == 'bind_named_override'
 
     def test_dns_restore_stops_named_and_pauses_renewal_before_extraction(self):
-        main = yaml.safe_load((ROLE / 'tasks/main.yml').read_text())
+        main = yaml.safe_load((ROLE / 'tasks/tasks.d/deploy/main.yml').read_text())
         rescue = next(task['rescue'] for task in main if 'rescue' in task)
         restore = next(index for index, task in enumerate(rescue) if task['name'] == 'Restore the pre-deployment BIND backup')
         stop = next((index for index, task in enumerate(rescue)

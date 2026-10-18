@@ -1,0 +1,281 @@
+---
+- name: Validate optional DNSSEC input before any role changes
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/dnssec_settings.yml'
+  tags: [always]
+
+- name: Validate client inputs and derive shared DNS authorization
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/clients.yml'
+  tags: [always]
+
+- name: Derive local DNS peer addresses from inventory
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/site_peers.yml'
+  tags: [always]
+
+- name: Provision shared site TSIG on the controller
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/tsig.yml'
+  tags: [deploy, configure]
+
+- name: Generate reverse zones and PTR records from authoritative addresses
+  ansible.builtin.set_fact:
+    bind_generated_reverse_zones: "{{ bind_authoritative_zones | automatic_reverse_zones }}"
+  tags: [always]
+
+- name: Combine direct and automatically generated reverse zones
+  ansible.builtin.set_fact:
+    bind_managed_zones: "{{ bind_authoritative_zones + bind_generated_reverse_zones }}"
+  tags: [always]
+
+- name: Validate named inputs
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/validate.yml'
+  tags: [deploy, preflight]
+
+- name: Reject unsafe filesystem paths
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/path_safety.yml'
+  tags: [deploy, preflight, configure, zones, records, services, backup]
+
+- name: Recover an explicitly requested interrupted FRONT operation
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_recover.yml'
+  tags: [never, routes-recover]
+
+- name: Install dependencies before DNS checks require dig on a fresh secondary
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/packages.yml'
+  tags: [deploy, install]
+
+- name: Authorize DNS in existing FRONT and BACK firewalld zones
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/firewall.yml'
+  environment:
+    LC_ALL: C
+  tags: [deploy, firewall]
+
+- name: Verify local primary before secondary deployment
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/primary_readiness.yml'
+  tags: [deploy, preflight]
+  when: "bind_secondary_group in group_names and ((bind_managed_zones) | length > 0)"
+
+- name: Verify distribution-owned localhost zone files
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/native_loopback.yml'
+  tags: [deploy, validate]
+
+- name: Determine whether routes belong to a complete DNS deployment
+  ansible.builtin.set_fact:
+    bind_front_routes_defer_commit: '{{ "all" in ansible_run_tags or "deploy" in ansible_run_tags }}'
+    bind_front_route_transaction_pending: false
+    bind_front_route_rollback_attempted: false
+  tags: [deploy, routes]
+
+- name: Require explicit boolean route management setting
+  ansible.builtin.assert:
+    that: ["(bind_front_routes_enabled | type_debug) == 'bool'"]
+    fail_msg: 'bind_front_routes_enabled must be a YAML boolean.'
+  tags: [always]
+
+- name: Report disabled FRONT route management
+  ansible.builtin.debug:
+    msg: 'FRONT route management is disabled. Set the YAML boolean bind_front_routes_enabled: true explicitly to enable it; interrupted operations can still be recovered with routes-recover.'
+  when: not bind_front_routes_enabled
+  tags: [deploy, routes]
+
+- name: Add only return routes when explicitly running the routes tag
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_return_routes.yml'
+  tags: [deploy, routes]
+  when:
+    - bind_front_routes_enabled
+    - bind_cloud_clients | length > 0
+    - not (bind_front_routes_defer_commit | bool)
+
+- name: Back up full BIND configuration before changes
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/migration.yml'
+  tags: [deploy, backup]
+
+- name: Prepare managed directories
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/directories.yml'
+  tags: [deploy, configure]
+
+- name: Find existing reverse zone files before deployment
+  ansible.builtin.find:
+    paths: /var/named/zones
+    patterns:
+      - '*.in-addr.arpa.zone'
+      - '*.ip6.arpa.zone'
+    contains: '^; Bind9-Ansible-MANAGED-REVERSE$'
+    # Omit read_whole_file for older Ansible; contains already scans line by line.
+  register: bind_existing_reverse_files
+  when: "bind_primary_group in group_names"
+  tags: [deploy]
+
+- name: Snapshot managed runtime files before deployment
+  # Read-only preconditions must fail before entering the modifying transaction.
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/runtime_snapshot.yml'
+  tags: [deploy, configure]
+
+- name: Apply DNS changes with rollback on failure
+  block:
+    - name: Add return routes as part of the protected DNS deployment
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_return_routes.yml'
+      tags: [deploy]
+      when:
+        - bind_front_routes_enabled
+        - bind_cloud_clients | length > 0
+        - bind_front_routes_defer_commit | default(false) | bool
+
+    - name: Preserve native transport and prepare administrative reload
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/named_runtime.yml'
+      tags: [deploy, configure]
+
+    - name: Remove managed DNSSEC components when validation is disabled
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/dnssec_disable.yml'
+      when: not (bind_dnssec_active == 'auto' or (bind_dnssec_active | bool))
+      tags: [deploy, configure]
+
+    - name: Prepare optional DNSSEC validation and scoped private exceptions
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/dnssec_install.yml'
+      when: bind_dnssec_active == 'auto' or (bind_dnssec_active | bool)
+      tags: [deploy, configure]
+
+    - name: Install canonical named.conf
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/configuration.yml'
+      tags: [deploy, configure]
+
+    - name: Install authoritative zone files
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/zones.yml'
+      tags: [deploy, configure, zones, records]
+
+    - name: Configure SELinux contexts
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/security.yml'
+      tags: [deploy, configure]
+
+    - name: Validate BIND and zones
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/verify.yml'
+      tags: [deploy, validate]
+
+    - name: Start or reload BIND
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/service.yml'
+      tags: [deploy, services]
+
+    - name: Activate scoped private DNSSEC exceptions before health checks
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/dnssec_activate.yml'
+      when: bind_dnssec_active == 'auto' or (bind_dnssec_active | bool)
+      tags: [deploy]
+
+    - name: Verify DNS queries and SOA consistency
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/health.yml'
+      tags: [deploy, health]
+
+    - name: Verify pending return routes after successful DNS health checks
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_verify.yml'
+      tags: [deploy]
+      when: bind_front_route_transaction_pending | default(false) | bool
+
+    - name: Commit return routes after successful DNS deployment
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_commit.yml'
+      tags: [deploy]
+      when: bind_front_route_transaction_pending | default(false) | bool
+
+  rescue:
+    - name: Retain operation ownership until DNS and route recovery complete
+      ansible.builtin.set_fact:
+        bind_deployment_retain_lease: true
+      # Partial configure/zones/service runs must also retain an unresolved lease.
+      tags: [always]
+
+    - name: Remove routes created by the failed DNS deployment
+      block:
+        - name: Roll back owned FRONT route additions
+          # Evaluate the ownership guard once: a static import would reevaluate
+          # it after the helper sets rollback_attempted, skipping its removals.
+          ansible.builtin.include_tasks:
+            file: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_rollback.yml'
+            apply:
+              tags: [deploy]
+          when:
+            - bind_front_route_transaction_pending | default(false) | bool
+            - not (bind_front_route_rollback_attempted | default(false) | bool)
+      rescue:
+        # Continue the existing DNS restoration, but surface the incomplete
+        # network rollback in the final fatal error and retain its journal.
+        - name: Record an incomplete FRONT rollback without masking it
+          ansible.builtin.set_fact:
+            bind_front_route_rollback_error: '{{ ansible_failed_result.msg | default("FRONT rollback failed; inspect the recovery journal") }}'
+      tags: [deploy]
+
+    - name: Inspect managed renewal units before DNS restoration
+      ansible.builtin.stat:
+        path: '{{ item }}'
+        follow: false
+      loop:
+        - /etc/systemd/system/named-private-dnssec.timer
+        - /etc/systemd/system/named-private-dnssec.service
+      register: bind_dnssec_renewal_units
+      tags: [deploy]
+
+    - name: Pause private DNSSEC renewal during restoration
+      ansible.builtin.systemd:
+        name: '{{ item.item | basename }}'
+        state: stopped
+        enabled: '{{ false if item.item.endswith(".timer") else omit }}'
+        daemon_reload: true
+      loop: '{{ bind_dnssec_renewal_units.results }}'
+      when: item.stat.exists
+      tags: [deploy]
+
+    - name: Stop named before restoring files and journals
+      ansible.builtin.systemd:
+        name: named
+        state: stopped
+      tags: [deploy]
+
+    - name: Restore managed runtime files from before the failed deployment
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/runtime_restore.yml'
+      when: bind_runtime_snapshot_ready | default(false) | bool
+      tags: [deploy]
+
+    - name: Restore the pre-deployment BIND backup
+      ansible.builtin.command:
+        argv:
+          - /usr/local/sbin/bind-configtool
+          - restore
+          - --root
+          - "{{ bind_backup_root }}"
+          - --archive
+          - "{{ bind_recovery_archive | basename }}"
+      register: bind_rollback
+      tags: [deploy]
+      changed_when: true
+
+    - name: Restart restored BIND configuration
+      ansible.builtin.systemd:
+        name: named
+        state: restarted
+        daemon_reload: true
+      when: bind_rollback is succeeded
+      tags: [deploy]
+
+    - name: Resume previously active private DNSSEC renewal
+      ansible.builtin.systemd:
+        name: named-private-dnssec.timer
+        state: started
+      when:
+        - bind_rollback is succeeded
+        - (bind_dnssec_timer_active.rc | default(3)) == 0
+      tags: [deploy]
+
+    - name: Allow lease release only after completed DNS and FRONT rollback
+      ansible.builtin.set_fact:
+        bind_deployment_retain_lease: '{{ bind_front_route_transaction_pending | default(false) | bool }}'
+      tags: [deploy]
+
+    - name: Stop deployment after rollback
+      ansible.builtin.fail:
+        msg: >-
+          named deployment failed; managed files restored. Inspect service and logs.
+          {{ ('FRONT rollback incomplete: ' ~
+          (bind_front_route_rollback_error | default('see the failed route task')) ~
+          '. Recovery journal retained.')
+          if (bind_front_route_transaction_pending | default(false) | bool) else '' }}
+      tags: [deploy]
+
+
+- name: Configure periodic DNS health monitoring
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/monitoring.yml'
+  tags: [monitor]
+  when: bind_monitoring_enabled | bool

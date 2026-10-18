@@ -1,14 +1,14 @@
 # Validation DNSSEC optionnelle
 
 ```yaml
-bind_dnssec_active: false
+bind_dnssec_active: auto
 ```
 
 | Valeur | Directive BIND | Déploiement spécifique DNSSEC |
 |---|---|---|
-| `false` (défaut) | `dnssec-validation no;` | Aucun helper, hook privé, service ou timer installé ; anciens assets gérés retirés |
+| `false` | `dnssec-validation no;` | Aucun helper, hook privé, service ou timer installé ; anciens assets gérés retirés |
 | `true` | `dnssec-validation yes;` | Ancres natives chargées explicitement, réconciliateur d’exceptions, hook et renouvellement |
-| `auto` | `dnssec-validation auto;` | Ancres automatiques via `bindkeys-file`, réconciliateur, hook et renouvellement |
+| `auto` (défaut) | `dnssec-validation auto;` | Ancres automatiques via `bindkeys-file`, réconciliateur, hook et renouvellement |
 
 Les booléens YAML et chaînes CLI exactes `true`/`false` sont acceptés, ainsi
 que la chaîne `auto`. Les autres chaînes, nombres et valeurs nulles sont
@@ -29,10 +29,11 @@ et pourrait convertir une valeur incorrecte en désactivation silencieuse.
 Le template calcule localement la directive depuis cette même entrée publique,
 sans fait Ansible surchargeable. Voir [DURCISSEMENT_DNSSEC.md](DURCISSEMENT_DNSSEC.md).
 
-Le défaut désactivé de la livraison DNSSEC optionnelle est conservé. L’entrée
-publique s’appelle désormais `bind_dnssec_active` ; mettre à jour les inventaires
-et commandes. Pour activer le mode automatique, définir explicitement
-`bind_dnssec_active: auto`.
+Le défaut est désormais `auto` : sans surcharge, le rôle active la validation
+et ses composants associés. Une valeur explicite `false` conserve la désactivation.
+L’entrée publique reste `bind_dnssec_active`. Avant mise à niveau, vérifier
+les ancres natives et les exceptions des zones privées ; voir
+[DEFAUT_DNSSEC_AUTO.md](DEFAUT_DNSSEC_AUTO.md).
 
 ## Ancres et exceptions privées
 
@@ -87,7 +88,7 @@ persistantes. Détails : [OPERATIONS.md](OPERATIONS.md).
 ## Contrôles et limites
 
 **EXÉCUTÉ** : BIND natif EL8 9.11.36 et BIND 9.18.24, chacun 109 configurations
-et 270 contrôles DNS : défaut désactivé, validation explicite et auto,
+et 270 contrôles DNS lors de cette campagne historique : mode désactivé, validation explicite et auto,
 signatures valides/invalides, AD/CD, forwarding privé, NTA, réplication TSIG et
 zones natives inchangées. Une ancre signée temporaire de laboratoire rend les
 essais cryptographiques indépendants d’Internet ; elle n’est pas livrée en production.

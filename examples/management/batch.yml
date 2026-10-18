@@ -1,0 +1,41 @@
+---
+# One immutable operations list for preview, check and application.
+# These documentation addresses must be adapted to reachable upstreams.
+bind_manage:
+  resource: batch
+  action: '{{ bind_manage_batch_action | default("read") }}'
+  operations:
+    - resource: option
+      action: update
+      name: minimal-responses
+      value: 'yes'
+    - resource: zone
+      action: create
+      name: service.example.test
+      kind: authoritative
+      ttl: 300
+      serial: 1
+    - resource: record
+      action: create
+      zone: service.example.test
+      name: app
+      type: A
+      ttl: 300
+      values: ['192.0.2.80', '192.0.2.81']
+    - resource: record
+      action: create
+      zone: service.example.test
+      name: description
+      type: TXT
+      ttl: 300
+      values: ['"service de demonstration"']
+    - resource: zone
+      action: create
+      name: private.example.test
+      kind: forward
+      dnssec_validate: false
+      forwarders:
+        - address: 10.11.0.53
+          port: 53
+        - address: 10.11.0.54
+          port: 53

@@ -3,6 +3,9 @@
   ansible.builtin.command:
     argv:
       - dig
+      - -r
+      - '-4'
+      - +ignore
       - '{{ item.transport }}'
       - +time=3
       - +tries=1
@@ -30,12 +33,12 @@
   # Match the AA token only inside dig's header flags, never in answer data.
   until: >-
     bind_loopback_check.rc == 0 and
-    'status: NOERROR' in bind_loopback_check.stdout and
+    (bind_loopback_check.stdout | dns_response_complete) and
     bind_loopback_check.stdout is search('(?m)^;; flags: (?:[a-z]+ )*aa(?: |;)') and
     bind_loopback_check.stdout is search('(?m)^' ~ (item.name | regex_escape) ~ '[.]?\s+\d+\s+IN\s+' ~ item.type ~ '\s+' ~ item.answer ~ '\s*$')
   failed_when: >-
     bind_loopback_check.rc != 0 or
-    'status: NOERROR' not in bind_loopback_check.stdout or
+    not (bind_loopback_check.stdout | dns_response_complete) or
     bind_loopback_check.stdout is not search('(?m)^;; flags: (?:[a-z]+ )*aa(?: |;)') or
     bind_loopback_check.stdout is not search('(?m)^' ~ (item.name | regex_escape) ~ '[.]?\s+\d+\s+IN\s+' ~ item.type ~ '\s+' ~ item.answer ~ '\s*$')
 
@@ -67,6 +70,9 @@
   ansible.builtin.command:
     argv:
       - dig
+      - -r
+      - '-4'
+      - +tcp
       - +time=3
       - +tries=2
       - +norecurse
@@ -94,7 +100,7 @@
 
 - name: Verify each conditional forward zone through IPv4 loopback
   ansible.builtin.command:
-    argv: [dig, '{{ item.1 }}', +time=3, +tries=1, +noall, +comments, +answer,
+    argv: [dig, -r, '-4', +ignore, '{{ item.1 }}', +time=3, +tries=1, +noall, +comments, +answer,
            -b, 127.0.0.1, '@127.0.0.1', '{{ item.0.domain }}', SOA]
   loop: '{{ bind_forward_zones | product(["+notcp", "+tcp"]) | list }}'
   loop_control:
@@ -105,10 +111,14 @@
   delay: 2
   until: >-
     bind_forward_health.rc == 0 and
-    'status: NOERROR' in bind_forward_health.stdout and
+    (bind_forward_health.stdout | dns_response_complete) and
     bind_forward_health.stdout is search('(?mi)^' ~ (item.0.domain | regex_escape) ~ '[.]?\s+\d+\s+IN\s+SOA\s+')
   failed_when: >-
     bind_forward_health.rc != 0 or
-    'status: NOERROR' not in bind_forward_health.stdout or
+    not (bind_forward_health.stdout | dns_response_complete) or
     bind_forward_health.stdout is not search('(?mi)^' ~ (item.0.domain | regex_escape) ~ '[.]?\s+\d+\s+IN\s+SOA\s+')
+
+- name: Record that all selected deployment health checks completed
+  ansible.builtin.set_fact:
+    bind_deployment_health_completed: true
 

@@ -15,7 +15,7 @@ class TestLoggingContract:
     """Test the public operational contract and evaluate the real rule expressions."""
 
     def test_logs_are_created_privately_without_changing_existing_contents_or_times(self):
-        tasks = yaml.safe_load((TASKS / 'directories.yml').read_text())
+        tasks = yaml.safe_load((TASKS / 'deploy/directories.yml').read_text())
         assert {'path': '/var/log/named', 'owner': 'named', 'mode': '0750'} in tasks[0]['loop']
         files = tasks[1]
         assert files['loop'] == ['/var/log/named/default.log', '/var/log/named/security.log', '/var/log/named/xfer.log']
@@ -34,7 +34,7 @@ class TestLoggingContract:
         ('/var/log/named(/.*)? regular file system_u:object_r:named_log_t:s0', '-a', True),
     ])
     def test_exact_all_files_rule_is_added_corrected_or_reused(self, rule, operation, changed):
-        task = next(t for t in yaml.safe_load((TASKS / 'security.yml').read_text())
+        task = next(t for t in yaml.safe_load((TASKS / 'deploy/security.yml').read_text())
                     if t['name'].startswith('Persist the SELinux log context'))
         scope = {'ansible_selinux': {'status': 'enabled'},
                  'bind_named_log_contexts': {'stdout_lines': [rule]}}
@@ -46,7 +46,7 @@ class TestLoggingContract:
 
     @pytest.mark.parametrize('facts', [{}, {'ansible_selinux': {'status': 'disabled'}}])
     def test_disabled_selinux_skips_new_policy_commands_and_label_checks(self, facts):
-        tasks = yaml.safe_load((TASKS / 'security.yml').read_text())
+        tasks = yaml.safe_load((TASKS / 'deploy/security.yml').read_text())
         for task in tasks:
             if 'bind_named_log_' in str(task) and 'when' in task:
                 when = task['when'] if isinstance(task['when'], list) else [task['when']]
@@ -54,7 +54,7 @@ class TestLoggingContract:
 
     @pytest.mark.parametrize('wrong', [False, True])
     def test_post_restore_check_rejects_incorrect_labels(self, wrong):
-        tasks = yaml.safe_load((TASKS / 'security.yml').read_text())
+        tasks = yaml.safe_load((TASKS / 'deploy/security.yml').read_text())
         names = [task['name'] for task in tasks]
         assert names.index('Restore SELinux contexts') < names.index('Inspect SELinux labels on the BIND log directory and files')
         task = next(t for t in tasks if t['name'] == 'Require named_log_t on all managed log paths')

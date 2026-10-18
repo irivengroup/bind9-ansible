@@ -7,7 +7,7 @@ n’est pas ouvert par ces tâches.
 
 ## Comportement intégré
 
-Le déploiement complet exécute `tasks.d/firewall.yml` après l’installation
+Le déploiement complet exécute `tasks.d/deploy/firewall.yml` après l’installation
 des paquets BIND et avant les vérifications du primaire et la sauvegarde
 DNS. Le tag `firewall` permet aussi d’exécuter uniquement cette gestion :
 

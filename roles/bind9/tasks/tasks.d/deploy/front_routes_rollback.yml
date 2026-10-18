@@ -7,7 +7,7 @@
     bind_front_route_rollback_attempted: true
 
 - name: Validate route journal before selecting owned removals
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_validate_journal.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_validate_journal.yml'
 
 - name: Inspect active FRONT identity before rollback
   ansible.builtin.command:
@@ -32,7 +32,7 @@
   changed_when: false
 
 - name: Refuse policy drift before removing any FRONT route
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_policy.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_policy.yml'
   vars:
     bind_front_rule_observation: '{{ bind_front_rollback_rules.stdout }}'
 
@@ -50,10 +50,10 @@
     bind_front_ssh_client: '{{ bind_front_recovery_ssh.stdout.split()[0] if ansible_connection | default("ssh") != "local" else "" }}'
 
 - name: Normalize the current SSH peer before owned route removal
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ssh_normalize.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_ssh_normalize.yml'
 
 - name: Normalize current inventory and SSH addresses for recovery protection
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_ipv4.yml'
   vars:
     bind_front_ipv4_context: 'current inventory and SSH source during FRONT rollback'
     bind_front_ipv4_values: >-
@@ -79,7 +79,7 @@
   changed_when: false
 
 - name: Parse persistent routes before selecting owned removals
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_parse_profile.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_parse_profile.yml'
   vars:
     bind_front_routes_text: '{{ bind_front_rollback_profile.stdout }}'
 
@@ -109,7 +109,7 @@
   changed_when: false
 
 - name: Normalize active destinations being inspected
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_ipv4.yml'
   vars:
     bind_front_ipv4_context: 'ip -j -4 route show table main during rollback'
     bind_front_ipv4_values: >-
@@ -175,7 +175,7 @@
   changed_when: false
 
 - name: Require the exact original routing state
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_compare.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_compare.yml'
   vars:
     bind_front_compare_profile: '{{ bind_front_restored.results[0].stdout }}'
     bind_front_compare_runtime: '{{ bind_front_restored.results[1].stdout }}'

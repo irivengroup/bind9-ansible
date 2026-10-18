@@ -1,0 +1,38 @@
+---
+- name: Preflight every targeted batch host before publishing on any host
+  hosts: dns_deployment_order
+  become: true
+  gather_facts: false
+  order: inventory
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Prepare the complete batch with no DNS publication
+      check_mode: true
+      block:
+        - name: Gather the existing platform and network facts for preflight
+          ansible.builtin.setup:
+        - name: Validate this host's approved batch candidate
+          ansible.builtin.include_role:
+            name: bind9
+            tasks_from: manage.yml
+      vars:
+        _bind_manage_preflight: true
+      when:
+        - bind_manage is defined and bind_manage is mapping
+        - bind_manage.resource | default('') == 'batch'
+        - bind_manage.action | default('') == 'apply'
+        - not ansible_check_mode
+
+- name: Apply targeted BIND management without redeployment
+  hosts: dns_deployment_order
+  become: true
+  gather_facts: true
+  order: inventory
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Run the independent management workflow
+      ansible.builtin.include_role:
+        name: bind9
+        tasks_from: manage.yml

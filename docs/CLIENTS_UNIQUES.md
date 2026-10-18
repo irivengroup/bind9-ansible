@@ -49,7 +49,7 @@ donc pas une isolation stricte par catégorie/interface. Les demandes sont
 attendues sur FRONT pour cloud et BACK pour internes selon votre réseau
 existant ; le rôle ne reconfigure ni ce réseau ni son pare-feu.
 
-Les zones natives, DNSSEC optionnel (défaut `false`), IPv4, réplication TSIG
+Les zones natives, DNSSEC configurable (défaut `auto`), IPv4, réplication TSIG
 et NXDOMAIN hors périmètre sont conservés. Les pairs BACK et la clé de
 transfert restent exclus de la récursion.
 

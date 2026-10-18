@@ -32,9 +32,9 @@ n’est pas confirmée.
 
 | Fichier | Bloc et modification |
 |---|---|
-| `roles/bind9/tasks/tasks.d/health.yml` | `Verify native localhost forward and reverse answers over UDP and TCP` : correction des expressions AA dans `until` et `failed_when` ; commentaire de compatibilité Jinja |
-| `roles/bind9/tasks/tasks.d/primary_readiness.yml` | `Verify primary SOA from secondary over back network` : même correction AA dans `failed_when` |
-| `roles/bind9/tasks/tasks.d/verify.yml` | `Ensure no wildcard zone transfers are enabled` : reconnaissance des ACL directes `any` multiligne et entre guillemets |
+| `roles/bind9/tasks/tasks.d/deploy/health.yml` | `Verify native localhost forward and reverse answers over UDP and TCP` : correction des expressions AA dans `until` et `failed_when` ; commentaire de compatibilité Jinja |
+| `roles/bind9/tasks/tasks.d/deploy/primary_readiness.yml` | `Verify primary SOA from secondary over back network` : même correction AA dans `failed_when` |
+| `roles/bind9/tasks/tasks.d/deploy/verify.yml` | `Ensure no wildcard zone transfers are enabled` : reconnaissance des ACL directes `any` multiligne et entre guillemets |
 | `tests/test_loopback_health_conditions.py` | 108 scénarios : réponses exactes, refus, sorties vides, erreurs de commande, faux jetons AA, SOA/serial, format canonique des ACL et analyse des constantes Jinja de toutes les conditions du rôle |
 | `tests/integration_loopback.py` | Exécution des vraies tâches de santé, disponibilité primaire et vérification des fichiers avec BIND ; test de refus d’une configuration ouverte réellement formatée par BIND ; deux modes de typage Jinja |
 | `README.md`, `docs/LOOPBACK.md`, `docs/VALIDATION_RHEL8.md` | Résultats actualisés, prérequis et lien vers ce rapport |

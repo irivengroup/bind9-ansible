@@ -101,11 +101,11 @@ class LoggingTaskRunner:
 
     def run(self):
         tasks_path = ROOT / 'roles/bind9/tasks/tasks.d'
-        directories = self.rebase(yaml.safe_load((tasks_path / 'directories.yml').read_text()))
+        directories = self.rebase(yaml.safe_load((tasks_path / 'deploy/directories.yml').read_text()))
         for task in directories:
             task['ansible.builtin.file'].update(owner=self.user, group=self.group)
             task['register'] = 'logging_file_result' if task.get('name', '').startswith('Prepare private') else 'logging_dir_result'
-        security = self.rebase(yaml.safe_load((tasks_path / 'security.yml').read_text()))
+        security = self.rebase(yaml.safe_load((tasks_path / 'deploy/security.yml').read_text()))
         security[0]['ansible.builtin.copy'].update(owner=self.user, group=self.group)
         for task in security:
             if task['name'].startswith('Persist the SELinux log context'):
@@ -122,7 +122,7 @@ class LoggingTaskRunner:
         playbook = self.folder / 'logging.yml'
         playbook.write_text(yaml.safe_dump(plays, sort_keys=False))
         result = subprocess.run(['ansible-playbook', '-i', 'localhost,', str(playbook)], env=self.environment,
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=90)
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, timeout=90)
         state = json.loads(self.state.read_text())
         assert self.existing.read_text() == 'historical log entry\n'
         assert self.existing.stat().st_mtime_ns == self.existing_mtime

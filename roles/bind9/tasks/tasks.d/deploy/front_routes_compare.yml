@@ -1,12 +1,12 @@
 ---
 # Compare snapshots and exact intended additions, not command stdout/changed.
 - name: Parse the persistent routes being verified
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_parse_profile.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_parse_profile.yml'
   vars:
     bind_front_routes_text: '{{ bind_front_compare_profile }}'
 
 - name: Normalize active destinations being inspected
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_ipv4.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_ipv4.yml'
   vars:
     bind_front_ipv4_context: 'ip -j -4 route show table main during verification'
     bind_front_ipv4_values: >-

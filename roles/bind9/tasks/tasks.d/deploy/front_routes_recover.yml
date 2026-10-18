@@ -41,11 +41,11 @@
     bind_front_plan: '{{ bind_front_recovery_data.content | b64decode | from_json }}'
 
 - name: Validate the interrupted native route journal
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_validate_journal.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_validate_journal.yml'
 
 - name: Mark the interrupted route operation pending
   ansible.builtin.set_fact:
     bind_front_route_transaction_pending: true
 
 - name: Restore only routes added by the interrupted operation
-  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/front_routes_rollback.yml'
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_rollback.yml'

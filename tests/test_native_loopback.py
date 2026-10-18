@@ -2,6 +2,7 @@
 from pathlib import Path
 import ast
 import re
+import sys
 
 from jinja2 import Environment, StrictUndefined
 import pytest
@@ -17,13 +18,17 @@ class TestNativeLoopback:
     def test_target_python_script_parses_on_python36_grammar(self):
         # TSIG and filters run on the controller, not on the Python 3.6.8 target.
         source = ROLE / 'files/reverse-serial.py'
-        ast.parse(source.read_text(), filename=str(source), feature_version=(3, 6))
+        if sys.version_info < (3, 8):
+            # The actual legacy interpreter is stricter than a simulated grammar.
+            ast.parse(source.read_text(), filename=str(source))
+        else:
+            ast.parse(source.read_text(), filename=str(source), feature_version=(3, 6))
 
     def test_native_el8_paths_ipv4_and_automatic_dnssec_are_explicit(self):
         template = (ROLE / 'templates/named.conf.j2').read_text()
         assert 'dnssec-validation {{ dnssec_mode }};' in template
         assert 'listen-on-v6 { none; };' in template
-        assert 'empty-zones-enable yes;' in template
+        assert 'empty-zones-enable' not in template  # Use the native enabled default.
         assert 'include "/etc/named.rfc1912.zones";' in template
         assert 'include "/etc/crypto-policies/back-ends/bind.config";' in template
         assert 'validate-except' not in template
@@ -31,7 +36,7 @@ class TestNativeLoopback:
         for path in ('/var/named/data/cache_dump.db', '/var/named/data/named_stats.txt',
                      '/run/named/named.pid', '/run/named/session.key'):
             assert path in template
-        directories = yaml.safe_load((ROLE / 'tasks/tasks.d/directories.yml').read_text())[0]['loop']
+        directories = yaml.safe_load((ROLE / 'tasks/tasks.d/deploy/directories.yml').read_text())[0]['loop']
         assert {'path': '/var/named/data', 'owner': 'named', 'mode': '0750'} in directories
         assert yaml.safe_load((ROLE / 'defaults/main.yml').read_text())['bind_front_routes_enabled'] is False
 
@@ -85,22 +90,22 @@ class TestNativeLoopback:
         assert tasks[0]['ansible.builtin.stat']['follow'] is False
         assert tasks[0]['loop'] == ['/etc/named.rfc1912.zones', '/var/named/named.localhost', '/var/named/named.loopback', '/var/named/named.empty']
         assert 'ansible.builtin.assert' in tasks[1]
-        main = (ROLE / 'tasks/main.yml').read_text()
-        assert main.index('tasks.d/packages.yml') < main.index('tasks.d/native_loopback.yml') < main.index('tasks.d/configuration.yml')
+        main = (ROLE / 'tasks/tasks.d/deploy/main.yml').read_text()
+        assert main.index('tasks.d/deploy/packages.yml') < main.index('tasks.d/native_loopback.yml') < main.index('tasks.d/deploy/configuration.yml')
 
     def test_loopback_checks_cover_native_a_and_ptr_on_both_transports(self):
-        task = yaml.safe_load((ROLE / 'tasks/tasks.d/health.yml').read_text())[0]
+        task = yaml.safe_load((ROLE / 'tasks/tasks.d/deploy/health.yml').read_text())[0]
         assert '@127.0.0.1' in task['ansible.builtin.command']['argv']
         assert {(x['transport'], x['type']) for x in task['loop']} == {('+tcp', 'A'), ('+notcp', 'A'), ('+tcp', 'PTR'), ('+notcp', 'PTR')}
-        assert 'NOERROR' in task['failed_when'] and 'item.answer' in task['failed_when']
+        assert 'dns_response_complete' in task['failed_when'] and 'item.answer' in task['failed_when']
         assert task['changed_when'] is False
 
     def test_native_routes_and_bind_recovery_are_integrated(self):
-        main = (ROLE / 'tasks/main.yml').read_text()
-        assert 'tasks.d/front_return_routes.yml' in main and 'bind-front-routes' not in main
+        main = (ROLE / 'tasks/tasks.d/deploy/main.yml').read_text()
+        assert 'tasks.d/deploy/front_return_routes.yml' in main and 'bind-front-routes' not in main
         assert 'Restore the pre-deployment BIND backup' in main
         assert not (ROLE / 'files/front-routes.py').exists()
-        assert (ROLE / 'tasks/tasks.d/front_return_routes.yml').exists()
+        assert (ROLE / 'tasks/tasks.d/deploy/front_return_routes.yml').exists()
 
     def test_periodic_monitor_checks_native_loopback(self):
         source = (ROLE / 'files/named-healthcheck.sh').read_text()

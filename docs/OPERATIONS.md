@@ -1,5 +1,7 @@
 # Opérations BIND 9 (RHEL 8+)
 
+**Contrat actuel :** `hibernate_deployment: yes` génère un sceau après réussite du déploiement complet ; défaut `no`, sans nouveau sceau. Le tag isolé `hibernate`, avec ce paramètre à `yes`, permet de sceller uniquement la configuration existante sans redéploiement. Un sceau existant bloque toute reconstruction, même avec `no`, jusqu’à son [retrait explicite par un opérateur](HIBERNATE_DEPLOYMENT.md). `force` est retiré et refusé. Pour une modification ciblée préservant les autres interventions, utiliser [MANAGEMENT.md](MANAGEMENT.md), lecture et checksum obligatoires. Les procédures de reconstruction ci-dessous nécessitent le retrait préalable de tout sceau existant.
+
 Le rôle déploie **un seul fichier de configuration** : `/etc/named.conf`.
 
 Les préconditions renforcées des secrets, archives, chemins et reprises FRONT
@@ -76,7 +78,7 @@ Une sortie vide, une erreur réseau, `Transfer failed` seul ou une erreur TSIG n
 
 ## Passage depuis la livraison avec vues
 
-Sauvegarder les deux pairs et relever leurs SOA avant le déploiement en recette. La configuration autorise la fusion calculée `bind_allowed_clients` des listes cloud et internes, charge les zones natives globalement et désactive DNSSEC par défaut (`bind_dnssec_active: false`). Déclarer `dnssec_validate: false` seulement sur les suffixes privés non signés qui nécessitent une exception. Les modifications des données exigent un serial supérieur au serial servi. Déployer le primaire avant le secondaire et appliquer [TESTS_FONCTIONNELS.md](TESTS_FONCTIONNELS.md). Le passage à chaud depuis des vues n'a pas été exécuté sur RHEL : contrôler le rechargement et les journaux ; planifier un restart en recette si nécessaire. Le rollback automatique porte sur l'hôte courant, sans restaurer les hôtes déjà déployés.
+Sauvegarder les deux pairs et relever leurs SOA avant le déploiement en recette. La configuration autorise la fusion calculée `bind_allowed_clients` des listes cloud et internes, charge les zones natives globalement et active DNSSEC en mode automatique par défaut (`bind_dnssec_active: auto`). Déclarer `dnssec_validate: false` seulement sur les suffixes privés non signés qui nécessitent une exception. Les modifications des données exigent un serial supérieur au serial servi. Déployer le primaire avant le secondaire et appliquer [TESTS_FONCTIONNELS.md](TESTS_FONCTIONNELS.md). Le passage à chaud depuis des vues n'a pas été exécuté sur RHEL : contrôler le rechargement et les journaux ; planifier un restart en recette si nécessaire. Le rollback automatique porte sur l'hôte courant, sans restaurer les hôtes déjà déployés.
 
 ## DNSSEC, services et retour arrière
 
@@ -126,7 +128,7 @@ pas installé sur une cible neuve en mode `false`.
 
 ## Migration de la variable et contrôle du contrôleur
 
-Utiliser uniquement `bind_dnssec_active: false`, `true` ou `auto` comme entrée
+Utiliser uniquement `bind_dnssec_active: auto` (défaut), `true` ou `false` comme entrée
 DNSSEC. Remplacer l’ancien nom `bind_dnssec_enabled` dans les inventaires et
 paramètres CLI. Ne pas définir un mode intermédiaire ; le rôle n’en calcule
 plus et son assertion de surcharge est supprimée. Un `false` YAML sans

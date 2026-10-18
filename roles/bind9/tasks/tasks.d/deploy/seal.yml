@@ -1,0 +1,59 @@
+---
+- name: Require completed health checks before sealing deployment success
+  ansible.builtin.assert:
+    that:
+      - hibernate_deployment | default(false) | bool
+      - bind_deployment_lease_acquired | default(false) | bool
+      - >-
+        (bind_deployment_health_completed | default(false) | bool) or
+        (bind_deployment_seal_kind | default('deploy') == 'hibernate' and
+         (bind_deployment_config_checked | default(false) | bool))
+    fail_msg: 'Deployment health checks were not completed, or explicit hibernation syntax checks are missing; no deployment seal will be written.'
+
+- name: Collect checksums of successfully deployed configuration and primary zones
+  ansible.builtin.stat:
+    path: '{{ item }}'
+    follow: false
+    checksum_algorithm: sha256
+  loop: >-
+    {{ ['/etc/named.conf'] if bind_deployment_seal_kind | default('deploy') == 'hibernate' else
+       ['/etc/named.conf', '/var/named/empty-root.zone'] +
+       ((bind_managed_zones | map(attribute='domain') | map('regex_replace', '^(.*)$', '/var/named/zones/\1.zone') | list)
+        if bind_primary_group in group_names else []) }}
+  register: bind_deployment_seal_files
+
+- name: Require real files before recording deployment success
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists and (item.stat.isreg | default(false))
+      - not (item.stat.islnk | default(false)) and item.stat.nlink == 1
+      - item.stat.checksum is defined
+    fail_msg: 'Cannot record successful deployment: a managed file is missing or unsafe.'
+  loop: '{{ bind_deployment_seal_files.results }}'
+
+- name: Build a checksum manifest without configuration contents or secrets
+  ansible.builtin.set_fact:
+    bind_deployment_seal_payload: >-
+      {%- set ns = namespace(files={}) -%}
+      {%- for entry in bind_deployment_seal_files.results -%}
+      {%- set ns.files = ns.files | combine({entry.item: entry.stat.checksum}) -%}
+      {%- endfor -%}
+      {{ {'schema': 1, 'host': inventory_hostname, 'kind': bind_deployment_seal_kind | default('deploy'), 'files': ns.files} }}
+
+- name: Create the private deployment seal directory
+  ansible.builtin.file:
+    path: /var/lib/Bind9-Ansible
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Atomically seal the successfully completed deployment
+  ansible.builtin.copy:
+    dest: /var/lib/Bind9-Ansible/.deployment.lock
+    owner: root
+    group: root
+    mode: '0600'
+    content: >-
+      {{ {'payload': bind_deployment_seal_payload,
+          'sha256': (bind_deployment_seal_payload | to_json(sort_keys=true) | hash('sha256'))} | to_nice_json }}

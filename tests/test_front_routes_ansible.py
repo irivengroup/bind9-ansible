@@ -30,7 +30,7 @@ class AnsibleRouteSandbox:
         self.state_root = folder / 'route-state'
         role = folder / 'roles/bind9'
         shutil.copytree(ROOT / 'roles/bind9', role, ignore=shutil.ignore_patterns('__pycache__'))
-        for path in (role / 'tasks/tasks.d').glob('front*.yml'):
+        for path in (role / 'tasks/tasks.d/deploy').glob('front*.yml'):
             path.write_text(path.read_text().replace('/var/lib/Bind9-Ansible', str(self.state_root)))
         binaries = folder / 'bin'
         binaries.mkdir()
@@ -63,7 +63,7 @@ class AnsibleRouteSandbox:
     def read(self):
         return json.loads(self.data_file.read_text())
 
-    def run(self, tasks_from='tasks.d/front_return_routes.yml', check=False, extra_vars=None, tags=None, extra_cli_vars=None):
+    def run(self, tasks_from='tasks.d/deploy/front_return_routes.yml', check=False, extra_vars=None, tags=None, extra_cli_vars=None):
         variables = {'ansible_python_interpreter': str(self.interpreter),
                      'ansible_host': '192.0.2.2', 'ansible_env': {'SSH_CONNECTION': ''},
                      'bind_front_ip': '198.51.100.2', 'bind_back_ip': '10.0.0.2',
@@ -144,7 +144,7 @@ class TestAnsibleNativeFrontRoutes:
         sandbox.data['persistent'].append({'network': existing['dst'], 'gateway': existing['gateway'], 'metric': 150})
         sandbox.save()
         initial = copy.deepcopy(sandbox.data)
-        main = yaml.safe_load((ROOT / 'roles/bind9/tasks/main.yml').read_text())
+        main = yaml.safe_load((ROOT / 'roles/bind9/tasks/tasks.d/deploy/main.yml').read_text())
         deployment = next(task for task in main if task['name'] == 'Apply DNS changes with rollback on failure')
         if failure_phase == 'reload':
             handlers = tmp_path / 'roles/bind9/handlers/main.yml'
@@ -158,7 +158,7 @@ class TestAnsibleNativeFrontRoutes:
                 elif failure_phase == 'reload' and task['name'] == 'Start or reload BIND':
                     # Keep the real flush_handlers entry point. Only systemd
                     # operations are replaced; the failure comes from a handler.
-                    service = yaml.safe_load((ROOT / 'roles/bind9/tasks/tasks.d/service.yml').read_text())
+                    service = yaml.safe_load((ROOT / 'roles/bind9/tasks/tasks.d/deploy/service.yml').read_text())
                     task['block'] = [entry for entry in service if 'ansible.builtin.meta' in entry]
                 else:
                     task['ansible.builtin.debug'] = {'msg': 'Isolated DNS operation substitute'}
@@ -249,7 +249,7 @@ class TestAnsibleNativeFrontRoutes:
         blocked = sandbox.run()
         assert blocked.returncode != 0
         assert 'routes-recover' in blocked.stdout
-        recovered = sandbox.run('tasks.d/front_routes_recover.yml')
+        recovered = sandbox.run('tasks.d/deploy/front_routes_recover.yml')
         assert recovered.returncode == 0, recovered.stdout
         assert sandbox.read()['runtime'] == BASE
         assert sandbox.read()['persistent'] == []
