@@ -2,7 +2,11 @@
 
 Le réseau du serveur est déjà configuré. Le rôle complète les routes IPv4 vers
 `bind_cloud_clients` avec les outils natifs `ip` et `nmcli`. Il découvre le
-profil NetworkManager actif par UUID, puis lit sa propriété `ipv4.gateway`.
+profil NetworkManager actif par UUID, puis rapproche sa propriété `ipv4.gateway`,
+`IP4.GATEWAY` de l'interface FRONT et les prochains sauts de ses seules routes
+par défaut existantes. Une propriété persistante vide n'est plus un refus si
+une autre observation FRONT fournit une passerelle unique et cohérente. Toute
+contradiction reste bloquante. Voir [correction et impacts](CORRECTION_PASSERELLE_FRONT.md).
 Aucune variable de passerelle ou d'interface supplémentaire n'est nécessaire.
 
 La révision de durcissement relit le profil, sa passerelle, les routes et les
@@ -64,7 +68,8 @@ du déploiement DNS en mode simulation.
   Python de routage personnalisé n’est fourni, aucun paquet contrôleur supplémentaire
   n’est nécessaire ; `netaddr` et les collections réseau ne sont pas requis.
 - SSH ADM et `become: true` ; `ip` et `nmcli` déjà disponibles ; NetworkManager
-  déjà actif avec un profil FRONT et une passerelle IPv4 configurée, sur le lien.
+  déjà actif avec un profil FRONT et une passerelle IPv4 existante sur le lien,
+  identifiable dans le profil, l'état actif ou les routes par défaut FRONT.
 - FRONT, BACK et ADM sont des interfaces distinctes avec les adresses IPv4
   littérales déclarées dans l'inventaire. Les adresses doivent être présentes
   sur le serveur ; la découverte refuse les profils absents ou ambigus.
@@ -182,8 +187,9 @@ Le message indique désormais le contexte de lecture, le type et la valeur
 
 - **Interfaces/inventaire** : vérifier FRONT/BACK et l’IPv4 ADM littérale dans
   `ansible_host` ; un nom DNS n’est pas une IPv4 normalisable par cette fonction.
-- **Plan** : contrôler les clients déclarés, la source SSH et `ipv4.gateway`
-  du profil FRONT sélectionné ; aucune passerelle globale de remplacement.
+- **Plan** : contrôler les clients déclarés, la source SSH et les observations
+  `ipv4.gateway`, `IP4.GATEWAY` et routes par défaut du seul périphérique FRONT ;
+  aucune passerelle globale de remplacement.
 - **Profil** : examiner uniquement `ipv4.routes` de ce profil, avec son format
   exact et ses réseaux/adresses ; une sortie incomprise n’est pas ignorée.
 - **Noyau** : examiner `ip -j -4 address show` et

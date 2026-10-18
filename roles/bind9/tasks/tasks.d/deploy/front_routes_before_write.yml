@@ -15,11 +15,13 @@
   register: bind_front_before_write_profile
   changed_when: false
 
-- name: Refuse a gateway changed since route planning
-  ansible.builtin.assert:
-    that:
-      - bind_front_before_write_profile.results[0].stdout | trim == bind_front_plan.gateway
-    fail_msg: 'FRONT gateway changed since planning; no routes were added.'
+- name: Recheck active FRONT gateway under the operation lock
+  ansible.builtin.command:
+    argv: [nmcli, -g, IP4.GATEWAY, device, show, '{{ bind_front_plan.device }}']
+  environment: {LC_ALL: C}
+  register: bind_front_before_write_active_gateway
+  changed_when: false
+  check_mode: false
 
 - name: Recheck main routes and policy rules under the operation lock
   ansible.builtin.command:
@@ -29,6 +31,19 @@
     - [ip, -j, -4, rule, show]
   register: bind_front_before_write_kernel
   changed_when: false
+
+- name: Reconcile existing FRONT gateway observations
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_gateway.yml'
+  vars:
+    bind_front_gateway_profile_value: '{{ bind_front_before_write_profile.results[0].stdout }}'
+    bind_front_gateway_active_value: '{{ bind_front_before_write_active_gateway.stdout }}'
+    bind_front_gateway_kernel_value: '{{ bind_front_before_write_kernel.results[0].stdout }}'
+    bind_front_gateway_device: '{{ bind_front_plan.device }}'
+
+- name: Refuse a FRONT gateway changed since planning
+  ansible.builtin.assert:
+    that: [bind_front_gateway == bind_front_plan.gateway]
+    fail_msg: 'FRONT gateway changed since planning; route operation stopped before further writes.'
 
 - name: Require unchanged standard policy before adding routes
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_policy.yml'

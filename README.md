@@ -8,7 +8,7 @@ Le rôle produit une configuration unique `/etc/named.conf`, sans vues BIND. Il 
 
 **Configuration live :** le management conserve l'existant et refuse les créations sur un nom déjà présent. Les interventions manuelles doivent partager le verrou d'opération. Les lectures et écritures sont contrôlées contre les données partielles ; voir [fiabilité des données et I/O](docs/FIABILITE_DONNEES_ET_IO.md) et [procédure opérateur](docs/INTEGRITE_CONFIGURATION_LIVE.md).
 
-**Qualification opérationnelle : NON TERMINÉE pour la production.** Aucun déploiement complet sur votre paire RHEL 8 n’a été exécuté. Voir [AUDIT_HIBERNATE_DEPLOYMENT.md](docs/AUDIT_HIBERNATE_DEPLOYMENT.md) pour les résultats propres à cette révision et les procédures restantes ; les rapports précédents restent historiques.
+**Qualification opérationnelle : NON TERMINÉE pour la production.** Aucun déploiement complet sur votre paire RHEL 8 n’a été exécuté. Voir [CORRECTION_PASSERELLE_FRONT.md](docs/CORRECTION_PASSERELLE_FRONT.md) pour cette révision de la découverte des passerelles et ses limites ; [AUDIT_HIBERNATE_DEPLOYMENT.md](docs/AUDIT_HIBERNATE_DEPLOYMENT.md) décrit la campagne précédente, conservée comme historique.
 
 Ce guide s’adresse aux équipes d’exploitation. Les commandes du contrôleur supposent Bash sous Linux, depuis la racine du projet. Les commandes de diagnostic système s’exécutent sur le serveur DNS indiqué. Toutes les adresses et tous les domaines d’exemple doivent être adaptés avant utilisation.
 
@@ -41,7 +41,7 @@ Ce guide s’adresse aux équipes d’exploitation. Les commandes du contrôleur
 | Ansible minimal déclaré | **2.9**, dans les métadonnées du rôle. Version des contrôles locaux enregistrés : **2.9.27**. Les autres correctifs 2.9 n’ont pas tous été exécutés. |
 | Python requis sur les cibles | **3.6.8** dans le contexte retenu. Compilation, composants et transports locaux sur le véritable Python 3.6.8 EL8 : **EXÉCUTÉ**. Modules Ansible/DNF sur votre serveur : **NON EXÉCUTÉ**. |
 | Contrôleur de cette passe | Linux, Python **3.6.8**, Ansible **2.9.27**, Jinja2 **2.10.3**. Les essais Python 3.8.20/Jinja 3.0.3 appartiennent aux rapports historiques. |
-| BIND de laboratoire courant | **9.11.36-16.el8_10.16**, paquets EL8 installés dans un conteneur Rocky Linux 8.9 avec paquets EL8.10. Ce n’est pas une recette système RHEL. Les essais BIND 9.18.24 restent historiques. |
+| BIND du laboratoire précédent | **9.11.36-16.el8_10.16**, paquets EL8 installés dans un conteneur Rocky Linux 8.9 avec paquets EL8.10. Cette passe de routage ne rejoue pas la recette BIND native ; les templates DNS sont inchangés. |
 | NetworkManager de laboratoire | **1.46.0**, testé antérieurement en environnement isolé ; la version cible reste à qualifier pour les routes. |
 | Familles d’adresses | Écoute DNS et clients déclarés : **IPv4**. Forwarders, transport sortant et données DNS : **IPv4/IPv6**. Routes gérées : **IPv4 uniquement**. |
 
@@ -88,7 +88,7 @@ Le rôle ne configure pas les adresses des interfaces, `/etc/resolv.conf`, le ro
 - Fichiers natifs présents : `/etc/named.rfc1912.zones`, `/var/named/named.localhost`, `/var/named/named.loopback`, `/var/named/named.empty`, `/etc/crypto-policies/back-ends/bind.config`. L’include de politique cryptographique doit résoudre vers un fichier régulier.
 - RNDC et `named-setup-rndc.service` natifs disponibles. Le rôle utilise ce générateur pour préparer `/etc/rndc.key` dans tous les modes DNSSEC.
 - Horloges synchronisées pour TSIG ; espace disque pour zones, archives et journaux.
-- **Routes FRONT activées seulement :** NetworkManager actif, `nmcli`, sortie JSON de `ip`, profil FRONT actif contenant sa passerelle IPv4 existante. FRONT/BACK/ADM doivent alors être des interfaces distinctes ; table principale et règles de routage standard, sans VRF ni règles personnalisées.
+- **Routes FRONT activées seulement :** NetworkManager actif, `nmcli`, sortie JSON de `ip`, profil FRONT actif et passerelle IPv4 existante identifiable sans ambiguïté dans ce profil, l'état actif de FRONT ou ses routes par défaut. Toutes les observations présentes doivent concorder. FRONT/BACK/ADM doivent être des interfaces distinctes ; table principale et règles de routage standard, sans VRF ni règles personnalisées.
 - **DNSSEC activé seulement :** `/usr/bin/python3`, ancres officielles `/etc/named.root.key` à jour et accès aux données nécessaires à la validation. Le rôle ne remplace pas les ancres de distribution.
 
 `ansible.cfg` utilise la découverte `auto_silent`. Si nécessaire, définir `ansible_python_interpreter: /usr/bin/python3` dans l’inventaire après vérification de ce chemin et des bindings DNF. La contrainte Python 3.6.8 concerne le serveur, pas le contrôleur.
@@ -439,6 +439,8 @@ L’absence des unités privées est attendue après nettoyage en mode désactiv
 
 La fonction est **désactivée par défaut**. Elle découvre l’interface FRONT, le profil NetworkManager actif par UUID et sa passerelle IPv4. Elle ajoute seulement les routes manquantes vers `bind_cloud_clients`, dans le profil et le noyau, sans réactivation de connexion, changement de route par défaut ou écriture BACK/ADM. Les clients directement connectés n’exigent pas de route par passerelle ; leur chemin est toutefois vérifié.
 
+La propriété persistante `ipv4.gateway` peut être vide : la découverte rapproche aussi `IP4.GATEWAY` de l'interface FRONT et les prochains sauts de ses seules routes par défaut existantes. Elle exige une valeur IPv4 unique et cohérente, puis conserve les contrôles de sous-réseau. Une sortie invalide ou contradictoire reste bloquante. Aucune passerelle BACK/ADM ni prochain saut d'une route particulière n'est utilisé comme remplacement. Les mêmes contrôles s'appliquent avant ajout, avant commit et avant rollback. Voir [correction, impacts et diagnostic](docs/CORRECTION_PASSERELLE_FRONT.md).
+
 Prévisualiser puis appliquer sur un hôte :
 
 ```bash
@@ -756,7 +758,7 @@ Cette révision ajoute `hibernate_deployment: no`, le tag `hibernate`, la protec
 
 ### Preuves disponibles
 
-Les contrôles de cette révision sont détaillés dans [AUDIT_HIBERNATE_DEPLOYMENT.md](docs/AUDIT_HIBERNATE_DEPLOYMENT.md) et `DELIVERY.json`.
+Les contrôles de cette révision sont détaillés dans [CORRECTION_PASSERELLE_FRONT.md](docs/CORRECTION_PASSERELLE_FRONT.md) et `DELIVERY.json`. Les preuves BIND, sauvegarde et couverture de [AUDIT_HIBERNATE_DEPLOYMENT.md](docs/AUDIT_HIBERNATE_DEPLOYMENT.md) appartiennent à la livraison précédente ; elles ne sont pas présentées comme réexécutées pendant cette correction.
 
 Les tests de restauration utilisent les vrais tar, gzip, fichiers et empreintes. Les cinq scénarios sont aussi exécutables dans la racine d’un conteneur jetable sans namespaces imbriqués ; systemd, BIND et SELinux y sont des doubles. Les recettes DNS utilisent des démons réels dans un conteneur sans réseau externe. Les assertions d’inventaire emploient des facts RHEL simulés. Aucune de ces preuves ne vaut déploiement complet sur vos serveurs.
 
@@ -832,12 +834,12 @@ Bind9-Ansible/
 └── README.md
 ```
 
-Cette révision part de `Bind9-Ansible-management-fiabilite.zip`, SHA-256 `212c5f983928d39972060f49a40134f36b95459199b6af823109e007d699344a`. Elle remplace le paramètre de reconstruction par `hibernate_deployment`, durcit la concurrence et les contrôles DNS et rend les tests compatibles avec Python 3.6.8. Inventaires, templates DNS et algorithme d’ajout des routes restent inchangés. Voir [AUDIT_HIBERNATE_DEPLOYMENT.md](docs/AUDIT_HIBERNATE_DEPLOYMENT.md) et `DELIVERY.json`.
+Cette révision part de `Bind9-Ansible-hibernate-deployment.zip`, SHA-256 `63f826d85deb0ce68ee45dbe87a77fade81df44f636e5fdd0749281d2052c992`. Elle corrige et partage la découverte de la passerelle FRONT entre le plan, les contrôles sous verrou, la vérification finale et le rollback. Inventaires, templates DNS, management, hibernation et ajout strictement additif des routes sont conservés. Voir [CORRECTION_PASSERELLE_FRONT.md](docs/CORRECTION_PASSERELLE_FRONT.md) et `DELIVERY.json`.
 
 Le ZIP source possède une empreinte SHA-256 externe. Sur le contrôleur Linux, depuis le dossier contenant ZIP et empreinte :
 
 ```bash
-sha256sum -c Bind9-Ansible-hibernate-deployment.zip.sha256
+sha256sum -c Bind9-Ansible-front-gateway.zip.sha256
 ```
 
 Après extraction, depuis la racine du projet :
@@ -850,7 +852,7 @@ Attendu : toutes les entrées correspondent. Le manifeste couvre les fichiers sa
 
 | Besoin | Document |
 |---|---|
-| Verrouillage, retrait opérateur et audit courant | [HIBERNATE_DEPLOYMENT.md](docs/HIBERNATE_DEPLOYMENT.md), [AUDIT_HIBERNATE_DEPLOYMENT.md](docs/AUDIT_HIBERNATE_DEPLOYMENT.md) |
+| Verrouillage et retrait opérateur | [HIBERNATE_DEPLOYMENT.md](docs/HIBERNATE_DEPLOYMENT.md), [AUDIT_HIBERNATE_DEPLOYMENT.md](docs/AUDIT_HIBERNATE_DEPLOYMENT.md) |
 | Fiabilité des données et I/O | [FIABILITE_DONNEES_ET_IO.md](docs/FIABILITE_DONNEES_ET_IO.md), [VALIDATION_FIABILITE_IO.md](docs/VALIDATION_FIABILITE_IO.md) |
 | Préservation live et intervention manuelle | [INTEGRITE_CONFIGURATION_LIVE.md](docs/INTEGRITE_CONFIGURATION_LIVE.md), [VALIDATION_FIABILITE_IO.md](docs/VALIDATION_FIABILITE_IO.md) |
 | CRUD ciblé, checksum, sceau et reprise | [MANAGEMENT.md](docs/MANAGEMENT.md), [VALIDATION_MANAGEMENT.md](docs/VALIDATION_MANAGEMENT.md) |
@@ -858,7 +860,7 @@ Attendu : toutes les entrées correspondent. Le manifeste couvre les fichiers sa
 | Recette DNS et RHEL | [TESTS_FONCTIONNELS.md](docs/TESTS_FONCTIONNELS.md), [VALIDATION_RHEL8.md](docs/VALIDATION_RHEL8.md) |
 | Clients et ACL | [CLIENTS_UNIQUES.md](docs/CLIENTS_UNIQUES.md), [ACL_SERVEURS.md](docs/ACL_SERVEURS.md) |
 | Transport et zones natives | [TRANSPORT_DNS.md](docs/TRANSPORT_DNS.md), [LOOPBACK.md](docs/LOOPBACK.md) |
-| Routes et reprise | [FRONT_ROUTES.md](docs/FRONT_ROUTES.md), [VALIDATION_ROUTES_NATIVES.md](docs/VALIDATION_ROUTES_NATIVES.md) |
+| Routes, passerelle et reprise | [FRONT_ROUTES.md](docs/FRONT_ROUTES.md), [CORRECTION_PASSERELLE_FRONT.md](docs/CORRECTION_PASSERELLE_FRONT.md), [VALIDATION_ROUTES_NATIVES.md](docs/VALIDATION_ROUTES_NATIVES.md) |
 | DNSSEC et types | [DNSSEC.md](docs/DNSSEC.md), [DURCISSEMENT_DNSSEC.md](docs/DURCISSEMENT_DNSSEC.md) |
 | Logs et labels | [JOURNALISATION.md](docs/JOURNALISATION.md) |
 | Pare-feu DNS | [FIREWALLD.md](docs/FIREWALLD.md) |

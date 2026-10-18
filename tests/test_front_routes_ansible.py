@@ -93,6 +93,78 @@ class AnsibleRouteSandbox:
 
 
 class TestAnsibleNativeFrontRoutes:
+    @pytest.mark.parametrize('identity', ['', '--', UUID + '\n' + UUID, 'not-a-uuid'])
+    def test_invalid_active_profile_identity_is_refused_before_profile_reads(self, tmp_path, identity):
+        sandbox = AnsibleRouteSandbox(tmp_path)
+        sandbox.data['uuid'] = identity
+        sandbox.save()
+        result = sandbox.run()
+        assert result.returncode != 0, result.stdout
+        assert 'canonical active FRONT profile UUID' in result.stdout
+        assert sandbox.read() == sandbox.data
+        assert not sandbox.state_root.exists()
+
+    @pytest.mark.parametrize('source', ['active', 'front-default'])
+    def test_discovered_front_gateway_applies_and_is_idempotent(self, tmp_path, source):
+        """Exercise all phases; replacing only the planning guard is insufficient."""
+        sandbox = AnsibleRouteSandbox(tmp_path)
+        sandbox.data['gateway'] = ''
+        sandbox.data['active_gateway'] = '198.51.100.1' if source == 'active' else ''
+        if source == 'front-default':
+            sandbox.data['runtime'].append({'dst': 'default', 'dev': 'front0',
+                                            'gateway': '198.51.100.1', 'metric': 500})
+        sandbox.save()
+        before = copy.deepcopy(sandbox.data)
+        preview = sandbox.run(check=True)
+        assert preview.returncode == 0, preview.stdout
+        assert sandbox.read() == before
+        assert not sandbox.state_root.exists()
+        applied = sandbox.run()
+        assert applied.returncode == 0, applied.stdout
+        assert sandbox.read()['runtime'] == before['runtime'] + [NEW]
+        assert len(sandbox.read()['operations']) == 2
+        repeated = sandbox.run()
+        assert repeated.returncode == 0, repeated.stdout
+        assert len(sandbox.read()['operations']) == 2
+        assert 'changed=0' in repeated.stdout
+
+    def test_active_gateway_discovery_supports_selective_rollback(self, tmp_path):
+        sandbox = AnsibleRouteSandbox(tmp_path)
+        sandbox.data.update(gateway='', active_gateway='198.51.100.1', fail_active_once=True)
+        sandbox.save()
+        result = sandbox.run()
+        assert result.returncode != 0, result.stdout
+        assert sandbox.read()['persistent'] == [] and sandbox.read()['runtime'] == BASE
+        assert len(sandbox.read()['operations']) == 3
+        assert not (sandbox.state_root / 'front-routes.lock').exists()
+
+    def test_active_gateway_conflict_is_refused_before_writes(self, tmp_path):
+        sandbox = AnsibleRouteSandbox(tmp_path)
+        sandbox.data['active_gateway'] = '198.51.100.11'
+        sandbox.save()
+        result = sandbox.run()
+        assert result.returncode != 0, result.stdout
+        assert 'Require one consistent existing FRONT IPv4 gateway' in result.stdout
+        assert sandbox.read() == sandbox.data
+        assert not sandbox.state_root.exists()
+
+    @pytest.mark.parametrize('read_number', [2, 3])
+    def test_active_gateway_drift_is_caught_before_write_or_commit(self, tmp_path, read_number):
+        sandbox = AnsibleRouteSandbox(tmp_path)
+        sandbox.data.update(gateway='', active_gateway='198.51.100.1',
+                            drift_active_gateway_on_read=read_number)
+        sandbox.save()
+        result = sandbox.run()
+        assert result.returncode != 0, result.stdout
+        assert 'gateway changed since planning' in result.stdout
+        if read_number == 2:
+            assert sandbox.read()['operations'] == []
+            assert not (sandbox.state_root / 'front-routes.lock').exists()
+        else:
+            # A changed gateway invalidates rollback ownership; retain the journal.
+            assert len(sandbox.read()['operations']) == 2
+            assert (sandbox.state_root / 'front-routes.lock/plan.json').is_file()
+
     def test_two_empty_lists_fail_before_route_commands_even_with_routes_tag(self, tmp_path):
         sandbox = AnsibleRouteSandbox(tmp_path)
         result = sandbox.run(tags='routes', extra_vars={'bind_cloud_clients': [], 'bind_internal_clients': []})

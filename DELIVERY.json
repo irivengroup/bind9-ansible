@@ -1,68 +1,34 @@
 {
   "project": "Bind9-Ansible",
-  "release": "2026.10.18-hibernate-deployment.1",
-  "source_archive": "Bind9-Ansible-management-fiabilite.zip",
-  "source_sha256": "212c5f983928d39972060f49a40134f36b95459199b6af823109e007d699344a",
+  "release": "2026.10.18-front-gateway.1",
+  "source_archive": "Bind9-Ansible-hibernate-deployment.zip",
+  "source_sha256": "63f826d85deb0ce68ee45dbe87a77fade81df44f636e5fdd0749281d2052c992",
   "changed_files": [
-    ".github/workflows/ci.yml",
     "DELIVERY.json",
     "README.md",
     "SOURCE-MANIFEST.sha256",
-    "docs/AUDIT_HIBERNATE_DEPLOYMENT.md",
+    "docs/CORRECTION_PASSERELLE_FRONT.md",
     "docs/FRONT_ROUTES.md",
-    "docs/HIBERNATE_DEPLOYMENT.md",
-    "docs/IMPACTS_MANAGEMENT.md",
-    "docs/MANAGEMENT.md",
-    "docs/OPERATIONS.md",
-    "docs/PREUVES_HIBERNATE_DEPLOYMENT.txt",
-    "docs/VALIDATION_FIABILITE_IO.md",
-    "docs/VALIDATION_MANAGEMENT.md",
-    "roles/bind9/defaults/main.yml",
-    "roles/bind9/files/bind-configtool.sh",
-    "roles/bind9/files/named-healthcheck.sh",
-    "roles/bind9/filter_plugins/soa_health.py",
-    "roles/bind9/tasks/main.yml",
-    "roles/bind9/tasks/tasks.d/deploy/guard.yml",
-    "roles/bind9/tasks/tasks.d/deploy/health.yml",
-    "roles/bind9/tasks/tasks.d/deploy/hibernate.yml",
-    "roles/bind9/tasks/tasks.d/deploy/lease_release.yml",
-    "roles/bind9/tasks/tasks.d/deploy/main.yml",
-    "roles/bind9/tasks/tasks.d/deploy/primary_readiness.yml",
-    "roles/bind9/tasks/tasks.d/deploy/seal.yml",
-    "roles/bind9/tasks/tasks.d/manage/main.yml",
-    "tests/integration_backup_container.py",
-    "tests/integration_hibernate.py",
-    "tests/integration_logging.py",
-    "tests/integration_loopback.py",
-    "tests/test_archive_hardening.py",
-    "tests/test_configtool_axfr.py",
-    "tests/test_configtool_workflows.py",
-    "tests/test_deployment_contract.py",
-    "tests/test_deployment_lock_ansible.py",
-    "tests/test_dns_probe_hardening.py",
-    "tests/test_firewall_ansible.py",
-    "tests/test_logging_ansible.py",
-    "tests/test_management_ansible.py",
-    "tests/test_management_batch_ansible.py",
-    "tests/test_native_loopback.py",
-    "tests/test_private_dnssec.py",
-    "tests/test_private_dnssec_hardening.py",
-    "tests/test_security_remediation.py",
-    "tests/test_single_named_architecture.py",
-    "tests/test_soa_health.py",
-    "tests/test_tsig_hardening.py",
-    "tests/test_tsig_provisioning.py"
+    "docs/PREUVES_PASSERELLE_FRONT.txt",
+    "roles/bind9/tasks/tasks.d/deploy/front_return_routes.yml",
+    "roles/bind9/tasks/tasks.d/deploy/front_routes_before_write.yml",
+    "roles/bind9/tasks/tasks.d/deploy/front_routes_gateway.yml",
+    "roles/bind9/tasks/tasks.d/deploy/front_routes_plan.yml",
+    "roles/bind9/tasks/tasks.d/deploy/front_routes_rollback.yml",
+    "roles/bind9/tasks/tasks.d/deploy/front_routes_verify.yml",
+    "tests/fixtures/native_network_cli.py",
+    "tests/test_front_routes_ansible.py",
+    "tests/test_native_front_routes.py"
+  ],
+  "modified_production": [
+    "roles/bind9/tasks/tasks.d/deploy/front_return_routes.yml",
+    "roles/bind9/tasks/tasks.d/deploy/front_routes_before_write.yml",
+    "roles/bind9/tasks/tasks.d/deploy/front_routes_gateway.yml",
+    "roles/bind9/tasks/tasks.d/deploy/front_routes_plan.yml",
+    "roles/bind9/tasks/tasks.d/deploy/front_routes_rollback.yml",
+    "roles/bind9/tasks/tasks.d/deploy/front_routes_verify.yml"
   ],
   "new_production_dependencies": [],
-  "entrypoints": [
-    "playbooks/bind9-deploy.yml",
-    "playbooks/bind9-management.yml"
-  ],
-  "targets": {
-    "os": "RHEL 8",
-    "ansible": "2.9.27",
-    "python_target": "3.6.8"
-  },
   "public_contract": {
     "parameter": "hibernate_deployment",
     "default": false,
@@ -80,107 +46,56 @@
     "tag_changes": "private seal from canonical live file only; no DNS provisioning or runtime health qualification",
     "shared_operation_lease": "always required for modifying role paths independently of hibernation"
   },
+  "targets": {
+    "os": "RHEL 8",
+    "ansible": "2.9.27",
+    "python_target": "3.6.8"
+  },
+  "entrypoints": [
+    "playbooks/bind9-deploy.yml",
+    "playbooks/bind9-management.yml"
+  ],
   "validation": {
     "status": "EXÉCUTÉ",
-    "global_suite": {
-      "passed": 1046,
-      "skipped": 5
-    },
-    "lock_route_suite": {
-      "passed": 99,
-      "skipped": 0
-    },
-    "last_guards": {
-      "passed": 19,
-      "skipped": 0
-    },
-    "scope_note": "Overlapping suites. Last standalone pending-route guard scenario added after global collection and covered by final targeted runs.",
-    "management_suite": {
-      "passed": 352,
-      "skipped": 0
-    },
-    "management_coverage_percent": 98.20493642483171,
-    "management_statements": 1337,
-    "management_missing": 24,
-    "dns_secret_suite": {
-      "passed": 265,
-      "skipped": 0
-    },
-    "dns_secret_coverage_percent": 99.74489795918367,
-    "dns_secret_statements": 392,
-    "dns_secret_missing": 1,
-    "minimum_coverage_percent": 98,
-    "native_hibernation": {
-      "configurations_loaded": 108,
-      "ansible_native_loopback_probes": 8,
-      "periodic_monitor_wire_check": true,
-      "systemctl_monitor_double": true,
-      "hibernate_public_playbook_native_checker": true,
-      "check_then_create_then_idempotent": true,
-      "disabled_setting_cannot_bypass_seal": true,
-      "native_files_unchanged": true
-    },
-    "native_management": [
-      {
-        "transactions": 12,
-        "dnssec": "no",
-        "native_validation_reload_wire_dns": true,
-        "real_archives": true,
-        "unavailable_forwarder_rollback_after_cached_answer": true,
-        "mixed_batch_transactions": 2,
-        "joint_batch_rollback": true,
-        "invalid_late_batch_rdata_refused": true,
-        "catalogs_native": true,
-        "selinux_double": true
+    "suites": {
+      "final-route-tests.log": {
+        "passed": 146,
+        "skipped": 0
       },
-      {
-        "transactions": 12,
-        "dnssec": "auto",
-        "native_validation_reload_wire_dns": true,
-        "real_archives": true,
-        "unavailable_forwarder_rollback_after_cached_answer": true,
-        "mixed_batch_transactions": 2,
-        "joint_batch_rollback": true,
-        "invalid_late_batch_rdata_refused": true,
-        "catalogs_native": true,
-        "selinux_double": true
+      "general-tests.log": {
+        "passed": 964,
+        "skipped": 0
       }
-    ],
-    "native_backups": {
-      "existing_workflow_assertions_executed": [
-        "test_backup_restore_preserves_unrelated_files",
-        "test_active_named_is_rejected_before_overwriting_configuration",
-        "test_symlink_destination_never_deletes_an_external_owned_zone",
-        "test_general_directory_is_not_chmodded_as_backup_root",
-        "test_label_failure_is_fatal_and_preserves_safety_archive"
-      ],
-      "isolation": "disposable standard container root; no nested mounts",
-      "systemd_bind_selinux_doubles": true
     },
-    "syntax_checks": 6,
-    "preflight_inventories": 3,
-    "preflight_hosts": 12,
-    "static_analysis": [
-      "Bandit 1.7.10",
-      "Pyflakes 3.2.0"
-    ],
-    "production_bytes_compared": 67,
-    "report": "docs/AUDIT_HIBERNATE_DEPLOYMENT.md",
-    "proof": "docs/PREUVES_HIBERNATE_DEPLOYMENT.txt"
+    "contracts": {
+      "syntax_checks": 6,
+      "python_compiled": 70,
+      "shell_scripts": 6
+    },
+    "suite_overlap": true,
+    "python": "3.6.8",
+    "ansible": "2.9.27",
+    "jinja2": "2.10.3",
+    "before_regression_failures": 2,
+    "native_network_commands": false,
+    "report": "docs/CORRECTION_PASSERELLE_FRONT.md",
+    "proof": "docs/PREUVES_PASSERELLE_FRONT.txt"
   },
   "preserved": [
-    "management engine and module",
-    "inventories",
     "DNS templates",
-    "native FRONT route algorithm"
+    "inventories",
+    "public variables and tags",
+    "management engine",
+    "hibernation",
+    "additive-only route changes",
+    "route recovery journal schema"
   ],
   "production_qualification": {
     "status": "NON TERMINÉE",
     "remaining": [
-      "user RHEL pair deployment",
-      "real systemd/SELinux/firewalld/NetworkManager",
-      "physical storage/crash/load qualification",
-      "remote CI matrix and long DNSSEC lifecycle"
+      "native user RHEL 8 NetworkManager/iproute2 and SSH workflow",
+      "reboot persistence and system deployment on user servers",
+      "remote CI matrix, physical concurrent operator changes"
     ]
   }
 }
