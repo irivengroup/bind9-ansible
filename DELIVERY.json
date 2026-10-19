@@ -1,18 +1,16 @@
 {
   "project": "Bind9-Ansible",
-  "release": "2026.10.19-deploy-auto-routes.1",
-  "source_archive": "Bind9-Ansible-dnssec-consolide.zip",
-  "source_sha256": "eb3d0345a3ee3575569f82809ee640cd1f24687140cd061a2e468e8ae9aa7ba8",
+  "release": "2026.10.19-routes-only.1",
+  "source_archive": "Bind9-Ansible-deploiement-auto-routes.zip",
+  "source_sha256": "1f263838813a9e369a9286f52c03e4a1b2e3eeddda96089b335233bea3913bde",
   "production_identical_to_source": true,
   "changed_files": [
     "DELIVERY.json",
     "README.md",
     "SOURCE-MANIFEST.sha256",
-    "docs/DNSSEC.md",
+    "docs/FRONT_ROUTES.md",
     "docs/OPERATIONS.md",
-    "tests/fixtures/deployment_systemd.py",
-    "tests/integration_deploy_auto_routes.py",
-    "tests/test_global_review.py"
+    "tests/integration_deploy_auto_routes.py"
   ],
   "removed_files": [],
   "new_runtime_dependencies": [],
@@ -34,7 +32,22 @@
     "roles/bind9/module_utils/bind9_management.py": "70ff6326458715c26acbd32a318f2414718975d276002a236715459231565376",
     "roles/bind9/tasks/main.yml": "81a7bb3771ca9cf6ce83d93072fa0859d23ce78c3cc5285bd05d9fa4ed566c40",
     "roles/bind9/tasks/manage.yml": "b1705f0bdfc026d263ecf202225290066d52a4295d6ebfdd94bf557cc0890be7",
+    "roles/bind9/templates/authoritative.zone.j2": "eb8c7147c6afeb44ae53340b2d14591b39d9bc06399bbde589f9daefa91f9bce",
+    "roles/bind9/templates/empty-root.zone.j2": "536fc454cb050fd131325d7e57401f5a3015ace209a48917fcf34b195a9a6f44",
+    "roles/bind9/templates/named-healthcheck.service.j2": "fdfff9de4a1ce28acf6df695244ac7722462b8c0ea5dd414baff8fe7135bf000",
+    "roles/bind9/templates/named-runtime-override.j2": "fb57a972b89c309dbed32873f9f5194a3eaad8df36341e8471c93130cda73244",
+    "roles/bind9/templates/named.conf.j2": "8fb934f03c4cb18741c35c2c2ca7ee7511fef0ab42573a3cfd9ee362b3a33545",
+    "roles/bind9/templates/reverse.zone.j2": "6dc38fbceb1697e98ef27d0bdd03450589b8e20bd49d906d51e5bc05a2d028f4",
     "roles/bind9/tasks/tasks.d/clients.yml": "7433855305f84ede2c65d61b160857e0f08b69c9cf37d0bff052abb9a5d1a3b4",
+    "roles/bind9/tasks/tasks.d/dnssec_activate.yml": "9efc895a810e89b3e742fbf4b6ec8e5404bdce2ad10aefd298cb19fbbeb3969a",
+    "roles/bind9/tasks/tasks.d/dnssec_prepare.yml": "48501e2065b527b718403754f62216b3d241bec58474da14e56834de9178046f",
+    "roles/bind9/tasks/tasks.d/dnssec_settings.yml": "d3e20d58c973def9bce02bf95e1b8691bf2733b2bd4299956f94f6d55cd3cb8c",
+    "roles/bind9/tasks/tasks.d/named_runtime.yml": "fe83a1860619ae53933e8b3ba0071dfcb0f2bd3496b91c9eef0298ed4ff218e8",
+    "roles/bind9/tasks/tasks.d/native_loopback.yml": "816c5e4f4d036e555b7d491f84e94ca99ad6eeb6ab5165482ee43ce0a320367d",
+    "roles/bind9/tasks/tasks.d/path_safety.yml": "e38443f0e085425db1c284d4091a5bbe5b35fba26b0f5e50fdf6d8441114b5aa",
+    "roles/bind9/tasks/tasks.d/runtime_restore.yml": "b630008725f188471b809f83ced9e9eb5761d57c2312d262de5daa4e04c345d0",
+    "roles/bind9/tasks/tasks.d/runtime_snapshot.yml": "a303e9b77b140b19d10d5ccf1fd8f6bc7cbb88107d49f91508a714a310bf0234",
+    "roles/bind9/tasks/tasks.d/site_peers.yml": "1836dce109c7f6cfd875896787758ebfddad0bc203000bdf9cefa3fd7b2b59ff",
     "roles/bind9/tasks/tasks.d/deploy/configuration.yml": "88d030cfa0f407cb38fb6449374708660c9d1cce6f6bb783cb515d9a74764387",
     "roles/bind9/tasks/tasks.d/deploy/directories.yml": "06b19318e70b603d82961a60048a478c3974a630819ab13161c6dae403e1a0b0",
     "roles/bind9/tasks/tasks.d/deploy/firewall.yml": "ca32a70fda607b94affd77cb0b77bbbe44aa233c1e8d5b17025e49248ff85be8",
@@ -56,89 +69,155 @@
     "roles/bind9/tasks/tasks.d/deploy/validate.yml": "fa5208ab2268587cde94806ff5d63f57e691533ceda41da1ae0c81708ed05098",
     "roles/bind9/tasks/tasks.d/deploy/verify.yml": "91fd10c9e98e3c8a25bf842fd1ad486b8f660147f408b99a6090ccc95f2db8fb",
     "roles/bind9/tasks/tasks.d/deploy/zones.yml": "cfb217a3dc7fc6bc47a83e442f05867e044226685fe5b5112528b4e8ae339abd",
-    "roles/bind9/tasks/tasks.d/dnssec_activate.yml": "9efc895a810e89b3e742fbf4b6ec8e5404bdce2ad10aefd298cb19fbbeb3969a",
-    "roles/bind9/tasks/tasks.d/dnssec_prepare.yml": "48501e2065b527b718403754f62216b3d241bec58474da14e56834de9178046f",
-    "roles/bind9/tasks/tasks.d/dnssec_settings.yml": "d3e20d58c973def9bce02bf95e1b8691bf2733b2bd4299956f94f6d55cd3cb8c",
-    "roles/bind9/tasks/tasks.d/manage/main.yml": "4c6106c9e05f70571868eeb619402876d47d3189c82967c904f8f4193c36bc2e",
-    "roles/bind9/tasks/tasks.d/named_runtime.yml": "fe83a1860619ae53933e8b3ba0071dfcb0f2bd3496b91c9eef0298ed4ff218e8",
-    "roles/bind9/tasks/tasks.d/native_loopback.yml": "816c5e4f4d036e555b7d491f84e94ca99ad6eeb6ab5165482ee43ce0a320367d",
-    "roles/bind9/tasks/tasks.d/path_safety.yml": "e38443f0e085425db1c284d4091a5bbe5b35fba26b0f5e50fdf6d8441114b5aa",
-    "roles/bind9/tasks/tasks.d/runtime_restore.yml": "b630008725f188471b809f83ced9e9eb5761d57c2312d262de5daa4e04c345d0",
-    "roles/bind9/tasks/tasks.d/runtime_snapshot.yml": "a303e9b77b140b19d10d5ccf1fd8f6bc7cbb88107d49f91508a714a310bf0234",
-    "roles/bind9/tasks/tasks.d/site_peers.yml": "1836dce109c7f6cfd875896787758ebfddad0bc203000bdf9cefa3fd7b2b59ff",
-    "roles/bind9/templates/authoritative.zone.j2": "eb8c7147c6afeb44ae53340b2d14591b39d9bc06399bbde589f9daefa91f9bce",
-    "roles/bind9/templates/empty-root.zone.j2": "536fc454cb050fd131325d7e57401f5a3015ace209a48917fcf34b195a9a6f44",
-    "roles/bind9/templates/named-healthcheck.service.j2": "fdfff9de4a1ce28acf6df695244ac7722462b8c0ea5dd414baff8fe7135bf000",
-    "roles/bind9/templates/named-runtime-override.j2": "fb57a972b89c309dbed32873f9f5194a3eaad8df36341e8471c93130cda73244",
-    "roles/bind9/templates/named.conf.j2": "8fb934f03c4cb18741c35c2c2ca7ee7511fef0ab42573a3cfd9ee362b3a33545",
-    "roles/bind9/templates/reverse.zone.j2": "6dc38fbceb1697e98ef27d0bdd03450589b8e20bd49d906d51e5bc05a2d028f4"
+    "roles/bind9/tasks/tasks.d/manage/main.yml": "4c6106c9e05f70571868eeb619402876d47d3189c82967c904f8f4193c36bc2e"
   },
-  "new_test_sha256": {
-    "tests/fixtures/deployment_systemd.py": "e61de2d81933fbfd303b124a9cd0f134314f3edf16e8aed638fb99de9eb951d6",
-    "tests/integration_deploy_auto_routes.py": "a20b1d59c2929bfddfdbb61cc5bad2f7152d60b3d85b960d109280770813fc81"
-  },
+  "integration_test_sha256": "6158815404323c7990ec1e261c4b4902e99a27a55cc077a24838ae332d8d9533",
   "validation": {
     "primary": {
       "status": "EXÉCUTÉ",
       "result": {
         "status": "EXÉCUTÉ",
+        "scenario": "routes-only",
         "role": "primary",
         "runs": [
           {
-            "label": "fresh",
-            "rc": 0
+            "label": "fixture-dns-without-routes",
+            "rc": 0,
+            "tags": null,
+            "check": false,
+            "recap": "*********************************************************************\nprimary                    : ok=107  changed=21   unreachable=0    failed=0    skipped=87   rescued=0    ignored=0"
           },
           {
-            "label": "repeat",
-            "rc": 0
+            "label": "fixture-hibernate",
+            "rc": 0,
+            "tags": "hibernate",
+            "check": false,
+            "recap": "*********************************************************************\nprimary                    : ok=32   changed=1    unreachable=0    failed=0    skipped=14   rescued=0    ignored=0"
           },
           {
-            "label": "rollback",
-            "rc": 2
+            "label": "routes-check",
+            "rc": 0,
+            "tags": "routes",
+            "check": true,
+            "recap": "*********************************************************************\nprimary                    : ok=28   changed=1    unreachable=0    failed=0    skipped=18   rescued=0    ignored=0"
+          },
+          {
+            "label": "routes-apply",
+            "rc": 0,
+            "tags": "routes",
+            "check": false,
+            "recap": "*********************************************************************\nprimary                    : ok=30   changed=1    unreachable=0    failed=0    skipped=16   rescued=0    ignored=0"
+          },
+          {
+            "label": "routes-repeat",
+            "rc": 0,
+            "tags": "routes",
+            "check": false,
+            "recap": "*********************************************************************\nprimary                    : ok=30   changed=0    unreachable=0    failed=0    skipped=16   rescued=0    ignored=0"
           }
         ],
-        "public_playbook": true,
-        "dnssec_auto": true,
-        "front_routes_enabled": true,
-        "native_dns_rndc_nta_networkmanager_routes": true,
+        "routes_added": [
+          {
+            "dst": "172.21.7.23",
+            "gateway": "198.51.100.1",
+            "dev": "front0",
+            "metric": 100,
+            "flags": []
+          },
+          {
+            "dst": "203.0.113.0/24",
+            "gateway": "198.51.100.1",
+            "dev": "front0",
+            "metric": 100,
+            "flags": []
+          }
+        ],
+        "persistent_front_routes": "172.16.0.0/24 198.51.100.1 150, 172.21.7.23/32 198.51.100.1 100, 203.0.113.0/24 198.51.100.1 100",
+        "dns_files_inodes_mtimes_owners_permissions_unchanged": true,
+        "service_pid_and_operations_unchanged": true,
+        "dnssec_auto_and_manual_nta_unchanged": true,
+        "completion_seal_and_previous_lease_preserved": true,
+        "check_writes_nothing": true,
+        "repeat_changed_zero": true,
         "cloud_udp_tcp_roundtrip": true,
-        "secondary_front_address": true,
-        "system_default_only_back": true,
-        "existing_routes_back_adm_and_pending_dns_preserved": true,
-        "semantic_idempotence": true,
-        "rollback_new_routes_only": true,
+        "front_secondary_ip_gateway_not_system_default": true,
+        "back_adm_existing_routes_pending_dns_preserved": true,
         "systemd_firewall_selinux_are_contracts_not_system_qualification": true
       },
-      "evidence_sha256": "4fc083ea8e85b6ff4c57b6ebd99c28109d00394f56068e9ece3628c1398e1b10"
+      "evidence_sha256": "6acd071260480ef7040337df43467c17feefa86953f9650ddb590ae1884df155"
     },
     "secondary": {
       "status": "EXÉCUTÉ",
       "result": {
         "status": "EXÉCUTÉ",
+        "scenario": "routes-only",
         "role": "secondary",
         "runs": [
           {
-            "label": "fresh",
-            "rc": 0
+            "label": "fixture-dns-without-routes",
+            "rc": 0,
+            "tags": null,
+            "check": false,
+            "recap": "*********************************************************************\nsecondary                  : ok=105  changed=20   unreachable=0    failed=0    skipped=89   rescued=0    ignored=0"
           },
           {
-            "label": "repeat",
-            "rc": 0
+            "label": "fixture-hibernate",
+            "rc": 0,
+            "tags": "hibernate",
+            "check": false,
+            "recap": "*********************************************************************\nsecondary                  : ok=32   changed=1    unreachable=0    failed=0    skipped=14   rescued=0    ignored=0"
+          },
+          {
+            "label": "routes-check",
+            "rc": 0,
+            "tags": "routes",
+            "check": true,
+            "recap": "*********************************************************************\nsecondary                  : ok=28   changed=1    unreachable=0    failed=0    skipped=18   rescued=0    ignored=0"
+          },
+          {
+            "label": "routes-apply",
+            "rc": 0,
+            "tags": "routes",
+            "check": false,
+            "recap": "*********************************************************************\nsecondary                  : ok=30   changed=1    unreachable=0    failed=0    skipped=16   rescued=0    ignored=0"
+          },
+          {
+            "label": "routes-repeat",
+            "rc": 0,
+            "tags": "routes",
+            "check": false,
+            "recap": "*********************************************************************\nsecondary                  : ok=30   changed=0    unreachable=0    failed=0    skipped=16   rescued=0    ignored=0"
           }
         ],
-        "public_playbook": true,
-        "dnssec_auto": true,
-        "front_routes_enabled": true,
-        "native_dns_rndc_nta_networkmanager_routes": true,
+        "routes_added": [
+          {
+            "dst": "172.21.7.23",
+            "gateway": "198.51.100.1",
+            "dev": "front0",
+            "metric": 100,
+            "flags": []
+          },
+          {
+            "dst": "203.0.113.0/24",
+            "gateway": "198.51.100.1",
+            "dev": "front0",
+            "metric": 100,
+            "flags": []
+          }
+        ],
+        "persistent_front_routes": "172.16.0.0/24 198.51.100.1 150, 172.21.7.23/32 198.51.100.1 100, 203.0.113.0/24 198.51.100.1 100",
+        "dns_files_inodes_mtimes_owners_permissions_unchanged": true,
+        "service_pid_and_operations_unchanged": true,
+        "dnssec_auto_and_manual_nta_unchanged": true,
+        "completion_seal_and_previous_lease_preserved": true,
+        "check_writes_nothing": true,
+        "repeat_changed_zero": true,
         "cloud_udp_tcp_roundtrip": true,
-        "secondary_front_address": true,
-        "system_default_only_back": true,
-        "existing_routes_back_adm_and_pending_dns_preserved": true,
-        "semantic_idempotence": true,
-        "rollback_new_routes_only": false,
+        "front_secondary_ip_gateway_not_system_default": true,
+        "back_adm_existing_routes_pending_dns_preserved": true,
         "systemd_firewall_selinux_are_contracts_not_system_qualification": true
       },
-      "evidence_sha256": "d7bf10a2f5d60e558a1ad8a15b6bbb2033a2264d22eb5085609d2f9efe186a9b"
+      "evidence_sha256": "7613adffd8c77ec511463b4078ae1b56559d4d386b7e2dbcdc26b521c4ce4193"
     },
     "contracts": {
       "status": "EXÉCUTÉ",
@@ -152,28 +231,17 @@
     "targeted": {
       "status": "EXÉCUTÉ",
       "result": {
-        "passed": 232
+        "passed": 180,
+        "skipped": 0,
+        "warnings": 1
       },
-      "evidence_sha256": "0fa51463c7afedfc94fbdd3196f0e3bc40f7e01cc6972e458d2596d1583520a5"
-    },
-    "lab-guard-before": {
-      "status": "EXÉCUTÉ",
-      "result": "1 failed, 4 deselected",
-      "scope": "Test-harness cleanup safety; service commands replaced by an in-memory recorder",
-      "evidence_sha256": "83e1f61e4b7a0c631f6364bda8ac99bd58e1dc7a3be14feace993f09481efcba"
-    },
-    "lab-guard": {
-      "status": "EXÉCUTÉ",
-      "result": "5 passed, 4 deselected",
-      "scope": "Test-harness cleanup safety; service commands replaced by an in-memory recorder",
-      "evidence_sha256": "cde8042bbec670cb749c916c83920a639e7c9a669a0b6b2c43a0f0c36e15c003"
+      "evidence_sha256": "156aa8fd781a3983c8f2cb2b03f3840d5f7b47361210d694c5813746b6ff3e2e"
     }
   },
-  "deployment_runs": 5,
-  "successful_runs": 4,
-  "controlled_rollback_runs": 1,
+  "routes_only_runs": 6,
+  "fixture_setup_runs": 4,
   "native_lab_image_id": "sha256:215db17f4fd2f7632d2d7025ccd8cf0d14e28a2040807ec83c931f98a0441f01",
   "qualification_production": "NON TERMINÉE",
-  "remaining_controls": "docs/OPERATIONS.md#limites-et-recette-restante",
-  "historical_validation": "docs/DNSSEC.md"
+  "remaining_controls": "docs/FRONT_ROUTES.md#limites-et-recette-restante",
+  "historical_validation": "docs/OPERATIONS.md#déploiement-combiné-dnssec-auto-et-routes-front"
 }

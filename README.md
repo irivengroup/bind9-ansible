@@ -8,9 +8,9 @@ Le rôle produit une configuration unique `/etc/named.conf`, sans vues BIND. Il 
 
 **Configuration live :** le management conserve les clauses non ciblées et refuse toute création sur un nom déjà présent. Routes et management partagent une exclusion de processus, libérée automatiquement à sa fin ; un fichier vide restant ne bloque pas la suite. Les écritures restent conditionnées aux checksums et aux journaux de reprise. Les déploiements complets et interventions manuelles exigent une fenêtre exclusive. Voir [les garanties et limites](docs/VERIFICATION_SYNTAXE_SCRIPTS.md).
 
-**Révision courante : test de déploiement DNSSEC auto avec routes FRONT actives.** Déploiements primaire/secondaire, second passage et rollback combiné exercés dans un laboratoire EL8 avec BIND et NetworkManager natifs. Le code de production est conservé. [Périmètre et limites](docs/OPERATIONS.md#déploiement-combiné-dnssec-auto-et-routes-front).
+**Révision courante : essai du tag `routes` seul sur BIND déjà déployé.** Simulation, ajout persistant et à chaud, puis relance sans changement sur les rôles primaire et secondaire dans un laboratoire EL8. DNSSEC `auto`, fichiers DNS, processus et opérations de service sont préservés. [Résultats et limites](docs/FRONT_ROUTES.md#recette-du-tag-routes-seul).
 
-**Qualification opérationnelle : NON TERMINÉE pour la production.** Aucun serveur de votre environnement n’a été contacté. systemd/firewalld/SELinux restent des contrats de laboratoire ; résultats courants dans `DELIVERY.json` et [OPERATIONS.md](docs/OPERATIONS.md#déploiement-combiné-dnssec-auto-et-routes-front).
+**Qualification opérationnelle : NON TERMINÉE pour la production.** Aucun serveur de votre environnement n’a été contacté. systemd/firewalld/SELinux restent des contrats de laboratoire ; les preuves courantes figurent dans `DELIVERY.json` et [FRONT_ROUTES.md](docs/FRONT_ROUTES.md#recette-du-tag-routes-seul).
 
 Ce guide s’adresse aux équipes d’exploitation. Les commandes du contrôleur supposent Bash sous Linux, depuis la racine du projet. Les commandes de diagnostic système s’exécutent sur le serveur DNS indiqué. Toutes les adresses et tous les domaines d’exemple doivent être adaptés avant utilisation.
 
@@ -769,7 +769,7 @@ Si la cause reste inconnue, arrêter le changement, maintenir le pair sain et ap
 <a id="validation"></a>
 ## Validation, tests du projet et limites
 
-Cette révision ajoute un essai combiné du playbook public avec DNSSEC auto et routes FRONT actives ; voir [OPERATIONS.md](docs/OPERATIONS.md#déploiement-combiné-dnssec-auto-et-routes-front). La livraison source regroupait la préparation DNSSEC et sa documentation. Les tests de cycle de vie conservent les modes, l’idempotence, les migrations et le rollback ; les contenus et permissions runtime sont comparés à la livraison source. Résultats observés et périmètre dans `DELIVERY.json` et [DNSSEC.md](docs/DNSSEC.md).
+La livraison précédente ajoutait un essai combiné du playbook public avec DNSSEC auto et routes FRONT actives ; voir [OPERATIONS.md](docs/OPERATIONS.md#déploiement-combiné-dnssec-auto-et-routes-front). La livraison source regroupait la préparation DNSSEC et sa documentation. Les tests de cycle de vie conservent les modes, l’idempotence, les migrations et le rollback ; les contenus et permissions runtime sont comparés à la livraison source. Résultats observés et périmètre dans `DELIVERY.json` et [DNSSEC.md](docs/DNSSEC.md).
 
 ### Preuves disponibles
 
@@ -856,12 +856,12 @@ Bind9-Ansible/
 └── README.md
 ```
 
-La source de cette livraison est `Bind9-Ansible-dnssec-consolide.zip`, SHA-256 `eb3d0345a3ee3575569f82809ee640cd1f24687140cd061a2e468e8ae9aa7ba8`. Révision courante : `2026.10.19-deploy-auto-routes.1`. L’historique d’hibernation reste dans [AUDIT_HIBERNATE_DEPLOYMENT.md](docs/AUDIT_HIBERNATE_DEPLOYMENT.md) ; les preuves courantes sont dans [OPERATIONS.md](docs/OPERATIONS.md#déploiement-combiné-dnssec-auto-et-routes-front) et `DELIVERY.json`.
+La source de cette livraison est `Bind9-Ansible-deploiement-auto-routes.zip`, SHA-256 `1f263838813a9e369a9286f52c03e4a1b2e3eeddda96089b335233bea3913bde`. Révision courante : `2026.10.19-routes-only.1`. L’historique d’hibernation reste dans [AUDIT_HIBERNATE_DEPLOYMENT.md](docs/AUDIT_HIBERNATE_DEPLOYMENT.md) ; les preuves courantes sont dans [FRONT_ROUTES.md](docs/FRONT_ROUTES.md#recette-du-tag-routes-seul) et `DELIVERY.json`.
 
 Le ZIP source possède une empreinte SHA-256 externe. Sur le contrôleur Linux, depuis le dossier contenant ZIP et empreinte :
 
 ```bash
-sha256sum -c Bind9-Ansible-deploiement-auto-routes.zip.sha256
+sha256sum -c Bind9-Ansible-routes-seules.zip.sha256
 ```
 
 Après extraction, depuis la racine du projet :

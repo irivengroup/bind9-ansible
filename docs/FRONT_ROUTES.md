@@ -81,3 +81,97 @@ L’initialisation concurrente du dossier d’état est acceptée seulement si l
 ## Lisibilité et analyse du script
 
 La révision `2026.10.19-syntax.1` rend explicites les littéraux de phase (`'done'`, `'intent'`), les gardes conditionnelles et l’initialisation de la variable de capture. Les expressions régulières restent des expressions Bash natives : une coloration d’éditeur ne constitue pas une erreur de parsing. Les callbacks de sortie sont appelés par `trap` ; seules deux exceptions locales SC2329 documentent cette limite de l’analyseur. Les protections d’application/reprise ne sont pas supprimées. Voir [le contrôle des scripts](VERIFICATION_SYNTAXE_SCRIPTS.md).
+
+
+## Recette du tag routes seul
+
+Révision `2026.10.19-routes-only.1`. **EXÉCUTÉ** dans deux conteneurs EL8
+jetables distincts, un par rôle primaire/secondaire, avec Python 3.6.8,
+Ansible 2.9.27, Jinja2 2.10.3, BIND 9.11.36 et NetworkManager 1.40.16 natifs.
+Le code du rôle, les playbooks, les inventaires et la CI sont identiques à la
+livraison source ; aucun défaut de production n’a été reproduit dans ce périmètre.
+
+La préparation du banc installe une configuration DNS avec `dnssec-validation auto;`
+et routes désactivées, puis pose un vrai sceau avec `--tags hibernate`.
+Ces deux exécutions préparent uniquement le BIND déjà déployé du laboratoire.
+Le test demandé utilise ensuite **exclusivement `--tags routes`** :
+
+| Étape par rôle | Résultat observé |
+|---|---|
+| `--tags routes --check` | Aucun changement de route, de profil NetworkManager ou de fichiers DNS. |
+| `--tags routes` | Ajout de `203.0.113.0/24` et `172.21.7.23/32` dans le profil FRONT et dans le noyau. |
+| Même commande une seconde fois | `changed=0`, mêmes routes et même profil. |
+| Requêtes depuis un client cloud séparé | Réponses DNS attendues sur FRONT en UDP et TCP. |
+
+Le récapitulatif de simulation annonce `changed=1` pour les ajouts prévus ;
+ce compteur n'indique pas une écriture réseau. L'application annonce aussi
+`changed=1`, puis la répétition annonce `changed=0` sur chaque rôle.
+
+La passerelle système est uniquement sur BACK. L’IP de service FRONT est
+secondaire ; sa passerelle est récupérée depuis son propre profil, sans
+route par défaut FRONT active. Les routes préexistantes, les profils BACK/ADM
+et un changement DNS en attente sur le profil FRONT sont préservés.
+
+Les empreintes, inodes, dates de modification, droits et propriétaires des
+fichiers DNS statiques, clés TSIG/RNDC, helpers et unités sont comparés avant
+et après chaque étape. Le PID BIND et le registre des opérations de service
+restent identiques : aucun redémarrage/rechargement demandé par ces appels.
+Les exceptions DNSSEC du rôle et une exception manuelle sont conservées,
+ainsi que le sceau d’hibernation et les traces de l’ancien `.operation.lock`.
+Aucun journal `front-routes.pending` ne subsiste après succès. La simulation
+peut créer le fichier vide `operations.flock` et son dossier privé ; le champ
+de preuve `check_writes_nothing` désigne l’absence de changement réseau/DNS,
+pas l’absence de toute écriture temporaire de contrôle.
+
+**EXÉCUTÉ** : 180 tests ciblés sans exclusion ni test ignoré ; six
+contrôles de syntaxe Ansible, compilation de 76 fichiers Python et analyse
+syntaxique de sept scripts Bash. Les comptes des livraisons précédentes ne
+sont pas additionnés. `DELIVERY.json` contient les résultats et empreintes.
+Un avertissement de dépréciation de l'import `_yaml` provient du runtime
+PyYAML du laboratoire ; il est conservé dans la preuve, sans échec de test.
+
+### Reproduire le laboratoire
+
+Uniquement dans deux conteneurs neufs, isolés et déconnectés, disposant des
+prérequis du [banc combiné](OPERATIONS.md#reproduction), avec ses dépendances
+hors ligne dans `/runtime`. Ne jamais lancer le banc sur un serveur DNS :
+
+```bash
+export BIND_DEPLOY_ISOLATED=1
+python3 tests/integration_deploy_auto_routes.py --role primary --scenario routes
+# Dans un autre conteneur neuf :
+python3 tests/integration_deploy_auto_routes.py --role secondary --scenario routes
+```
+
+Le même fichier de test est étendu ; aucun nouveau fichier de production,
+service résident ou dépendance runtime n’est ajouté. Les tests existants et
+la protection du nettoyage du banc sont conservés.
+
+### Limites et recette restante
+
+**NON EXÉCUTÉ** : essai sur vos RHEL 8 avec systemd, firewalld, SELinux, SSH
+et reboot réels, faute d’accès et de système RHEL complet. Le banc substitue
+le transport systemd et firewalld, avec SELinux désactivé ; les commandes
+BIND/RNDC, les profils NetworkManager et le noyau réseau sont réels.
+Prérequis : hôte de recette représentatif, configuration BIND déjà active,
+inventaire complet des deux pairs, sauvegarde des profils/routes, fenêtre
+exclusive et accès ADM de secours. Lancer les deux commandes de la section
+« Préparer puis appliquer », puis contrôler `ip -4 route get` vers un client,
+`nmcli -g ipv4.routes connection show` sur le UUID FRONT et des requêtes DNS
+UDP/TCP depuis un client autorisé. Refaire les contrôles après reboot planifié.
+Attendu : deux magasins cohérents, retour par FRONT, défaut BACK conservé,
+DNS inchangé. Risque restant : différences de versions, confinement, accès
+SSH réel et persistance après redémarrage non reproduits ici.
+
+**NON EXÉCUTÉ** : CI distante, matrice de tous les contrôleurs et charge,
+sans dépôt distant ni environnement représentatif de capacité. Importer la
+livraison et exécuter la CI existante, puis mesurer sous la charge de recette ;
+attendu : contrôles réussis sans changement de seuil et capacité suffisante.
+Cette campagne ciblée ne requalifie pas tout le management ou le déploiement.
+Qualification de production **NON TERMINÉE**.
+
+Pour revenir à la livraison source, restaurer son archive sur le contrôleur :
+aucun changement runtime de cette révision n’exige de migration serveur.
+Les routes déjà committées restent additives ; les supprimer volontairement
+nécessite une intervention réseau ciblée et une sauvegarde préalable. Ne pas
+effacer les fichiers d’exclusion ou les journaux pour annuler des routes.

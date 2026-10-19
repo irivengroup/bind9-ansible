@@ -214,19 +214,96 @@ class CombinedDeployment:
     def routes(self):
         return json.loads(self.command(['ip', '-j', '-4', 'route', 'show', 'table', 'main']).stdout)
 
-    def deploy(self, label, variables=None, success=True):
+    def deploy(self, label, variables=None, success=True, tags=None, check=False):
         print('DEPLOY_STAGE=' + label, flush=True)
         request = dict(self.variables, **(variables or {}))
         parameters = self.work / (label + '.json')
         parameters.write_text(json.dumps(request))
-        result = self.command(['ansible-playbook', '-i', str(self.inventory_path),
+        argv = ['ansible-playbook', '-i', str(self.inventory_path),
             str(self.project / 'playbooks/bind9-deploy.yml'), '--limit', self.role,
-            '-e', '@' + str(parameters)], timeout=600, success=False)
+            '-e', '@' + str(parameters)]
+        if tags:
+            argv.extend(['--tags', tags])
+        if check:
+            argv.append('--check')
+        result = self.command(argv, timeout=600, success=False)
         (self.work / (label + '.log')).write_text(result.stdout)
         if (result.returncode == 0) is not success:
             raise RuntimeError(label + ' failed unexpectedly\n' + result.stdout[-16000:])
-        self.runs.append({'label': label, 'rc': result.returncode})
+        self.runs.append({'label': label, 'rc': result.returncode, 'tags': tags,
+                          'check': check, 'recap': result.stdout.split('PLAY RECAP')[-1].strip()})
         return result.stdout
+
+    def dns_snapshot(self):
+        """Freeze static DNS assets and service identity, excluding daemon caches/logs."""
+        paths = set(Path('/etc').glob('named*')) | set(Path('/etc').glob('rndc*'))
+        paths |= set(Path('/etc/systemd/system').glob('named*'))
+        paths |= set(Path('/usr/local/sbin').glob('*'))
+        paths |= {Path(name) for name in self.native}
+        paths |= {Path('/var/named/empty-root.zone'), self.work / 'units.json',
+                  self.native_named, Path(self.variables['bind_tsig_secret_file'])}
+        paths |= set(Path('/etc/named').rglob('*'))
+        paths |= set(Path('/var/lib/Bind9-Ansible').rglob('*'))
+        for parent in list(paths):
+            if parent.is_dir():
+                paths.update(parent.rglob('*'))
+        snapshot = {}
+        for path in paths:
+            # The route helper owns this empty flock inode, including in plan mode.
+            if str(path) == '/var/lib/Bind9-Ansible/operations.flock':
+                continue
+            if path.is_file() and not path.is_symlink():
+                metadata = path.stat()
+                snapshot[str(path)] = (hashlib.sha256(path.read_bytes()).hexdigest(),
+                    metadata.st_ino, metadata.st_mtime_ns, metadata.st_mode,
+                    metadata.st_uid, metadata.st_gid)
+        return snapshot
+
+    def routes_only(self):
+        """Prepare an existing DNS fixture, then exercise only the public routes tag."""
+        self.deploy('fixture-dns-without-routes', {'bind_front_routes_enabled': False})
+        self.command(['rndc', '-s', '127.0.0.1', '-k', '/etc/rndc.key',
+                      'nta', '-force', '-lifetime', '1w', 'manual.test'])
+        self.manual_nta = True
+        # A genuine completion seal must not prevent route maintenance.
+        self.deploy('fixture-hibernate', {'hibernate_deployment': True}, tags='hibernate')
+        old_lease = Path('/var/lib/Bind9-Ansible/.operation.lock')
+        old_lease.mkdir(mode=0o700)
+        (old_lease / 'operator-evidence').write_text('Previous operation: preserve this evidence.\n')
+        protected = self.dns_snapshot()
+        nta = self.command(['rndc', '-s', '127.0.0.1', '-k', '/etc/rndc.key', 'nta', '-dump']).stdout
+        before, profile = self.routes(), self.profile('front')
+        assert not any(row.get('dst') in ('203.0.113.0/24', '172.21.7.23') for row in before)
+        preview = self.deploy('routes-check', tags='routes', check=True)
+        assert self.routes() == before and self.profile('front') == profile
+        assert self.dns_snapshot() == protected, 'Route preview altered deployed DNS assets'
+        applied = self.deploy('routes-apply', tags='routes')
+        self.probes()
+        after, new_profile = self.routes(), self.profile('front')
+        added = [row for row in after if row not in before]
+        assert {row.get('dst') for row in added} == {'203.0.113.0/24', '172.21.7.23'}, added
+        assert all(row.get('dev') == 'front0' and row.get('gateway') == '198.51.100.1' for row in added), added
+        persistent = self.command(['nmcli', '-g', 'ipv4.routes', 'connection', 'show', 'front']).stdout
+        assert '203.0.113.0/24' in persistent and '172.21.7.23/32' in persistent, persistent
+        assert self.dns_snapshot() == protected, 'Route application altered deployed DNS assets'
+        repeated = self.deploy('routes-repeat', tags='routes')
+        self.probes()
+        assert 'changed=0' in repeated, repeated[-3000:]
+        assert self.routes() == after and self.profile('front') == new_profile
+        assert self.dns_snapshot() == protected, 'Repeated routing altered deployed DNS assets'
+        assert self.command(['rndc', '-s', '127.0.0.1', '-k', '/etc/rndc.key', 'nta', '-dump']).stdout == nta
+        forbidden = ('Install canonical named.conf', 'Install authoritative zone files',
+                     'Install BIND and SELinux tooling', 'Start or reload BIND')
+        assert not any(task in output for task in forbidden for output in (preview, applied, repeated))
+        print(json.dumps({'status': 'EXÉCUTÉ', 'scenario': 'routes-only', 'role': self.role,
+            'runs': self.runs, 'routes_added': added, 'persistent_front_routes': persistent.strip(),
+            'dns_files_inodes_mtimes_owners_permissions_unchanged': True,
+            'service_pid_and_operations_unchanged': True, 'dnssec_auto_and_manual_nta_unchanged': True,
+            'completion_seal_and_previous_lease_preserved': True,
+            'check_writes_nothing': True, 'repeat_changed_zero': True,
+            'cloud_udp_tcp_roundtrip': True, 'front_secondary_ip_gateway_not_system_default': True,
+            'back_adm_existing_routes_pending_dns_preserved': True,
+            'systemd_firewall_selinux_are_contracts_not_system_qualification': True}), flush=True)
 
     def probes(self):
         for transport in ('+notcp', '+tcp'):
@@ -255,7 +332,7 @@ class CombinedDeployment:
         if owned.isdigit() and int(owned) > 1 and owned == current:
             self.command(['/usr/sbin/rndc', '-s', '127.0.0.1', '-k', '/etc/rndc.key', 'stop'])
 
-    def execute(self):
+    def execute(self, scenario='combined'):
         try:
             self.prepare()
             print('PRODUCTION_SHA256=' + json.dumps({p.relative_to(self.root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
@@ -263,6 +340,9 @@ class CombinedDeployment:
             self.network()
             self.upstream()
             self.inventory()
+            if scenario == 'routes':
+                self.routes_only()
+                return
             self.deploy('fresh')
             self.probes()
             self.command(['rndc', '-s', '127.0.0.1', '-k', '/etc/rndc.key',
@@ -308,4 +388,6 @@ class CombinedDeployment:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--role', choices=['primary', 'secondary'], default='primary')
-    CombinedDeployment(parser.parse_args().role).execute()
+    parser.add_argument('--scenario', choices=['combined', 'routes'], default='combined')
+    arguments = parser.parse_args()
+    CombinedDeployment(arguments.role).execute(arguments.scenario)

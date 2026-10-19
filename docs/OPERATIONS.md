@@ -1,5 +1,7 @@
 # Opérations BIND 9 (RHEL 8+)
 
+**Recette courante :** [tag routes seul](FRONT_ROUTES.md#recette-du-tag-routes-seul). La section de déploiement combiné ci-dessous conserve les preuves de la livraison précédente.
+
 **Exclusion actuelle :** routes et management utilisent toujours un verrou de processus commun `/var/lib/Bind9-Ansible/operations.flock`, libéré automatiquement à la fin du processus. Le fichier vide peut rester présent sans bloquer une nouvelle opération. `bind_operation_lock_enabled: false` ignore uniquement le répertoire historique `.operation.lock` hors hibernation ; il ne désactive pas cette exclusion de processus. Les journaux incomplets sont des données de reprise, jamais des verrous à effacer. Organiser les déploiements DNS complets et interventions manuelles dans une fenêtre exclusive. [Fonctionnement, preuves et limites](REFONTE_ROUTES_MANAGEMENT.md).
 
 **Contrat actuel :** `hibernate_deployment: yes` génère un sceau après réussite du déploiement complet ; défaut `no`, sans nouveau sceau. Le tag isolé `hibernate`, avec ce paramètre à `yes`, permet de sceller uniquement la configuration existante sans redéploiement. Un sceau existant bloque toute reconstruction, même avec `no`, jusqu’à son [retrait explicite par un opérateur](HIBERNATE_DEPLOYMENT.md). `force` est retiré et refusé. Pour une modification ciblée préservant les autres interventions, utiliser [MANAGEMENT.md](MANAGEMENT.md), lecture et checksum obligatoires. Les procédures de reconstruction ci-dessous nécessitent le retrait préalable de tout sceau existant.
