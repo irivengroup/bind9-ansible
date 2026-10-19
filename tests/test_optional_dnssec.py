@@ -24,9 +24,14 @@ class TestOptionalDnssec:
         tasks=yaml.safe_load((self.ROLE/'tasks/tasks.d/deploy/main.yml').read_text())
         deployment=next(task for task in tasks if 'rescue' in task)
         imports={task['ansible.builtin.import_tasks']:task for task in deployment['block'] if 'ansible.builtin.import_tasks' in task}
-        for filename in ('dnssec_install.yml','dnssec_activate.yml','dnssec_disable.yml'):
-            expected=not enabled if filename=='dnssec_disable.yml' else enabled
-            assert TaskExpressions(result).condition([imports['{{ role_path }}/tasks/tasks.d/'+filename]['when']],result) is expected
+        prepare=imports['{{ role_path }}/tasks/tasks.d/dnssec_prepare.yml']
+        assert 'when' not in prepare
+        branches=yaml.safe_load((self.ROLE/'tasks/tasks.d/dnssec_prepare.yml').read_text())
+        assert len(branches)==2
+        for branch,expected in zip(branches,(not enabled,enabled)):
+            assert TaskExpressions(result).condition([branch['when']],result) is expected
+        assert TaskExpressions(result).condition(
+            [imports['{{ role_path }}/tasks/tasks.d/dnssec_activate.yml']['when']],result) is enabled
 
     @pytest.mark.parametrize('value',[None,0,1,2,[],{},'yes','no','AUTO','enabled','auto; any;',''])
     def test_unknown_values_cannot_silently_enable_or_disable_validation(self,value):
@@ -51,6 +56,10 @@ class TestOptionalDnssec:
         if value == '__omitted__':
             context.pop('bind_dnssec_active')
         output=Environment(undefined=StrictUndefined).from_string((self.ROLE/'templates/named.conf.j2').read_text()).render(**context)
+        # These are ceilings: upstream TTLs below them must not be increased.
+        assert output.count('max-cache-size 256m;') == 1
+        assert output.count('max-cache-ttl 3600;') == 1
+        assert output.count('max-ncache-ttl 300;') == 1
         assert 'dnssec-validation '+directive+';' in output
         assert ('managed-keys-directory' in output) is anchor
         assert ('/etc/named.root.key' in output) is anchor
@@ -67,14 +76,14 @@ class TestOptionalDnssec:
         assert tasks[0]['tags']==['always']
         deployment=next(task for task in tasks if 'rescue' in task)
         imports={task['ansible.builtin.import_tasks']:task for task in deployment['block'] if 'ansible.builtin.import_tasks' in task}
-        for name in ('dnssec_install.yml','dnssec_activate.yml'):
-            assert 'bind_dnssec_active' in imports['{{ role_path }}/tasks/tasks.d/'+name]['when']
-        assert 'bind_dnssec_active' in imports['{{ role_path }}/tasks/tasks.d/dnssec_disable.yml']['when']
+        branches=yaml.safe_load((self.ROLE/'tasks/tasks.d/dnssec_prepare.yml').read_text())
+        assert 'when' not in imports['{{ role_path }}/tasks/tasks.d/dnssec_prepare.yml']
+        assert 'bind_dnssec_active' in imports['{{ role_path }}/tasks/tasks.d/dnssec_activate.yml']['when']
         assert 'when' not in imports['{{ role_path }}/tasks/tasks.d/named_runtime.yml']
         evaluator=TaskExpressions(defaults)
-        for name in ('dnssec_install.yml','dnssec_activate.yml'):
-            assert evaluator.condition([imports['{{ role_path }}/tasks/tasks.d/'+name]['when']],defaults)
-        assert not evaluator.condition([imports['{{ role_path }}/tasks/tasks.d/dnssec_disable.yml']['when']],defaults)
+        assert evaluator.condition([imports['{{ role_path }}/tasks/tasks.d/dnssec_activate.yml']['when']],defaults)
+        assert not evaluator.condition([branches[0]['when']],defaults)
+        assert evaluator.condition([branches[1]['when']],defaults)
 
     def test_role_never_consumes_or_writes_intermediate_dnssec_facts(self):
         for folder in ('tasks','templates'):
@@ -93,7 +102,9 @@ class TestOptionalDnssec:
 
     def test_native_startup_and_administrative_reload_do_not_depend_on_dnssec(self):
         common=(self.ROLE/'templates/named-runtime-override.j2').read_text()
-        hook=(self.ROLE/'templates/named-dnssec-override.j2').read_text()
+        branches=yaml.safe_load((self.ROLE/'tasks/tasks.d/dnssec_prepare.yml').read_text())
+        hook=next(task['ansible.builtin.copy']['content'] for branch in branches
+                  for task in branch['block'] if task['name']=='Apply private exceptions before named start or reload completes')
         assert 'ExecStart=' not in common and 'rndc -s 127.0.0.1' in common
         assert 'listen-on-v6 { none; };' in (self.ROLE/'templates/named.conf.j2').read_text()
         assert 'bind-private-dnssec' not in common and 'ExecStartPost' not in common

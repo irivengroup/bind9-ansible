@@ -22,7 +22,7 @@ check_loopback() {
   }
   if ! complete_answer "$result" ||
      ! grep -Eq 'flags:.*\baa\b' <<<"$result" ||
-     ! grep -Eq "[[:space:]]IN[[:space:]]+$type[[:space:]]+$expected[[:space:]]*$" <<<"$result"; then
+     ! grep -Eq "[[:space:]]IN[[:space:]]+${type}[[:space:]]+${expected}[[:space:]]*$" <<<"$result"; then
     echo "CRITICAL loopback answer invalid: $name $type $transport"; exit 2
   fi
 }

@@ -79,6 +79,81 @@ grep -qx 'unrelated' /var/named/unrelated.file
 [[ $(bash "$tool" list --root "$backup_root") == "$archive" ]]
 ''')
 
+    def test_failed_initial_catalog_is_not_an_empty_success(self, tmp_path):
+        self.execute(tmp_path, r'''
+cat > "$fixture/bin/sort" <<'CLI'
+#!/bin/bash
+printf 'Injected archive catalog failure\n' >&2
+exit 2
+CLI
+chmod 755 "$fixture/bin/sort"
+if bash "$tool" list --root "$backup_root"; then exit 84; fi
+grep -qx 'original configuration' /etc/named.conf
+test -f /var/named/zones/example.zone
+''')
+
+    def test_failed_directory_metadata_blocks_backup_state_creation(self, tmp_path):
+        self.execute(tmp_path, r'''
+cat > "$fixture/bin/stat" <<'CLI'
+#!/bin/bash
+if [[ $1 == -c && $2 == '%u %a' ]]; then printf '0 700\n'; exit 1; fi
+exec /usr/bin/stat "$@"
+CLI
+chmod 755 "$fixture/bin/stat"
+if bash "$tool" list --root "$backup_root"; then exit 88; fi
+test ! -e "$backup_root"
+# Also reject a failed mode observation for a pre-existing private root.
+mkdir -p -m 700 "$backup_root"
+cat > "$fixture/bin/stat" <<'CLI'
+#!/bin/bash
+if [[ $1 == -c && $2 == '%a' ]]; then printf '700\n'; exit 1; fi
+exec /usr/bin/stat "$@"
+CLI
+if bash "$tool" list --root "$backup_root"; then exit 89; fi
+test ! -e "$backup_root/.lock"
+grep -qx 'original configuration' /etc/named.conf
+''')
+
+    def test_failed_retention_catalog_cannot_report_backup_success(self, tmp_path):
+        self.execute(tmp_path, r'''
+cat > "$fixture/bin/sort" <<'CLI'
+#!/bin/bash
+text=$(cat)
+if [[ $text == *'/named-config-'* ]]; then
+  printf '%s\n' "${text%%$'\n'*}"
+  printf 'Injected retention catalog failure\n' >&2
+  exit 2
+fi
+printf '%s\n' "$text" | /usr/bin/sort "$@"
+CLI
+chmod 755 "$fixture/bin/sort"
+if bash "$tool" backup --root "$backup_root" >"$fixture/receipt"; then exit 85; fi
+if grep -q '^BACKUP_CREATED ' "$fixture/receipt"; then exit 86; fi
+grep -qx 'original configuration' /etc/named.conf
+''')
+
+    def test_failed_restore_member_catalog_preserves_live_managed_zone(self, tmp_path):
+        self.execute(tmp_path, r'''
+created=$(bash "$tool" backup --root "$backup_root")
+archive=$(basename "${created#BACKUP_CREATED }")
+printf '; Bind9-Ansible-MANAGED-ZONE\noperator data\n' > /var/named/zones/new.zone
+expected_zone=$(sha256sum /var/named/zones/new.zone)
+printf 'operator configuration\n' > /etc/named.conf
+cat > "$fixture/bin/tar" <<'CLI'
+#!/bin/bash
+if [[ $1 == -tzf ]]; then
+  printf 'etc/named.conf\n'
+  printf 'Injected incomplete restore member catalog\n' >&2
+  exit 2
+fi
+exec /usr/bin/tar "$@"
+CLI
+chmod 755 "$fixture/bin/tar"
+if bash "$tool" restore --root "$backup_root" --archive "$archive"; then exit 87; fi
+[[ $(sha256sum /var/named/zones/new.zone) == "$expected_zone" ]]
+grep -qx 'operator configuration' /etc/named.conf
+''')
+
     def test_active_named_is_rejected_before_overwriting_configuration(self, tmp_path):
         self.execute(tmp_path, r'''
 created=$(bash "$tool" backup --root "$backup_root")

@@ -232,7 +232,7 @@ class LoopbackIntegration:
         anchor = 'trusted-keys { "' + domain + '" 257 3 13 "' + ''.join(public[3:]) + '"; };\n'
         return domain, signed, anchor
 
-    def exercise_replication(self, folder, original, validation='auto'):
+    def exercise_replication(self, folder, original, validation='auto', delay_primary=False):
         """Test initial TSIG transfer, signed NOTIFY convergence and forwarding."""
         primary = copy.deepcopy(original)
         primary.update(bind_dnssec_active=validation, bind_front_ip='127.0.0.2', bind_back_ip='127.0.0.3',
@@ -273,15 +273,40 @@ class LoopbackIntegration:
         uconf.write_text('options { directory "' + str(upstream) + '"; listen-on port ' + str(uport) + ' { 127.0.0.6; }; listen-on-v6 { none; }; recursion no; dnssec-validation no; pid-file "' + str(upstream / 'named.pid') + '"; }; controls { }; zone "' + forward_domain + '" { type master; file "' + str(zonefile) + '"; }; zone "' + secure_domain + '" { type master; file "' + str(secure_file) + '"; };')
         for reservation in reservations:
             reservation.close()
+        zone = primary['bind_authoritative_zones'][0]
+        record = next(x for x in zone['records'] if x['type'] == 'A')
+        query = record['name'] + '.' + zone['domain']
+        if delay_primary:
+            # Real delayed startup reproduces the previous first-SOA race;
+            # it never changes a server or the production BIND configuration.
+            delayed = folder / 'delay-primary.sh'
+            delayed.write_text('#!/bin/bash\nsleep 2\nexec "$@"\n')
         processes, logs = [], []
         try:
             for config in (uconf, pconf, sconf):
                 log = (config.parent / 'named.log').open('w+')
                 logs.append(log)
-                processes.append(subprocess.Popen([str(self.named), '-g', '-c', str(config), '-n', '1', '-U', '1'], stdout=log, stderr=log))
-            zone = primary['bind_authoritative_zones'][0]
-            record = next(x for x in zone['records'] if x['type'] == 'A')
-            query = record['name'] + '.' + zone['domain']
+                command = [str(self.named), '-g', '-c', str(config), '-n', '1', '-U', '1']
+                if config == pconf and delay_primary:
+                    command = ['bash', str(delayed)] + command
+                processes.append(subprocess.Popen(command, stdout=log, stderr=log))
+                if config == pconf:
+                    # A slave started before its master can enter BIND's native
+                    # refresh backoff. Require actual BACK DNS readiness first;
+                    # do not force retransfer or relax the convergence assertion.
+                    deadline = time.monotonic() + 15
+                    while time.monotonic() < deadline:
+                        answer = subprocess.run([str(self.bin_dir / 'dig'), '@127.0.0.3',
+                            '-p', str(pport), '-b', '127.0.0.5', '+time=1', '+tries=1',
+                            '+norecurse', '+short', query, 'A'], stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, universal_newlines=True, timeout=3)
+                        if answer.returncode == 0 and answer.stdout.strip() == record['value']:
+                            break
+                        if processes[-1].poll() is not None:
+                            raise AssertionError('Isolated primary failed before BACK DNS readiness')
+                        time.sleep(0.1)
+                    else:
+                        raise AssertionError('Isolated primary BACK DNS readiness timed out: ' + answer.stdout)
             def dig(destination, port, source, name, kind='A', transport='+notcp', short=True, timeout=1, cd=False):
                 argv = [str(self.bin_dir / 'dig'), '@' + destination, '-p', str(port), '-b', source,
                         transport, '+time=' + str(timeout), '+tries=1', name, kind]
@@ -298,6 +323,18 @@ class LoopbackIntegration:
                     raise AssertionError('Isolated primary/secondary/upstream failed to start')
                 time.sleep(0.1)
             else:
+                # Preserve native answers/status on failure; daemon logs alone
+                # cannot distinguish absent transfer from an unexpected answer.
+                for label, config, destination, port in (
+                    ('primary', pconf, '127.0.0.2', pport),
+                    ('secondary', sconf, '127.0.0.4', sport),
+                ):
+                    print(label + ' DNS answer: ' + dig(destination, port, '127.0.0.10', query, short=False))
+                    status = subprocess.run([str(self.bin_dir / 'rndc'), '-s', '127.0.0.1',
+                        '-p', str(self.control_ports[config]), '-k', str(config.parent / 'rndc.key'),
+                        'zonestatus', zone['domain']], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        universal_newlines=True, timeout=10)
+                    print(label + ' zone status: ' + status.stdout)
                 raise AssertionError('Initial signed zone transfer did not converge')
             checks = 1
             if validation is not False:
@@ -480,6 +517,12 @@ class LoopbackIntegration:
                 keyfile = folder / 'transfer.key'
                 keyfile.write_text('key "' + context['bind_tsig_key_name'] + '" { algorithm ' + context['bind_tsig_algorithm'] + '; secret "' + context['bind_tsig_secret'] + '"; };')
                 keyfile.chmod(0o600)
+                dig_help = subprocess.run([str(self.bin_dir / 'dig'), '-h'], stdout=subprocess.PIPE,
+                                          stderr=subprocess.STDOUT, universal_newlines=True).stdout
+                has_yaml = '+[no]yaml' in dig_help or '+yaml' in dig_help
+                # Keep explicit wire RCODE proof on native EL8 dig, where YAML
+                # output is unavailable; never accept "Transfer failed" alone.
+                display = ['+yaml'] if has_yaml else ['+noall', '+comments', '+answer']
                 for source, destination, signed, allowed in (
                     ('127.0.0.5', '127.0.0.3', True, True),
                     ('127.0.0.5', '127.0.0.3', False, False),
@@ -488,11 +531,11 @@ class LoopbackIntegration:
                     ('127.0.0.5', '127.0.0.2', True, True),
                     ('127.0.0.1', '127.0.0.1', True, False),
                 ):
-                    command = [str(self.bin_dir / 'dig'), '@' + destination, '-b', source, '-p', str(port), '+yaml', '+time=2', '+tries=1', zone['domain'], 'AXFR']
+                    command = [str(self.bin_dir / 'dig'), '@' + destination, '-b', source, '-p', str(port)] + display + ['+time=2', '+tries=1', zone['domain'], 'AXFR']
                     if signed:
                         command.extend(['-k', str(keyfile)])
                     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
-                    transferred = 'status: NOERROR' in result.stdout and result.stdout.count(' IN SOA ') == 2
+                    transferred = 'status: NOERROR' in result.stdout and len(re.findall(r'\sIN\s+SOA\s', result.stdout)) == 2
                     assert transferred == allowed, (source, destination, signed, result.stdout)
                     if not allowed:
                         # Only explicit DNS denial is proof of a refused transfer.
@@ -649,6 +692,7 @@ class LoopbackIntegration:
             queries += self.exercise_replication(root / 'unrelated', unrelated)
             queries += self.exercise_replication(root / 'manual-validation', copy.deepcopy(context), validation=True)
             queries += self.exercise_replication(root / 'validation-disabled', copy.deepcopy(context), validation=False)
+            queries += self.exercise_replication(root / 'delayed-primary', copy.deepcopy(context), validation=True, delay_primary=True)
             queries += self.exercise_ipv6_upstream(root / 'ipv6-upstream',context)
             count += 1
         assert native == {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in self.native_dir.iterdir() if p.is_file()}

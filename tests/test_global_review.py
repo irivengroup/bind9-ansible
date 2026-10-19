@@ -22,6 +22,36 @@ def policy(domain):
 class TestGlobalReview:
     """Check observable contracts, with only RNDC and the lock wait substituted."""
 
+    def test_combined_lab_refusal_never_attempts_a_native_service_stop(self, monkeypatch):
+        """A refused test launch must have no service-side cleanup effects."""
+        from integration_deploy_auto_routes import CombinedDeployment
+        lab = CombinedDeployment('primary')
+        calls = []
+        def refuse():
+            raise RuntimeError('Isolation precondition refused')
+        monkeypatch.setattr(lab, 'prepare', refuse)
+        monkeypatch.setattr(lab, 'command', lambda argv, **kwargs: calls.append(argv))
+        with pytest.raises(RuntimeError, match='Isolation precondition refused'):
+            lab.execute()
+        assert calls == []
+
+    @pytest.mark.parametrize('owned,current,stops', [(None, '50', False), ('50', None, False),
+                                                    ('50', '51', False), ('50', '50', True)])
+    def test_combined_lab_cleanup_requires_the_recorded_daemon_identity(self, tmp_path, monkeypatch, owned, current, stops):
+        """A stale/missing ownership receipt must preserve any other daemon."""
+        from integration_deploy_auto_routes import CombinedDeployment
+        lab = CombinedDeployment('primary')
+        lab.isolated = True
+        lab.owned_named, lab.native_named = tmp_path / 'owned.pid', tmp_path / 'actual.pid'
+        if owned is not None:
+            lab.owned_named.write_text(owned)
+        if current is not None:
+            lab.native_named.write_text(current)
+        calls = []
+        monkeypatch.setattr(lab, 'command', lambda argv, **kwargs: calls.append(argv))
+        lab.stop_owned_named()
+        assert bool(calls) is stops
+
     @pytest.mark.skipif(os.geteuid() != 0, reason='Requires root-owned policy/state')
     def test_waiting_renewal_reloads_policy_after_acquiring_lock(self, tmp_path, monkeypatch):
         config = tmp_path / 'named.conf'
@@ -62,8 +92,9 @@ class TestGlobalReview:
         assert render(bind_named_runtime_override={'changed': True}) == 'restarted'
         assert render(bind_named_override={'changed': False}) == 'reloaded'
         assert render() == 'reloaded'
-        install = yaml.safe_load((ROLE / 'tasks/tasks.d/dnssec_install.yml').read_text())
-        override = next(task for task in install if task['name'] == 'Apply private exceptions before named start or reload completes')
+        install = yaml.safe_load((ROLE / 'tasks/tasks.d/dnssec_prepare.yml').read_text())
+        override = next(task for branch in install for task in branch['block']
+                        if task['name'] == 'Apply private exceptions before named start or reload completes')
         assert override['register'] == 'bind_named_override'
 
     def test_dns_restore_stops_named_and_pauses_renewal_before_extraction(self):

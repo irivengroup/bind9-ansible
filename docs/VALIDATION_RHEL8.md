@@ -10,7 +10,7 @@ Le routage a été remplacé par des tâches Ansible natives sans dépendance aj
 intermédiaires et leur assertion sont supprimés ; les décisions utilisent
 l’entrée validée. Les contrôles `boolean` et `integer` nécessitant Jinja 2.11
 sont remplacés par `type_debug`, y compris dans le routage. Les valeurs
-invalides restent refusées. Impact : [DURCISSEMENT_DNSSEC.md](DURCISSEMENT_DNSSEC.md).
+invalides restent refusées. Impact : [Compatibilité DNSSEC](DNSSEC.md#compatibilité-et-migration).
 
 **EXÉCUTÉ** : suites sous Ansible 2.9.27 avec Jinja 2.10.3 et 3.0.3 ; rendu
 des trois modes, chaînes CLI et booléens, collisions extra-vars, contrôles de
@@ -37,7 +37,7 @@ Les dépréciations du vieux runtime sont affichées, pas masquées.
 | Python 3.6.8 extrait EL8 | **EXÉCUTÉ** | Compilation de tous les Python de production restants et réconciliation DNSSEC isolée ; aucun module Ansible/DNF exécuté sur un serveur RHEL |
 | Qualité | **EXÉCUTÉ** | Pyflakes, Bandit, compilation, syntaxe shell ; 62 YAML, 34 fichiers de tâches accessibles, 12 assets, un handler, onze variables par défaut et 11 filtres restants référencés |
 | IPv6 sortant / écoute | **EXÉCUTÉ** | Client IPv4 vers upstream IPv6, UDP et repli TCP prouvés par le journal upstream ; absence de listener DNS IPv6 en UDP/TCP, processus sans famille forcée |
-| Exemples DNS | **EXÉCUTÉ** | Campagne antérieure : deux zones forwardées, validation désactivée, rendus des deux rôles contrôlés par named-checkconf -z EL8. Le défaut actuel `auto` et ses preuves sont décrits dans [DEFAUT_DNSSEC_AUTO.md](DEFAUT_DNSSEC_AUTO.md). |
+| Exemples DNS | **EXÉCUTÉ** | Campagne antérieure : deux zones forwardées, validation désactivée, rendus des deux rôles contrôlés par named-checkconf -z EL8. Le défaut actuel `auto` et ses preuves sont décrits dans [Défaut DNSSEC et migration](DNSSEC.md#compatibilité-et-migration). |
 
 La suite complète et ses nombres exacts figurent dans `DELIVERY.json`. Les binaires EL8 sont des RPM AlmaLinux extraits sans installation/scriptlets et exécutés sous WSL Ubuntu avec leurs bibliothèques. La crypto-policy DEFAULT de laboratoire n’est pas la preuve d’une politique effective RHEL/FIPS. Les unités systemd, SELinux et le réseau de production ne sont pas qualifiés par ces essais.
 

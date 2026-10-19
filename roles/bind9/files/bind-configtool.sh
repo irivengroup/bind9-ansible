@@ -5,12 +5,13 @@ export LC_ALL=C
 # BEGIN ARCHIVE SAFETY HELPERS
 private_file() {
   # Never read secrets/archives through links, FIFOs or files shared by inode.
-  local file=$1 owner mode links
+  local file=$1 owner mode links observed
   [[ -f $file && ! -L $file ]] || { echo 'Expected a private regular file' >&2; return 1; }
-  read -r owner mode links < <(stat -c '%u %a %h' -- "$file")
-  [[ $owner == "$EUID" && $links == 1 ]] && (( (8#$mode & 077) == 0 )) || {
+  observed=$(stat -c '%u %a %h' -- "$file") || return 1
+  read -r owner mode links <<< "$observed" || return 1
+  if [[ $owner != "$EUID" || $links != 1 ]] || ! (( (8#$mode & 077) == 0 )); then
     echo 'Unsafe file ownership, permissions or link count' >&2; return 1;
-  }
+  fi
 }
 # END ARCHIVE SAFETY HELPERS
 usage() { echo 'usage: bind-configtool {backup [--force]|list|restore --archive FILE} [--root ABSOLUTE_DIR] | check-front-axfr FRONT_DNS_IP ZONE CLIENT_SOURCE_IP ROOT_ONLY_TSIG_KEYFILE' >&2; exit 2; }
@@ -26,9 +27,13 @@ check_front_axfr() {
   # Never echo the key or use dig -y: the secret must not appear in process arguments.
   for label in unsigned signed; do
     local -a args=(-r -4 +time=3 +tries=1 -b "$source" "@$server" "$zone" AXFR)
-    # Recent dig exposes the actual AXFR response RCODE in YAML. Older dig
-    # can print only "Transfer failed"; that is deliberately inconclusive.
-    [[ $dig_help == *'+[no]yaml'* || $dig_help == *'+yaml'* ]] && args+=(+yaml)
+    # Recent dig exposes AXFR RCODE in YAML; EL8 dig 9.11 needs explicit
+    # comments to expose that header. A generic transfer error stays inconclusive.
+    if [[ $dig_help == *'+[no]yaml'* || $dig_help == *'+yaml'* ]]; then
+      args+=(+yaml)
+    else
+      args+=(+noall +comments +answer)
+    fi
     [[ $label == signed ]] && args+=(-k "$keyfile")
     # A wire refusal can make dig exit nonzero; classify its DNS response.
     output=$(dig "${args[@]}" 2>&1) || true
@@ -71,16 +76,18 @@ probe=$root
 while [[ $probe != / ]]; do
   if [[ -e $probe || -L $probe ]]; then
     [[ -d $probe && ! -L $probe ]] || { echo 'Unsafe backup directory component' >&2; exit 1; }
-    read -r owner mode < <(stat -c '%u %a' -- "$probe")
-    [[ $owner == 0 ]] && (( (8#$mode & 022) == 0 || (8#$mode & 01000) != 0 )) || {
+    ancestor_metadata=$(stat -c '%u %a' -- "$probe") || { echo 'Backup ancestor metadata read failed' >&2; exit 1; }
+    read -r owner mode <<< "$ancestor_metadata"
+    if [[ $owner != 0 ]] || ! (( (8#$mode & 022) == 0 || (8#$mode & 01000) != 0 )); then
       echo 'Backup ancestors must be root-owned and not writable by others, except sticky ancestors' >&2; exit 1;
-    }
+    fi
   fi
   probe=$(dirname -- "$probe")
 done
 # Never chmod an existing general-purpose directory supplied as --root.
 if [[ -d $root ]]; then
-  [[ $(stat -c '%a' -- "$root") == 700 ]] || { echo 'Existing backup root must have mode 0700' >&2; exit 1; }
+  root_mode=$(stat -c '%a' -- "$root") || { echo 'Backup root metadata read failed' >&2; exit 1; }
+  [[ $root_mode == 700 ]] || { echo 'Existing backup root must have mode 0700' >&2; exit 1; }
 fi
 mkdir -p -- "$root"
 if [[ -e $root/.lock || -L $root/.lock ]]; then private_file "$root/.lock"; fi
@@ -90,12 +97,18 @@ flock -w 30 -x 9 || { echo 'Backup lock timed out; inspect the active operation'
 shopt -s nullglob
 archives=("$root"/named-config-????????T??????Z-????????.tar.gz)
 # Lexicographic order matches UTC timestamps.
-mapfile -t sorted < <(printf '%s\n' "${archives[@]}" | sed '/^$/d' | sort -r)
+# Check the producer before accepting a complete, possibly empty catalog.
+catalog=$(printf '%s\n' "${archives[@]}" | sed '/^$/d' | sort -r) || { echo 'Archive catalog read failed' >&2; exit 1; }
+sorted=()
+if [[ -n $catalog ]]; then mapfile -t sorted <<< "$catalog"; fi
 verify() {
-  local file=$1 entry listing details expected actual duplicate tar_bytes tail_bytes
+  local file=$1 entry listing details expected actual duplicate tar_bytes tail_bytes checksum_size
   local -a checksum_lines=()
   private_file "$file" && private_file "$file.sha256" || return 1
-  (( $(stat -c '%s' -- "$file.sha256") <= 512 )) || { echo 'Oversized checksum file' >&2; return 1; }
+  checksum_size=$(stat -c '%s' -- "$file.sha256") || return 1
+  if [[ ! $checksum_size =~ ^(0|[1-9][0-9]*)$ ]] || (( checksum_size > 512 )); then
+    echo 'Invalid or oversized checksum file' >&2; return 1;
+  fi
   mapfile -t checksum_lines < "$file.sha256"
   (( ${#checksum_lines[@]} == 1 )) || { echo 'Checksum must describe exactly one archive' >&2; return 1; }
   expected=${checksum_lines[0]:0:64}
@@ -159,7 +172,7 @@ restore_labels() {
 # Every backup invocation creates a uniquely named archive. --force is accepted
 # for compatibility but no longer changes the backup frequency.
 backup() {
-  local stamp target partial item cutoff timestamp epoch
+  local stamp target partial item cutoff timestamp epoch catalog
   safe_sources
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   target="$root/named-config-$stamp-$(od -An -N4 -tx1 /dev/urandom | tr -d " \n").tar.gz"
@@ -177,7 +190,11 @@ backup() {
   (cd "$root" && sha256sum -- "$(basename "$target")" >"$(basename "$target").sha256")
   chmod 0600 -- "$target" "$target.sha256"
   verify "$target"
-  mapfile -t sorted < <(find "$root" -maxdepth 1 -type f -name 'named-config-????????T??????Z-????????.tar.gz' -printf '%p\n' | sort -r)
+  catalog=$(find "$root" -maxdepth 1 -type f -name 'named-config-????????T??????Z-????????.tar.gz' -printf '%p\n' | sort -r) || {
+    echo 'Retention catalog read failed; no archive purged' >&2; return 1;
+  }
+  sorted=()
+  if [[ -n $catalog ]]; then mapfile -t sorted <<< "$catalog"; fi
   # Apply a 30-day UTC retention window based on the filename timestamp.
   # File mtimes are deliberately ignored because copying changes them.
   cutoff=$(date -u -d '30 days ago' +%s)
@@ -194,7 +211,7 @@ backup() {
   echo "BACKUP_CREATED $target"
 }
 restore() {
-  local target safety item
+  local target safety item member_listing
   [[ $archive_name =~ ^named-config-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}\.tar\.gz$ ]] || usage
   target="$root/$archive_name"
   verify "$target"
@@ -203,6 +220,11 @@ restore() {
   service_state=$(systemctl is-active named) || service_rc=$?
   [[ $service_rc == 3 || $service_rc == 4 ]] && [[ $service_state == inactive || $service_state == failed || $service_state == unknown ]] || {
     echo 'Stop named and confirm its inactive state before restore' >&2; return 1;
+  }
+  # Refuse a failed/partial member list before creating safety data or deleting
+  # any live project-owned zone. A process substitution would hide tar errors.
+  member_listing=$(tar -tzf "$target" | sed 's#^\./##') || {
+    echo 'Restore member catalog read failed; live data preserved' >&2; return 1;
   }
   safety=$(mktemp "$root/.restore-safety.XXXXXXXX")
   local -a members=()
@@ -215,7 +237,7 @@ restore() {
   # Remove only project-marked zone files absent from the backup, never unrelated files.
   # The current BIND service must be stopped before manual restore.
   local -a archived_files=()
-  mapfile -t archived_files < <(tar -tzf "$target" | sed 's#^\./##')
+  if [[ -n $member_listing ]]; then mapfile -t archived_files <<< "$member_listing"; fi
   local existing relative preserved
   for existing in /var/named/zones/*.zone; do
     [[ -f "$existing" && ! -L "$existing" ]] || continue

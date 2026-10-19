@@ -2,6 +2,7 @@
 from pathlib import Path
 import sys
 import ast
+import yaml
 
 from jinja2 import Environment, StrictUndefined
 
@@ -77,13 +78,24 @@ def test_named_conf_render_secondary_front_only():
     assert 'allow-notify { !{ !bind_primary_back_ip; any; }; key "site-transfer"; };' in out
 
 
-def test_configuration_task_deploys_single_file_and_removes_old_fragments():
-    s = (ROLE / 'tasks/tasks.d/deploy/configuration.yml').read_text()
-    assert 'src: named.conf.j2' in s
-    assert 'dest: /etc/named.conf' in s
-    assert 'no_log: true' in s
-    assert '/etc/named/40-views.conf' in s
-    assert 'state: absent' in s
+def test_configuration_task_preserves_fragments_and_retains_other_operations():
+    """Deploying named.conf must no longer delete existing configuration fragments."""
+    tasks = yaml.safe_load((ROLE / 'tasks/tasks.d/deploy/configuration.yml').read_text())
+    assert [task['name'] for task in tasks] == [
+        'Deploy the single canonical BIND configuration',
+        'Remove obsolete transaction executable from previous deployments',
+    ]
+    assert tasks[0]['ansible.builtin.template'] == {
+        'src': 'named.conf.j2', 'dest': '/etc/named.conf',
+        'owner': 'root', 'group': 'named', 'mode': '0640',
+    }
+    assert tasks[0]['no_log'] is True
+    assert tasks[0]['notify'] == 'Reload named configuration'
+    # Preserve the unrelated executable cleanup explicitly requested by the
+    # existing deployment contract; no configuration path may be removed here.
+    assert tasks[1]['ansible.builtin.file'] == {
+        'path': '/usr/local/sbin/named-transaction', 'state': 'absent',
+    }
 
 
 def test_backup_only_no_transaction_controller():

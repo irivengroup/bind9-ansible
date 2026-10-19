@@ -1,3 +1,5 @@
+> Rapport historique de la révision précédente. Pour le code courant, voir [Vérification, résilience et performance](VERIFICATION_RESILIENCE_PERFORMANCE.md).
+
 # Durcissement ciblé des routes et du management
 
 Révision **2026.10.19-hardening.1**. Source exclusive : `Bind9-Ansible-routes-management.zip`, SHA-256 `d58efa8904126d706ef129510114859fd71ef6031362a8b3a9adf5f29f506155`. L’archive source est conservée intacte. Aucun déploiement ni changement réseau n’a été exécuté sur vos serveurs.

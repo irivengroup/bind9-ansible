@@ -733,6 +733,10 @@ class Manager:
         identities only; Ansible prints values only on explicit operator request.
         Native implicit defaults and slave runtime files are never invented.
         """
+        # Validate/observe the whole graph as before, but project only the page.
+        # Sorting retains the public order without two full result catalogs.
+        offset, limit = self.request.get('offset', 0), self.request.get('limit', 100)
+        end = offset + limit
         items, catalog = [], []
         if self.resource == 'option':
             options = Syntax.one(self.config.configs['/etc/named.conf'].clauses, 'options')
@@ -741,9 +745,12 @@ class Manager:
                 items.append({'name': clause.name, 'source': source,
                     'value': text[clause.tokens[0].end:clause.tokens[-1].start].strip()})
             items.sort(key=lambda item: (item['name'], item['source']))
+            total = len(items)
+            items = items[offset:end]
             catalog = [{'name': item['name'], 'source': item['source']} for item in items]
         elif self.resource == 'zone':
-            for name, zone in sorted(self.config.zones.items()):
+            total = len(self.config.zones)
+            for name, zone in sorted(self.config.zones.items())[offset:end]:
                 text = self.config.contents[zone['config']].decode('utf-8')
                 settings = [{'name': clause.name, 'value': text[clause.tokens[0].end:clause.tokens[-1].start].strip()}
                             for clause in zone['clause'].children()]
@@ -755,16 +762,16 @@ class Manager:
             if zone['kind'] not in ('master', 'primary'):
                 raise ManagementError('List records on the primary static zone')
             document = ZoneDocument(self.config.contents[zone['file']].decode('utf-8'), zone['domain'])
-            for record in document.records:
+            records = sorted(document.records, key=lambda record: (
+                record['name'], record['type'], ' '.join(token.text for token in record['tokens'])))
+            total = len(records)
+            for record in records[offset:end]:
                 identity = {'zone': zone['domain'], 'name': record['name'], 'type': record['type'], 'ttl': record['ttl']}
                 items.append(dict(identity, value=' '.join(token.text for token in record['tokens'])))
-            items.sort(key=lambda item: (item['name'], item['type'], item['value']))
             catalog = [{key: value for key, value in item.items() if key != 'value'} for item in items]
-        offset, limit = self.request.get('offset', 0), self.request.get('limit', 100)
-        end = offset + limit
-        return {'resource': self.resource, 'action': 'list', 'total': len(items), 'offset': offset, 'limit': limit,
-                'count': len(items[offset:end]), 'next_offset': end if end < len(items) else None,
-                'items': items[offset:end], 'catalog': catalog[offset:end]}
+        return {'resource': self.resource, 'action': 'list', 'total': total, 'offset': offset, 'limit': limit,
+                'count': len(items), 'next_offset': end if end < total else None,
+                'items': items, 'catalog': catalog}
 
     def option_declarations(self, clauses, source):
         """Expand only includes within options, retaining declaration provenance."""

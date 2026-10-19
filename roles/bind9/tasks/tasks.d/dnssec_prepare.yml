@@ -1,0 +1,104 @@
+---
+# Preserve the former disable/install order. Block conditions are inherited by
+# every child task, including when invoked through deploy/configure tags.
+- name: Remove managed DNSSEC components when validation is disabled
+  when: not (bind_dnssec_active == 'auto' or (bind_dnssec_active | bool))
+  block:
+    # Fresh disabled installs create no DNSSEC assets. Existing role-owned assets
+    # are retired; the ownership journal and vendor keys remain intact for reuse.
+    - name: Inspect existing managed DNSSEC renewal units
+      ansible.builtin.stat:
+        path: '{{ item }}'
+        follow: false
+      loop:
+        - /etc/systemd/system/named-private-dnssec.timer
+        - /etc/systemd/system/named-private-dnssec.service
+      register: bind_dnssec_units_to_disable
+
+    - name: Stop existing private DNSSEC renewal and disable its timer
+      ansible.builtin.systemd:
+        name: '{{ item.item | basename }}'
+        state: stopped
+        enabled: '{{ false if item.item.endswith(".timer") else omit }}'
+        daemon_reload: true
+      loop: '{{ bind_dnssec_units_to_disable.results }}'
+      when: item.stat.exists
+
+    - name: Remove managed DNSSEC hook and renewal units when disabled
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: absent
+      loop:
+        - /etc/systemd/system/named.service.d/bind9-z-dnssec.conf
+        - /etc/systemd/system/named-private-dnssec.timer
+        - /etc/systemd/system/named-private-dnssec.service
+      register: bind_dnssec_removed
+      notify: Reload named configuration
+
+    - name: Forget removed DNSSEC hooks before retiring their executable
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Retire the managed private DNSSEC helper when disabled
+      ansible.builtin.file:
+        path: /usr/local/sbin/bind-private-dnssec
+        state: absent
+
+- name: Prepare optional DNSSEC validation and scoped private exceptions
+  when: bind_dnssec_active == 'auto' or (bind_dnssec_active | bool)
+  block:
+    # Installed only when DNSSEC validation is enabled.
+    - name: Install scoped private DNSSEC exception reconciler
+      ansible.builtin.copy:
+        src: bind-private-dnssec.py
+        dest: /usr/local/sbin/bind-private-dnssec
+        owner: root
+        group: root
+        mode: '0750'
+
+    - name: Apply private exceptions before named start or reload completes
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/named.service.d/bind9-z-dnssec.conf
+        content: |
+          # Bind9-Ansible: apply private suffix exceptions at start and reload.
+          [Service]
+          ExecStartPost=/usr/bin/python3 /usr/local/sbin/bind-private-dnssec
+          # This lexically later drop-in appends after the common RNDC reload.
+          ExecReload=/usr/bin/python3 /usr/local/sbin/bind-private-dnssec
+        owner: root
+        group: root
+        mode: '0644'
+      register: bind_named_override
+      notify: Reload named configuration
+
+    - name: Install daily private DNSSEC exception renewal service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/named-private-dnssec.service
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Renew Bind9-Ansible private DNSSEC suffix exceptions
+          Requires=named.service
+          After=named.service
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/bin/python3 /usr/local/sbin/bind-private-dnssec
+          UMask=0077
+
+    - name: Install daily private DNSSEC exception renewal timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/named-private-dnssec.timer
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Renew private DNSSEC suffix exceptions before their one-week expiry
+          [Timer]
+          OnBootSec=2min
+          OnUnitActiveSec=1d
+          AccuracySec=1min
+          [Install]
+          WantedBy=timers.target

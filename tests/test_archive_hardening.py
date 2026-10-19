@@ -84,3 +84,13 @@ class TestArchiveRejection:
         verifier = ArchiveVerifier(tmp_path)
         verifier.archive(['etc/named.conf', 'var/named/data.zone'])
         assert verifier.run().returncode == 0
+
+    def test_failed_checksum_size_observation_is_rejected(self, tmp_path, monkeypatch):
+        """A plausible size emitted before stat fails is not a safe observation."""
+        verifier = ArchiveVerifier(tmp_path)
+        verifier.archive(['etc/named.conf', 'var/named/data.zone'])
+        stat = tmp_path / 'stat'
+        stat.write_text('#!/bin/bash\nif [[ $1 == -c && $2 == %s ]]; then printf "1\\n"; exit 1; fi\nexec /usr/bin/stat "$@"\n')
+        stat.chmod(0o755)
+        monkeypatch.setenv('PATH', str(tmp_path) + os.pathsep + os.environ['PATH'])
+        assert verifier.run().returncode != 0

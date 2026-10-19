@@ -40,6 +40,8 @@ La simulation calcule et affiche les ajouts. Elle ne modifie ni profil ni route 
 
 Ce tag ne redéploie pas BIND et ne modifie pas les ACL DNS. Les variables clientes servent au calcul des routes ; leur modification ne met pas, à elle seule, la configuration DNS live à jour.
 
+Le code retour `2` est réservé à un résultat volontaire de changement ou de plan. Un échec natif avec ce même code devient un échec Ansible ; après mutation, le rollback conditionnel est tenté. Une sortie partielle ou un échec du tri des clients est refusé avant écriture. Si seul le nettoyage temporaire échoue après commit, le rôle signale l’erreur et conserve le répertoire concerné ; les routes déjà committées restent présentes. Contrôler l’état avant de relancer.
+
 ## Découverte et protections
 
 Le moteur utilise uniquement Bash et les outils natifs : `iproute`, NetworkManager/`nmcli`, `util-linux` (`flock`), GNU coreutils et `sed`. Aucun Python de routage, `jq`, `netaddr`, filtre personnalisé ou collection Galaxy n’est ajouté. Les outils manquants provoquent une erreur nommant le prérequis avant toute écriture de route.
@@ -73,4 +75,9 @@ La commande reprend le format actuel, ou l’ancien `front-routes.lock/plan.json
 
 Une restauration de BIND n’annule pas des routes déjà committées. Retirer un client de l’inventaire ne supprime pas sa route historique : le fonctionnement reste additif.
 
-L’initialisation concurrente du dossier d’état est acceptée seulement si le dossier apparu est ensuite reconnu root `0700`, sans lien ; aucun droit existant n’est corrigé aveuglément. Les preuves, limites et parties impactées figurent dans [DURCISSEMENT_FINAL.md](DURCISSEMENT_FINAL.md). La [refonte antérieure](REFONTE_ROUTES_MANAGEMENT.md) conserve sa traçabilité. La recette sur vos serveurs RHEL reste nécessaire.
+L’initialisation concurrente du dossier d’état est acceptée seulement si le dossier apparu est ensuite reconnu root `0700`, sans lien ; aucun droit existant n’est corrigé aveuglément. Les preuves, limites et parties impactées figurent dans [VERIFICATION_RESILIENCE_PERFORMANCE.md](VERIFICATION_RESILIENCE_PERFORMANCE.md). La [refonte antérieure](REFONTE_ROUTES_MANAGEMENT.md) conserve sa traçabilité. La recette sur vos serveurs RHEL reste nécessaire.
+
+
+## Lisibilité et analyse du script
+
+La révision `2026.10.19-syntax.1` rend explicites les littéraux de phase (`'done'`, `'intent'`), les gardes conditionnelles et l’initialisation de la variable de capture. Les expressions régulières restent des expressions Bash natives : une coloration d’éditeur ne constitue pas une erreur de parsing. Les callbacks de sortie sont appelés par `trap` ; seules deux exceptions locales SC2329 documentent cette limite de l’analyseur. Les protections d’application/reprise ne sont pas supprimées. Voir [le contrôle des scripts](VERIFICATION_SYNTAXE_SCRIPTS.md).

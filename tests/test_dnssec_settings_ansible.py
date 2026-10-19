@@ -54,9 +54,10 @@ class TestDnssecPolicyRunner:
         for value,active,default in [(False,False,False),('false',False,False),
                                      (True,True,False),('true',True,False),('auto',True,False),('auto',True,True)]:
             assertions=[]
-            for name in ('dnssec_install.yml','dnssec_activate.yml','dnssec_disable.yml'):
-                expected=not active if name=='dnssec_disable.yml' else active
-                condition=imports['{{ role_path }}/tasks/tasks.d/'+name]['when']
+            branches=yaml.safe_load((ROOT/'roles/bind9/tasks/tasks.d/dnssec_prepare.yml').read_text())
+            conditions=[(branches[0]['when'],not active),(branches[1]['when'],active),
+                        (imports['{{ role_path }}/tasks/tasks.d/dnssec_activate.yml']['when'],active)]
+            for condition,expected in conditions:
                 assertions.append('('+condition+') == '+str(expected).lower())
             plays.append(runner.play(value,[runner.validation(),{'assert':{'that':assertions}}],default))
         runner.run(plays,native)

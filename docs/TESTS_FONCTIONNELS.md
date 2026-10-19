@@ -92,7 +92,7 @@ bind-configtool check-front-axfr 192.0.2.11 \
   site1.prod.example.test 198.51.100.10 /chemin/protege/tsig.key
 ```
 
-Cet outil doit être installé sur le client de recette avec dig. L'adresse source doit lui appartenir. Code 0 : refus explicite des deux essais ; 1 : transfert inattendu ; 2 : contrôle incomplet/ambigu, notamment si l'ancien dig ne rend pas le RCODE AXFR. Un échec réseau ou `Transfer failed` seul ne suffit pas. Le secondaire BACK authentifié est autorisé, y compris vers FRONT ; ne pas utiliser ce pair pour tester le refus d'un client externe. Détail : [ACL_SERVEURS.md](ACL_SERVEURS.md).
+Cet outil doit être installé sur le client de recette avec dig. L'adresse source doit lui appartenir. Code 0 : refus explicite des deux essais ; 1 : transfert inattendu ; 2 : contrôle incomplet/ambigu, si le RCODE AXFR reste absent. Le dig EL8 est interrogé avec `+noall +comments +answer`, sans exiger YAML. Un échec réseau ou `Transfer failed` seul ne suffit pas. Le secondaire BACK authentifié est autorisé, y compris vers FRONT ; ne pas utiliser ce pair pour tester le refus d'un client externe. Détail : [ACL_SERVEURS.md](ACL_SERVEURS.md).
 
 ## Routes, reprise et décision de mise en production
 

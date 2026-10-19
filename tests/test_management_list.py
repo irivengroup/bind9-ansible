@@ -1,5 +1,6 @@
 """Discover explicit managed state without writes, silent defaults or leakage."""
 import os
+import tracemalloc
 
 import pytest
 
@@ -55,6 +56,26 @@ def test_records_are_individual_rows_with_owner_type_ttl_and_rdata(lab):
     assert any(item['type'] == 'SOA' for item in result['items'])
     assert all('value' not in item for item in result['catalog'])
     assert not lab.calls
+
+
+def test_a_small_record_page_has_a_bounded_projection_memory_cost(lab, monkeypatch):
+    # Isolate pagination/projection allocations from the separately bounded
+    # parser. Returning 25 rows must not allocate two 10,000-row result catalogs.
+    text = ZONE + ''.join('host%05d IN A 192.0.2.99\n' % index for index in range(10000))
+    document = M.ZoneDocument(text, 'example.test.')
+    manager = M.Manager(dict(resource='record', action='list', zone='example.test', limit=25),
+                        {}, root=lab.root, runner=lab.runner)
+    manager.config = M.Configuration(M.SafeFiles(lab.root))
+    monkeypatch.setattr(M, 'ZoneDocument', lambda text, domain: document)
+    tracemalloc.start()
+    try:
+        result = manager.listing()
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert result['total'] == len(document.records) and result['count'] == 25
+    assert result['next_offset'] == 25 and len(result['catalog']) == 25
+    assert peak < 4 * 1024 * 1024, 'Record page projection exceeded 4 MiB: ' + str(peak)
 
 
 def test_pages_are_stable_and_can_be_pinned_to_the_first_revision(lab):

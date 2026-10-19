@@ -10,6 +10,7 @@ PENDING=$STATE/front-routes.pending
 WORK=''
 MUTATING=false
 PREPARED=false
+CHANGED_RESULT=false
 ACTION=plan FRONT='' BACK='' ADM='' SSH_PEER='' METRIC=100 DEFER=false TOKEN=''
 declare -a CLIENTS=() PEERS=() ADDRESSES=() PROTECTED=() PROFILE=() KERNEL=() OPS=()
 declare -a LEGACY_P=() LEGACY_R=()
@@ -17,6 +18,8 @@ LEGACY_PROFILE_SHA='' LEGACY_KERNEL_SHA='' LEGACY_JOURNAL_SHA='' LEGACY_DIR_ID='
 LEGACY_CHANGED=false
 
 die() { printf 'FRONT: %s\n' "$*" >&2; exit 1; }
+# Reserve rc 2 for deliberate success, never an unhandled native command error.
+changed_result() { CHANGED_RESULT=true; exit 2; }
 trim() { local s=$1; s="${s#"${s%%[![:space:]]*}"}"; REPLY="${s%"${s##*[![:space:]]}"}"; }
 uint() { [[ $1 =~ ^(0|[1-9][0-9]{0,9})$ ]] && (( 10#$1 <= 4294967295 )); }
 ip_number() {
@@ -29,7 +32,7 @@ ip_number() {
 network() {
     local input=$1 ip=${1%/*} prefix=32 mask
     [[ $input != */* ]] || prefix=${input##*/}
-    uint "$prefix" && (( prefix <= 32 )) || die "Invalid prefix: $input"
+    if ! uint "$prefix" || (( prefix > 32 )); then die "Invalid prefix: $input"; fi
     ip_number "$ip"
     mask=$(( prefix == 0 ? 0 : (4294967295 << (32-prefix)) & 4294967295 ))
     LOW=$(( NUMBER & mask )); HIGH=$(( LOW | (4294967295 ^ mask) )); PREFIX=$prefix
@@ -179,6 +182,7 @@ observe() {
     done <<< "$ADDRESS_TEXT"
     (( hits == 1 && back_hits == 1 && adm_hits == 1 )) && [[ -n $back_dev && -n $adm_dev && $protected_devices != *"|$DEVICE|"* ]] || die 'FRONT must be uniquely present/up and distinct from BACK/ADM interfaces'
     FRONT_NETWORK=$front_network
+    local link=''
     capture link ip -o link show dev "$DEVICE"
     [[ $link != *' master '* ]] || die 'Enslaved FRONT interface is unsupported'
     capture UUID nmcli -g GENERAL.CON-UUID device show "$DEVICE"
@@ -241,7 +245,9 @@ coverage() {
         if overlap "$lo" "$hi" "$tlo" "$thi"; then
             if (( lo == tlo && hi == thi )); then ((EXACT_COUNT+=1)); fi
             if (( prefix >= tp )); then
-                [[ $device == "$DEVICE" && $gw == "$GATEWAY" ]] && $acceptable || die "Conflicting $store route for $target; existing route preserved"
+                if [[ $device != "$DEVICE" || $gw != "$GATEWAY" ]] || ! $acceptable; then
+                    die "Conflicting $store route for $target; existing route preserved"
+                fi
             fi
             if (( lo == tlo && hi == thi )) && [[ $device == "$DEVICE" && $gw == "$GATEWAY" ]] && $acceptable; then COVERED=true; COVER_METRIC=$mt; fi
         fi
@@ -251,7 +257,7 @@ coverage() {
 collapse_clients() {
     # Preserve the previous CIDR-union contract without a Python filter. Merge
     # only adjacent aligned siblings; never widen the authorized destinations.
-    local client row lo hi prefix last previous size
+    local client row lo hi prefix last previous size sorted
     local -a input=() lows=() highs=() prefixes=()
     WANTED=()
     for client in "${CLIENTS[@]}"; do
@@ -260,6 +266,9 @@ collapse_clients() {
         (( PREFIX > 0 )) || die 'A client default route is forbidden'
         input+=("$LOW|$HIGH|$PREFIX")
     done
+    # Process substitutions hide producer failures from the consuming loop.
+    # Capture and check the complete bounded input before planning any write.
+    sorted=$(if (( ${#input[@]} )); then printf '%s\n' "${input[@]}" | sort -t'|' -k1,1n -k3,3n; fi) || die 'Client normalization failed; no routes changed'
     while IFS='|' read -r lo hi prefix; do
         [[ -n $lo ]] || continue
         last=$(( ${#lows[@]}-1 ))
@@ -268,11 +277,11 @@ collapse_clients() {
         while (( ${#lows[@]} >= 2 )); do
             last=$(( ${#lows[@]}-1 )); previous=$((last-1)); size=$((highs[last]-lows[last]+1))
             if (( prefixes[last] == prefixes[previous] && highs[previous]+1 == lows[last] && lows[previous] % (2*size) == 0 )); then
-                highs[$previous]=${highs[$last]}; prefixes[$previous]=$((prefixes[last]-1))
+                highs[previous]=${highs[last]}; prefixes[previous]=$((prefixes[last]-1))
                 unset 'lows[last]' 'highs[last]' 'prefixes[last]'
             else break; fi
         done
-    done < <(if (( ${#input[@]} )); then printf '%s\n' "${input[@]}" | sort -t'|' -k1,1n -k3,3n; fi)
+    done <<< "$sorted"
     for ((last=0;last<${#lows[@]};last++)); do
         ip_string "${lows[$last]}"; WANTED+=("$REPLY/${prefixes[$last]}")
     done
@@ -407,11 +416,13 @@ load_journal() {
     (( ${#OPS[@]} <= 1024 )) || die 'Oversized operation journal'
     for op in "${OPS[@]}"; do
         IFS='|' read -r store net gw mt extra <<< "$op"
-        [[ $store == P || $store == R ]] && [[ -z $extra && $gw == "$BASE_GATEWAY" ]] && uint "$mt" || die 'Invalid journal operation'
+        if [[ $store != P && $store != R ]] || [[ -n $extra || $gw != "$BASE_GATEWAY" ]] || ! uint "$mt"; then
+            die 'Invalid journal operation'
+        fi
         network "$net"; [[ $CIDR == "$net" && $PREFIX -gt 0 ]] || die 'Invalid journal destination'
     done
     read -r PROGRESS PHASE extra <"$PENDING/progress"
-    uint "$PROGRESS" && (( PROGRESS <= ${#OPS[@]} )) && [[ $PHASE == done || $PHASE == intent ]] && [[ -z ${extra:-} ]] || die 'Malformed journal progress'
+    uint "$PROGRESS" && (( PROGRESS <= ${#OPS[@]} )) && [[ $PHASE == 'done' || $PHASE == 'intent' ]] && [[ -z ${extra:-} ]] || die 'Malformed journal progress'
 }
 remove_journal() {
     # Never recursively delete a journal directory: unexpected evidence stays.
@@ -534,7 +545,7 @@ rollback() {
     # An intent with unchanged stores proves that command did not add a route.
     # If a crash left an unacknowledged addition, the comparison above refuses
     # to guess its ownership and keeps the journal for operator inspection.
-    [[ $PHASE == done ]] || durable progress "$PROGRESS done"
+    [[ $PHASE == 'done' ]] || durable progress "$PROGRESS done"
     for ((n=PROGRESS;n>0;n--)); do
         durable progress "$n intent"
         mutate "${owned[$((n-1))]}" true
@@ -545,9 +556,15 @@ rollback() {
     MUTATING=false
     printf 'FRONT rollback completed; preexisting routes preserved.\n'
 }
+# Invoked by EXIT; ShellCheck cannot follow this trap callback (SC2329).
+# shellcheck disable=SC2329
 finish() {
     local rc=$1 recovery_rc=0
     trap - EXIT ERR INT TERM
+    if (( rc == 2 )) && ! $CHANGED_RESULT; then
+        printf 'FRONT internal command failed with rc 2; refusing a success result.\n' >&2
+        rc=1
+    fi
     if (( rc != 0 && rc != 2 )) && $MUTATING; then
         printf 'FRONT operation failed; attempting guarded rollback.\n' >&2
         # Recovery checks must exit on their own failure without aborting cleanup
@@ -564,11 +581,24 @@ finish() {
         recovery_rc=$?
         if (( recovery_rc != 0 )); then printf 'Prepared journal retained: %s\n' "$PENDING" >&2; fi
     fi
-    cleanup
+    if ! cleanup; then
+        printf 'FRONT temporary work cleanup failed; inspect %s.\n' "$WORK" >&2
+        rc=1
+    fi
     exit "$rc"
 }
-cleanup() { [[ -z $WORK ]] || rm -f -- "$WORK/out" "$WORK/err"; [[ -z $WORK ]] || rmdir -- "$WORK"; }
+# Called through finish(), whose entry point is the EXIT trap.
+# shellcheck disable=SC2329
+cleanup() {
+    [[ -n $WORK ]] || return 0
+    rm -f -- "$WORK/out" "$WORK/err" || return 1
+    rmdir -- "$WORK"
+}
 
+# Cover prerequisite/lock acquisition failures as well as routing mutations.
+trap 'finish $?' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 while (( $# )); do
     case $1 in
         --action) ACTION=${2:?}; shift 2;; --front-ip) FRONT=${2:?}; shift 2;;
@@ -601,12 +631,9 @@ exec 9<>"$LOCK"
 [[ $(stat -Lc '%d:%i' /proc/self/fd/9) == $(stat -c '%d:%i' "$LOCK") ]] || die 'Operation lock changed while opening'
 flock -n 9 || die 'Another route or management operation is active; retry after it ends'
 WORK=$(mktemp -d "$STATE/.route-work.XXXXXXXX")
-trap 'finish $?' EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
 if [[ $ACTION == legacy-rollback || $ACTION == legacy-cleanup ]]; then
     legacy_recovery
-    $LEGACY_CHANGED && exit 2
+    $LEGACY_CHANGED && changed_result
     exit 0
 fi
 if [[ $ACTION == recover || $ACTION == rollback || $ACTION == commit || $ACTION == verify ]]; then
@@ -614,9 +641,9 @@ if [[ $ACTION == recover || $ACTION == rollback || $ACTION == commit || $ACTION 
     [[ $ACTION == recover || -n $TOKEN ]] || die 'Transaction token is required'
     load_journal
     case $ACTION in
-        recover|rollback) rollback; exit 2;;
+        recover|rollback) rollback; changed_result;;
         verify) verify; exit 0;;
-        commit) (( PROGRESS == ${#OPS[@]} )) && [[ $PHASE == done ]] || die 'Incomplete transaction cannot commit'; verify; remove_journal; printf 'FRONT transaction committed.\n'; exit 0;;
+        commit) (( PROGRESS == ${#OPS[@]} )) && [[ $PHASE == 'done' ]] || die 'Incomplete transaction cannot commit'; verify; remove_journal; printf 'FRONT transaction committed.\n'; exit 0;;
     esac
 fi
 [[ ! -e $STATE/front-routes.lock && ! -L $STATE/front-routes.lock ]] || die 'Legacy FRONT journal found: use routes-recover for legacy recovery before a new operation'
@@ -624,13 +651,13 @@ fi
 ip_number "$FRONT"; ip_number "$BACK"; ip_number "$ADM"
 [[ $FRONT != "$BACK" && $FRONT != "$ADM" && $BACK != "$ADM" ]] || die 'FRONT/BACK/ADM addresses must differ'
 for peer in "${PEERS[@]}"; do ip_number "$peer"; done
-uint "$METRIC" && (( METRIC > 0 )) || die 'Metric must be an integer from 1 to 4294967295'
+if ! uint "$METRIC" || (( METRIC == 0 )); then die 'Metric must be an integer from 1 to 4294967295'; fi
 (( ${#CLIENTS[@]} <= 512 )) || die 'At most 512 client destinations per operation'
 observe
 build_plan
 printf 'FRONT device=%s profile=%s gateway=%s additions=%s\n' "$DEVICE" "$UUID" "${GATEWAY:-none}" "${#OPS[@]}"
 for op in "${OPS[@]}"; do printf '  %s\n' "$op"; done
-if [[ $ACTION == plan ]]; then (( ${#OPS[@]} == 0 )) && exit 0; exit 2; fi
+if [[ $ACTION == plan ]]; then (( ${#OPS[@]} == 0 )) && exit 0; changed_result; fi
 (( ${#OPS[@]} )) || { BASE_PROFILE=$OBSERVED_PROFILE BASE_KERNEL=$OBSERVED_KERNEL BASE_UUID=$UUID BASE_DEVICE=$DEVICE BASE_GATEWAY=$GATEWAY BASE_ADDRESSES=$ADDRESS_TEXT BASE_RULES=$RULES_TEXT; verify; exit 0; }
 BASE_PROFILE=$OBSERVED_PROFILE BASE_KERNEL=$OBSERVED_KERNEL BASE_UUID=$UUID BASE_DEVICE=$DEVICE BASE_GATEWAY=$GATEWAY BASE_ADDRESSES=$ADDRESS_TEXT BASE_RULES=$RULES_TEXT
 prepare
@@ -648,4 +675,4 @@ done
 verify
 MUTATING=false
 if $DEFER; then printf 'transaction: %s\n' "$TOKEN"; else remove_journal; fi
-exit 2
+changed_result

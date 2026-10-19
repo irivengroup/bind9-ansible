@@ -43,7 +43,7 @@ class DnssecRuntimeSandbox:
         main=yaml.safe_load((self.role/'tasks/tasks.d/deploy/main.yml').read_text())
         deployment=next(t for t in main if 'rescue' in t)
         selected={'tasks.d/named_runtime.yml',
-                  'tasks.d/dnssec_disable.yml','tasks.d/dnssec_install.yml','tasks.d/dnssec_activate.yml'}
+                  'tasks.d/dnssec_prepare.yml','tasks.d/dnssec_activate.yml'}
         block=[t for t in deployment['block'] if t.get('ansible.builtin.import_tasks', '').replace('{{ role_path }}/tasks/', '') in selected]
         block.append({'name':'Inject a post-configuration failure','ansible.builtin.fail':{'msg':'Controlled runtime rollback test'},'when':'test_rollback'})
         names={'Inspect managed renewal units before DNS restoration','Pause private DNSSEC renewal during restoration',
@@ -126,7 +126,7 @@ class TestDnssecRuntime:
         sandbox.run(False)
         assert set(sandbox.assets())=={'etc/systemd/system/named.service.d/bind9-runtime.conf'}
 
-    @pytest.mark.parametrize('mode',[False,True,'auto','__default__'])
+    @pytest.mark.parametrize('mode',[False,'false',True,'true','auto','__default__'])
     def test_fresh_modes_and_file_idempotence(self,tmp_path,mode):
         sandbox=DnssecRuntimeSandbox(tmp_path)
         state=sandbox.run(mode)
@@ -136,7 +136,7 @@ class TestDnssecRuntime:
         paths=set(files)
         assert 'etc/systemd/system/named.service.d/bind9-runtime.conf' in paths
         dnssec={p for p in paths if 'dnssec' in p}
-        assert bool(dnssec) is (mode is not False)
+        assert bool(dnssec) is (mode not in (False,'false'))
         assert 'etc/systemd/system/named.service.d/bind9-dnssec.conf' not in paths
         sandbox.run(mode)
         assert sandbox.assets()==files
@@ -149,7 +149,7 @@ class TestDnssecRuntime:
         timer=state['units']['named-private-dnssec.timer']
         assert not timer['active'] and not timer['enabled']
 
-    @pytest.mark.parametrize('before,after',[(False,'auto'),('auto',False)])
+    @pytest.mark.parametrize('before,after',[(False,'auto'),('auto',False),(True,'auto'),('auto',True)])
     def test_failed_mode_transition_restores_exact_files_and_timer_state(self,tmp_path,before,after):
         sandbox=DnssecRuntimeSandbox(tmp_path)
         old=sandbox.run(before)

@@ -1,4 +1,4 @@
-"""Run the five existing Bash backup workflows in a disposable container root.
+"""Run the backup and fault-injection workflows in a disposable container root.
 
 Alternative isolation for a standard container without mount-namespace capability.
 This resets /var/named and /var/backups/bind-test and overwrites /etc/named.conf;
@@ -36,7 +36,7 @@ class BackupContainerIntegration(TestConfigtoolWorkflows):
             mount = line.split()[4]
             if mount != '/' and any(target == mount or target.startswith(mount + '/') or mount.startswith(target + '/') for target in targets):
                 raise RuntimeError('A test target must not be a mounted host or volume path')
-        completed = []
+        completed, failures = [], []
         for name in TestConfigtoolWorkflows.__dict__:
             if not name.startswith('test_'):
                 continue
@@ -47,12 +47,18 @@ class BackupContainerIntegration(TestConfigtoolWorkflows):
                 if path.exists():
                     shutil.rmtree(str(path))
             with tempfile.TemporaryDirectory(prefix='bind9-backup-container-') as temporary:
-                getattr(self, name)(Path(temporary))
-            completed.append(name)
-        assert len(completed) == 5
+                try:
+                    getattr(self, name)(Path(temporary))
+                except AssertionError as error:
+                    failures.append({'name': name, 'cause': str(error)})
+                else:
+                    completed.append(name)
+        assert len(completed) + len(failures) == 9
         print(json.dumps({'existing_workflow_assertions_executed': completed,
+                          'failures': failures,
                           'isolation': 'disposable standard container root; no nested mounts',
-                          'systemd_bind_selinux_doubles': True}))
+                          'systemd_bind_selinux_doubles': True}), flush=True)
+        assert not failures, 'Backup workflow failure(s): ' + ', '.join(item['name'] for item in failures)
 
 
 if __name__ == '__main__':

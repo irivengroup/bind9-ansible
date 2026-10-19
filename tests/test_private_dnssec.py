@@ -199,14 +199,16 @@ def test_start_reload_timer_and_health_order_are_integrated():
     tasks = yaml.safe_load((ROLE / 'tasks/tasks.d/deploy/main.yml').read_text())
     deployment = next(task for task in tasks if task['name'] == 'Apply DNS changes with rollback on failure')
     imports = [task.get('ansible.builtin.import_tasks') for task in deployment['block']]
-    assert imports.index('{{ role_path }}/tasks/tasks.d/dnssec_install.yml') < imports.index('{{ role_path }}/tasks/tasks.d/deploy/verify.yml')
+    assert imports.index('{{ role_path }}/tasks/tasks.d/dnssec_prepare.yml') < imports.index('{{ role_path }}/tasks/tasks.d/deploy/verify.yml')
     assert imports.index('{{ role_path }}/tasks/tasks.d/deploy/service.yml') < imports.index('{{ role_path }}/tasks/tasks.d/dnssec_activate.yml') < imports.index('{{ role_path }}/tasks/tasks.d/deploy/health.yml')
-    dropin = (ROLE / 'templates/named-dnssec-override.j2').read_text()
+    prepare = yaml.safe_load((ROLE / 'tasks/tasks.d/dnssec_prepare.yml').read_text())
+    dropin = next(task['ansible.builtin.copy']['content'] for branch in prepare
+                  for task in branch['block'] if task['name'] == 'Apply private exceptions before named start or reload completes')
     assert 'ExecStartPost=' in dropin and 'ExecReload=' in dropin
     runtime = (ROLE / 'templates/named-runtime-override.j2').read_text()
     assert 'ExecStart=' not in runtime  # Inherit native IPv4/IPv6 startup.
     assert '|| true' not in dropin
-    install = (ROLE / 'tasks/tasks.d/dnssec_install.yml').read_text()
+    install = (ROLE / 'tasks/tasks.d/dnssec_prepare.yml').read_text()
     assert 'OnUnitActiveSec=1d' in install
     assert 'named-setup-rndc.service' in (ROLE / 'tasks/tasks.d/named_runtime.yml').read_text()
 

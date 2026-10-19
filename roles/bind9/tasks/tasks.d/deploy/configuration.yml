@@ -9,21 +9,6 @@
   no_log: true
   notify: Reload named configuration
 
-- name: Remove obsolete Bind9-Ansible configuration fragments
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - /etc/named/10-tsig.conf
-    - /etc/named/20-acl.conf
-    - /etc/named/30-options.conf
-    - /etc/named/40-views.conf
-    - /etc/named/zones/10-authoritative-zones.conf
-    - /etc/named/zones/15-external-authoritative-zones.conf
-    - /etc/named/zones/16-internal-authoritative-zones.conf
-    - /etc/named/zones/20-forward-zones.conf
-  notify: Reload named configuration
-
 - name: Remove obsolete transaction executable from previous deployments
   ansible.builtin.file:
     path: /usr/local/sbin/named-transaction

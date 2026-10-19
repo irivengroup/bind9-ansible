@@ -83,6 +83,10 @@ options {
         {{ local_back_acl }};
     };
     recursion yes;
+    // Bound recursive cache memory and positive/negative answer retention.
+    max-cache-size 256m;
+    max-cache-ttl 3600;
+    max-ncache-ttl 300;
     allow-recursion { dns_recursive_clients; };
     allow-query-cache { dns_recursive_clients; };
     allow-recursion-on {

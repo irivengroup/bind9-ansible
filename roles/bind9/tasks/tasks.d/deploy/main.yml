@@ -124,14 +124,8 @@
       ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/named_runtime.yml'
       tags: [deploy, configure]
 
-    - name: Remove managed DNSSEC components when validation is disabled
-      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/dnssec_disable.yml'
-      when: not (bind_dnssec_active == 'auto' or (bind_dnssec_active | bool))
-      tags: [deploy, configure]
-
-    - name: Prepare optional DNSSEC validation and scoped private exceptions
-      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/dnssec_install.yml'
-      when: bind_dnssec_active == 'auto' or (bind_dnssec_active | bool)
+    - name: Prepare managed DNSSEC components for the selected mode
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/dnssec_prepare.yml'
       tags: [deploy, configure]
 
     - name: Install canonical named.conf

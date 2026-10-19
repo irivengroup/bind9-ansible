@@ -258,6 +258,64 @@ class TestNativeRouteExpressions:
 class TestNativeProcessTransactions:
     """Exercise the replacement engine, not only its planned arithmetic."""
 
+    def test_a_native_cleanup_error_cannot_report_a_successful_change(self, tmp_path):
+        lab = NativeRouteLab(tmp_path)
+        wrapper = tmp_path / 'bin/rmdir'
+        wrapper.write_text('#!/bin/bash\n'
+            'if [[ "${@: -1}" == "$BIND_ROUTE_WORK_PREFIX"* ]]; then exit 2; fi\n'
+            'exec /usr/bin/rmdir "$@"\n')
+        wrapper.chmod(0o755)
+        lab.env['BIND_ROUTE_WORK_PREFIX'] = str(lab.state / '.route-work.')
+        result = lab.run()
+        assert result.returncode == 1, result.stdout
+        assert 'temporary work cleanup failed' in result.stdout
+        # The transaction already committed: report cleanup failure accurately,
+        # preserve its diagnostic work directory, and leave valid routes intact.
+        assert lab.data['runtime'] == BASE + [NEW] and len(lab.data['persistent']) == 1
+        assert not (lab.state / 'front-routes.pending').exists()
+        assert len(list(lab.state.glob('.route-work.*'))) == 1
+
+    @pytest.mark.parametrize('stage', ['observation', 'clients', 'verification'])
+    def test_native_sort_failure_never_becomes_a_successful_or_partial_route_apply(self, tmp_path, stage):
+        lab = NativeRouteLab(tmp_path)
+        # A native utility can return 2, also used by the engine for a successful
+        # change. Inject once so the guarded rollback can use the real utility.
+        wrapper = tmp_path / 'bin/sort'
+        wrapper.write_text('''#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import sys
+stage = os.environ['BIND_SORT_FAILURE_STAGE']
+state = json.loads(Path(os.environ['BIND_NETWORK_DOUBLE_STATE']).read_text())
+marker = Path(os.environ['BIND_SORT_FAILURE_MARKER'])
+applied = any(not item['persistent'] and item['action'] == '+ipv4.routes' for item in state['operations'])
+fail = stage == 'observation' or (stage == 'clients' and '-t|' in sys.argv) or (stage == 'verification' and applied)
+if fail and not marker.exists():
+    marker.touch()
+    text = sys.stdin.read()
+    if stage == 'clients' and text:
+        print(text.splitlines()[0])
+    print('Injected native sort failure', file=sys.stderr)
+    sys.exit(2)
+os.execv(os.environ['BIND_REAL_SORT'], [os.environ['BIND_REAL_SORT']] + sys.argv[1:])
+''')
+        wrapper.chmod(0o755)
+        marker = tmp_path / 'sort-failed'
+        lab.env.update(BIND_REAL_SORT=shutil.which('sort'), BIND_SORT_FAILURE_STAGE=stage,
+                       BIND_SORT_FAILURE_MARKER=str(marker))
+        result = lab.run(clients=['203.0.113.25', '203.0.113.27'])
+        assert marker.exists(), 'The native failure boundary was not reached'
+        assert result.returncode == 1, result.stdout
+        assert 'Injected native sort failure' in result.stdout
+        assert lab.data['runtime'] == BASE and not lab.data['persistent']
+        assert not (lab.state / 'front-routes.pending').exists()
+        if stage == 'verification':
+            assert 'FRONT rollback completed' in result.stdout
+            assert any(item['action'] == '-ipv4.routes' for item in lab.data['operations'])
+        else:
+            assert not lab.data['operations']
+
     @pytest.mark.parametrize('device', ['front0', 'other0'])
     def test_a_gateway_owned_by_the_server_is_refused_before_any_write(self, tmp_path, device):
         lab = NativeRouteLab(tmp_path)

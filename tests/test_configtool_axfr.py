@@ -62,6 +62,27 @@ def test_missing_tsig_is_not_a_pass(tmp_path):
     assert result.returncode == 2
 
 
+def test_legacy_dig_uses_explicit_comments_to_expose_wire_refusal(tmp_path):
+    """dig 9.11 suppresses AXFR RCODE unless comment output is requested."""
+    body = ('if [ "$1" = "-h" ]; then echo "legacy dig help"; exit 0; fi\n'
+            'case "$*" in *+yaml*) echo "Invalid option: +yaml"; exit 1;; esac\n'
+            'case "$*" in *+noall*+comments*+answer*) echo "status: REFUSED";; '
+            '*) echo "Transfer failed";; esac\nexit 9')
+    result = invoke(tmp_path, body)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count('DENIED:') == 2
+
+
+def test_failed_stat_cannot_authorize_reading_a_tsig_key(tmp_path):
+    """Partial metadata from a failed producer must never establish key safety."""
+    stat = tmp_path / 'stat'
+    stat.write_text('#!/bin/sh\nprintf "%s\\n" "' + str(os.geteuid()) + ' 600 1"\nexit 1\n')
+    stat.chmod(0o755)
+    result = invoke(tmp_path, 'echo "status: REFUSED"; exit 9')
+    assert result.returncode == 2
+    assert 'DENIED:' not in result.stdout
+
+
 def test_publicly_readable_key_is_rejected_before_dns_queries(tmp_path):
     result = invoke(tmp_path, 'echo "status: REFUSED"; exit 9', key_mode=0o644)
     assert result.returncode == 2
