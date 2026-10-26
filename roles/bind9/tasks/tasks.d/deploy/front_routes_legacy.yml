@@ -43,8 +43,7 @@
     ansible.builtin.assert:
       that:
       - bind_front_plan is mapping
-      - (bind_front_plan.keys() | list | sort) == (['device','uuid','gateway','profile_additions','runtime_additions','probes','runtime_before','profile_before','protected_ips']
-        | sort)
+      - (bind_front_plan.keys() | list | sort) == (['device','uuid','gateway','profile_additions','runtime_additions','probes','runtime_before','profile_before','protected_ips']| sort)
       - (bind_front_plan | to_json | length) < 262144
       - bind_front_plan.device is string and bind_front_plan.device is match('^[a-zA-Z0-9_.:-]{1,15}$')
       - bind_front_plan.uuid is string and bind_front_plan.uuid is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
@@ -225,8 +224,7 @@
           is not string
         - (bind_front_rule_observation | from_json if bind_front_rule_observation is string else bind_front_rule_observation)
           is not mapping
-        - (bind_front_rule_observation | from_json if bind_front_rule_observation is string else bind_front_rule_observation)
-          | length == 3
+        - (bind_front_rule_observation | from_json if bind_front_rule_observation is string else bind_front_rule_observation) | length == 3
         fail_msg: IPv4 policy observation must contain the three classic rules; no routing writes allowed.
     - name: Refuse custom selectors or alternate IPv4 rule tables
       ansible.builtin.assert:
@@ -242,8 +240,7 @@
     - name: Refuse duplicate or missing standard IPv4 rule priorities
       ansible.builtin.assert:
         that:
-        - ((bind_front_rule_observation | from_json if bind_front_rule_observation is string else bind_front_rule_observation)
-          | map(attribute='priority') | list | sort) == [0, 32766, 32767]
+        - ((bind_front_rule_observation | from_json if bind_front_rule_observation is string else bind_front_rule_observation)| map(attribute='priority') | list | sort) == [0, 32766, 32767]
   - name: Read the actual SSH peer before route recovery
     ansible.builtin.command:
       argv:
@@ -281,8 +278,7 @@
   - name: Refuse owned routes that cover current administrative or DNS addresses
     ansible.builtin.assert:
       that:
-      - not (bind_front_ipv4_data[item.1].lo <= bind_front_ipv4_data[item.0.split()[0]].hi and bind_front_ipv4_data[item.1].hi
-        >= bind_front_ipv4_data[item.0.split()[0]].lo)
+        - not (bind_front_ipv4_data[item.1].lo <= bind_front_ipv4_data[item.0.split()[0]].hi and bind_front_ipv4_data[item.1].hi >= bind_front_ipv4_data[item.0.split()[0]].lo)
       fail_msg: Recovery would affect a current ADM, FRONT, BACK or SSH address; no route removals were started.
     loop: "{{ (bind_front_plan.profile_additions + bind_front_plan.runtime_additions) | product(\n   [ansible_host, bind_front_ip,\
       \ bind_back_ip, hostvars[bind_primary_host].bind_back_ip,\n    hostvars[bind_secondary_host].bind_back_ip] + ([bind_front_ssh_ipv4]\
@@ -338,8 +334,7 @@
     - name: Reject ambiguous persistent route observations
       ansible.builtin.assert:
         that:
-        - ((bind_front_parsed_profile_json | from_json if bind_front_parsed_profile_json is string else bind_front_parsed_profile_json)).errors
-          | length == 0
+        - ((bind_front_parsed_profile_json | from_json if bind_front_parsed_profile_json is string else bind_front_parsed_profile_json)).errors | length == 0
         fail_msg: '{{ ((bind_front_parsed_profile_json | from_json if bind_front_parsed_profile_json is string else bind_front_parsed_profile_json)).errors
           }}'
     - name: Retain typed persistent route observations
@@ -371,8 +366,7 @@
   - name: Refuse removal of a modified persistent route
     ansible.builtin.assert:
       that:
-      - ((bind_front_profile_selection | from_json if bind_front_profile_selection is string else bind_front_profile_selection)).errors
-        | length == 0
+      - ((bind_front_profile_selection | from_json if bind_front_profile_selection is string else bind_front_profile_selection)).errors | length == 0
       fail_msg: '{{ ((bind_front_profile_selection | from_json if bind_front_profile_selection is string else bind_front_profile_selection)).errors
         }}'
   - name: Read runtime routes available for selective rollback
@@ -414,8 +408,7 @@
   - name: Refuse removal of a modified active route
     ansible.builtin.assert:
       that:
-      - ((bind_front_runtime_selection | from_json if bind_front_runtime_selection is string else bind_front_runtime_selection)).errors
-        | length == 0
+      - ((bind_front_runtime_selection | from_json if bind_front_runtime_selection is string else bind_front_runtime_selection)).errors | length == 0
       fail_msg: '{{ ((bind_front_runtime_selection | from_json if bind_front_runtime_selection is string else bind_front_runtime_selection)).errors
         }}'
   - name: Bind legacy recovery to its exact validated observations and journal identity
@@ -517,14 +510,12 @@
     - name: Require exact route preservation
       ansible.builtin.assert:
         that:
-        - (bind_front_comparison_json | from_json if bind_front_comparison_json is string else bind_front_comparison_json)
-          | length == 0
+        - (bind_front_comparison_json | from_json if bind_front_comparison_json is string else bind_front_comparison_json) | length == 0
         fail_msg: '{{ (bind_front_comparison_json | from_json if bind_front_comparison_json is string else bind_front_comparison_json)
           }}'
   - name: Remove the recovery journal after successful rollback
     ansible.builtin.script:
-      cmd: '{{ (role_path ~ "/files/bind-front-routes.sh") | quote }} --action legacy-cleanup {{ bind_front_legacy_arguments
-        | map("quote") | join(" ") }}'
+      cmd: '{{ (role_path ~ "/files/bind-front-routes.sh") | quote }} --action legacy-cleanup {{ bind_front_legacy_arguments | map("quote") | join(" ") }}'
       executable: /bin/bash
     register: bind_front_legacy_cleanup
     changed_when: bind_front_legacy_cleanup.rc == 2
