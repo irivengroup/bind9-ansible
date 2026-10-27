@@ -63,7 +63,7 @@ jobs:
             --norc --shell=bash roles/bind9/files/*.sh tests/*.sh
       - name: Native route task workflows on legacy Ansible
         if: matrix.ansible-version == '2.9.27'
-        run: sudo --preserve-env=PATH "$(command -v python)" -m pytest -q tests/test_front_routes_ansible.py tests/test_front_route_hardening_ansible.py
+        run: sudo --preserve-env=PATH "$(command -v python)" -m pytest -q tests/test_front_routes_ansible.py tests/test_front_route_hardening_ansible.py tests/test_front_route_recovery_hardening.py
       - name: Targeted management, deployment seal and transport on legacy Ansible
         if: matrix.ansible-version == '2.9.27'
         run: |

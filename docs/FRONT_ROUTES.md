@@ -4,7 +4,7 @@ Le réseau existe déjà. Le rôle ajoute uniquement les routes IPv4 nécessaire
 
 **La découverte suit l’IP FRONT, puis son interface et son profil actif. FRONT n’a pas besoin de porter la route par défaut du système, ni même une route `0.0.0.0/0` active. La passerelle système ou celle d’une autre interface ne sert jamais de repli.**
 
-Deux fichiers portent le fonctionnement courant : `roles/bind9/tasks/tasks.d/deploy/front_return_routes.yml` et `roles/bind9/files/bind-front-routes.sh`. Un seul adaptateur YAML, `front_routes_legacy.yml`, reste réservé à la reprise des anciens journaux. Les douze anciens fichiers auxiliaires séparés sont retirés.
+Deux fichiers portent le fonctionnement courant : `roles/bind9/tasks/tasks.d/deploy/front_return_routes.yml` et `roles/bind9/files/bind-front-routes.sh`. Le routage et sa reprise utilisent uniquement le journal `front-routes.pending/`. L’adaptateur de l’ancien format a été supprimé ; voir [NETTOYAGE_FRONT_ACTUEL.md](NETTOYAGE_FRONT_ACTUEL.md).
 
 ## Préparer puis appliquer
 
@@ -48,6 +48,10 @@ Le moteur utilise uniquement Bash et les outils natifs : `iproute`, NetworkManag
 
 La passerelle est lue sur le profil actif FRONT par UUID. Si `ipv4.gateway` est vide, l’état actif `IP4.GATEWAY` de cette même interface peut fournir la passerelle. Si les deux sont absents, une unique passerelle de route par défaut déjà déclarée dans ce même profil peut être utilisée. Des observations contradictoires sont refusées. La passerelle doit être une adresse utilisable du sous-réseau de l’adresse FRONT, différente de toutes les IPv4 locales actives, y compris les adresses secondaires. Aucune passerelle globale, BACK ou ADM n’est choisie par défaut. Les métriques explicites existantes restent conservées ; une métrique automatique est déduite de la route active ou de la métrique effectivement observée sur FRONT.
 
+Si ces trois sources sont vides, le moteur recherche désormais un prochain saut unique dans les routes spécifiques du profil FRONT actif et dans les routes de la table principale portées par cette interface. Ce cas couvre notamment un profil `ipv4.never-default: yes`, sans propriété de passerelle ni route par défaut FRONT. Les routes directement connectées, sans prochain saut, ne fournissent aucune passerelle. Plusieurs prochains sauts différents provoquent un refus avant écriture ; le moteur ne choisit pas arbitrairement selon la métrique ou l’ordre des routes. Les routes comportant des attributs supplémentaires ne servent pas à cette inférence (seul `proto static` est accepté pour les routes actives) ; utiliser une configuration FRONT explicite ou une gestion réseau spécifique dans ce cas. Les sources explicites précédentes gardent leur priorité et leurs protections. Un échec pour absence de passerelle précise désormais l’interface, l’UUID et la destination concernée.
+
+La correction reprend le repérage par IP, l’identification du profil actif, l’ajout conditionnel exact et le contrôle du chemin proposés dans le playbook utilisateur. La recherche native conserve la prise en charge des IP secondaires, sans supposer un champ `ipv4.gateway` dans les faits Ansible. L’UUID reste préféré au nom de connexion, et la comparaison structurée des routes remplace une recherche par expression régulière. L’ajout persistant par `nmcli +ipv4.routes` est activé par `ip route add`, sans réactiver la connexion ni ses paramètres en attente. La relecture des magasins remplace une pause fixe. **Aucun ping de validation n’est ajouté, conformément à la demande.** La recette et les limites de cette correction figurent dans [CORRECTION_PASSERELLE_FRONT.md](CORRECTION_PASSERELLE_FRONT.md).
+
 Le moteur ajoute avec `+ipv4.routes` et `ip route add`. Il ne remplace ni ne supprime une ancienne route contradictoire, ne vide aucune table et n’utilise ni `connection up`, ni `device reapply` en exploitation. Les paramètres de profil en attente, notamment DNS, ne sont pas activés. Les adresses, règles, passerelle et magasins sont relus avant écriture et après application ; les routes étrangères doivent rester identiques.
 
 Les plages réservées, les réseaux ADM/BACK, les adresses BACK des pairs et le client SSH IPv4 réel sont protégés. Les formes IPv4 mappées en IPv6 du client SSH sont également reconnues. Les clients directement connectés à FRONT ne nécessitent pas de route via une passerelle. Les règles IPv4 doivent être les trois règles standard des tables `local`, `main`, `default` : VRF, routage par politique et multipath nécessitent une gestion réseau spécifique.
@@ -62,6 +66,10 @@ Le dossier historique `.operation.lock` reste ignoré par défaut hors hibernati
 
 Une opération qui écrit prépare d’abord `/var/lib/Bind9-Ansible/front-routes.pending/`, avec instantanés, opérations ordonnées, progression et SHA-256. Ce dossier contient des données de reprise ; il ne représente pas un processus vivant. Après réussite isolée, il est supprimé de façon contrôlée, sans suppression récursive. Dans un déploiement DNS complet, il est conservé jusqu’aux contrôles DNS puis committé, ou repris par le rollback du déploiement.
 
+Le chargement exige des fichiers bornés, sans octet NUL et terminés par un seul LF. Métadonnées et progression contiennent exactement un enregistrement ; leurs champs sont vérifiés intégralement. Les clients restent limités à 512 entrées et les opérations à 1024. L’union exacte des clients est recalculée, y compris les sous-réseaux agrégés ; chaque opération doit correspondre à une destination de cette union, avec une identité unique par magasin et destination. Une métrique active héritée de zéro reste acceptée. Une donnée malformée provoque un refus sans retrait de route ni effacement du journal.
+
+Une opération différée doit fournir exactement une ligne `transaction:` avec un UUID canonique, en LF ou CRLF. Si ce reçu est absent, malformé ou dupliqué, le rôle échoue explicitement, conserve l’état pending et ne réutilise aucun ancien jeton. La reprise devient alors une intervention explicite après inspection du journal. Voir [DURCISSEMENT_FRONT_ACTUEL.md](DURCISSEMENT_FRONT_ACTUEL.md).
+
 Un échec pris en charge déclenche le retrait des seuls ajouts confirmés, après contrôle des deux magasins. Une modification manuelle, une identité inattendue, un fichier de journal ajouté, une corruption ou une issue de commande rendue ambiguë par un crash empêchent toute suppression hasardeuse. Le journal reste présent avec une cause explicite. La reprise protège aussi le client SSH de la connexion courante, qui peut être différent de celui de l’opération initiale.
 
 Après inspection du journal et du réseau, et après vérification qu’aucune autre opération ou intervention n’est en cours :
@@ -71,7 +79,7 @@ ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml \
   --limit site1-dns01 --tags routes-recover
 ```
 
-La commande reprend le format actuel, ou l’ancien `front-routes.lock/plan.json` via l’adaptateur conservé. Elle ne supprime pas un journal absent ou dangereux pour repartir artificiellement. Un conflit nécessite une réconciliation opérateur des seules routes concernées. Ne pas effacer les journaux pour forcer une exécution.
+La commande reprend uniquement le journal `front-routes.pending/`. Elle ne supprime pas un journal absent ou dangereux pour repartir artificiellement. Un conflit nécessite une réconciliation opérateur des seules routes concernées. Ne pas effacer les journaux pour forcer une exécution.
 
 Une restauration de BIND n’annule pas des routes déjà committées. Retirer un client de l’inventaire ne supprime pas sa route historique : le fonctionnement reste additif.
 

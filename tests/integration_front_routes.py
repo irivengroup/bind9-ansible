@@ -105,10 +105,33 @@ class NativeRouteIntegration:
         self.role()
         assert self.role()['stats']['localhost']['changed'] == 0
         assert protected == {name: self.profile(name) for name in protected}
+        # A never-default FRONT exposes its next-hop only through specific
+        # routes after reload; BACK must remain the sole system default.
+        self.command('nmcli', 'connection', 'modify', 'front', 'ipv4.never-default', 'yes')
+        self.command('nmcli', 'connection', 'down', 'front')
+        self.command('nmcli', 'connection', 'up', 'front')
+        assert not self.command('nmcli', '-g', 'ipv4.gateway', 'connection', 'show', 'front')
+        assert not self.command('nmcli', '-g', 'IP4.GATEWAY', 'device', 'show', 'front0')
+        assert not any(row.get('dst') == 'default' and row.get('dev') == 'front0' for row in self.routes())
+        before_specific = self.routes()
+        before_profile = self.command('nmcli', '-g', 'ipv4.routes', 'connection', 'show', 'front')
+        self.variables['bind_cloud_clients'] += ['172.19.0.0/24']
+        self.role('plan')
+        assert self.routes() == before_specific
+        assert self.command('nmcli', '-g', 'ipv4.routes', 'connection', 'show', 'front') == before_profile
+        self.role()
+        assert self.role()['stats']['localhost']['changed'] == 0
+        assert all(row in self.routes() for row in before_specific)
+        selected = json.loads(self.command('ip', '-j', '-4', 'route', 'get', '172.19.0.1', 'from', '198.51.100.2'))[0]
+        assert selected['dev'] == 'front0' and selected['gateway'] == '198.51.100.1'
+        assert protected == {name: self.profile(name) for name in protected}
+        assert [row for row in self.routes() if row.get('dst') == 'default'] == [
+            row for row in before_specific if row.get('dst') == 'default']
         print(json.dumps({'networkmanager': self.command('nmcli', '-g', 'VERSION', 'general'),
             'ansible_workflows': self.workflows, 'native_plan_apply_recover': True,
             'idempotence_after_profile_reload': True, 'active_gateway_fallback': True, 'automatic_metric_observed': True,
             'front_gateway_without_front_default_route': True,
+            'specific_front_route_gateway_without_any_front_default': True,
             'pending_dns_unapplied': True, 'back_adm_and_default_preserved': True}))
 
 

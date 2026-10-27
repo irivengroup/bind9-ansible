@@ -61,8 +61,8 @@ class TestSourceReachability:
         assert not [name for name, count in definitions.items() if occurrences[name] <= count]
 
     def test_reused_yaml_blocks_do_not_hide_variable_consumers(self, tmp_path, monkeypatch):
-        # Consolidating the legacy adapter creates YAML aliases. Definitions and
-        # references must both be counted after expansion; assertions stay strict.
+        # Shared YAML blocks create aliases. Count both definitions and uses
+        # after expansion so reuse cannot hide a missing runtime consumer.
         folder = tmp_path / 'roles'
         folder.mkdir()
         shared = {'vars': {'bind_example': 1}, 'debug': {'msg': '{{ bind_example }}'}}

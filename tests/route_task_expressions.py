@@ -62,22 +62,5 @@ class TaskExpressions:
 
     @classmethod
     def load(cls, filename):
-        """Read current tasks or a retained helper in the legacy recovery adapter."""
-        path = cls.TASKS / filename
-        if path.exists():
-            return yaml.safe_load(path.read_text())
-        wanted = 'Legacy helper ' + Path(filename).name
-        def find(tasks):
-            for task in tasks:
-                if task.get('name') == wanted or 'legacy-helper-' + Path(filename).name in task.get('tags', []):
-                    return task['block']
-                for key in ('block', 'rescue', 'always'):
-                    if key in task:
-                        result = find(task[key])
-                        if result is not None:
-                            return result
-            return None
-        result = find(yaml.safe_load((cls.TASKS / 'deploy/front_routes_legacy.yml').read_text()))
-        if result is None:
-            raise ValueError('No current/legacy helper: ' + filename)
-        return result
+        """Read the current production task file without compatibility aliases."""
+        return yaml.safe_load((cls.TASKS / filename).read_text())

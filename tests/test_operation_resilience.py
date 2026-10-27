@@ -197,13 +197,12 @@ def test_lost_runtime_lock_cannot_authorize_publication(tmp_path, change):
     assert (tmp_path / 'etc/named.conf').read_bytes() == before
 
 
-@pytest.mark.parametrize('filename', ['front-routes.pending', 'front-routes.lock'])
-def test_pending_front_transaction_prevents_overlapping_dns_publication(tmp_path, filename):
+def test_pending_front_transaction_prevents_overlapping_dns_publication(tmp_path):
     lab = Lab(tmp_path)
     checksum = lab.manager().run()['checksum']
     folder = tmp_path / 'var/lib/Bind9-Ansible'
     folder.mkdir(parents=True, mode=0o700)
-    (folder / filename).mkdir(mode=0o700)
+    (folder / 'front-routes.pending').mkdir(mode=0o700)
     with pytest.raises(M.ManagementError, match='pending FRONT transaction'):
         lab.manager(action='update', expected_checksum=checksum, value='no').run()
     assert not lab.calls

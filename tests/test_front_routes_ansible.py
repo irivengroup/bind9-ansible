@@ -14,7 +14,7 @@ import sys
 import pytest
 import yaml
 
-from test_native_front_routes import ADDRESSES, BASE, NEW, RULES, UUID, plan
+from test_native_front_routes import ADDRESSES, BASE, NEW, RULES, UUID
 
 ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.skipif(os.name != 'posix' or not shutil.which('ansible-playbook')
@@ -74,9 +74,6 @@ class AnsibleRouteSandbox:
                      'bind_primary_host': 'localhost', 'bind_secondary_host': 'secondary',
                      'bind_cloud_clients': ['203.0.113.0/24'], 'bind_internal_clients': ['10.0.0.0/24','10.30.1.20'], 'bind_front_route_metric': 100,
                      'bind_front_routes_enabled': True}
-        if tasks_from.endswith('front_routes_recover.yml'):
-            tasks_from = 'tasks.d/deploy/front_return_routes.yml'
-            variables['bind_front_requested_action'] = 'recover'
         variables.update(extra_vars or {})
         play = [{'hosts': 'localhost', 'gather_facts': False, 'vars': variables,
                  # Dynamic includes need apply to reproduce the production
@@ -137,6 +134,54 @@ class TestAnsibleNativeFrontRoutes:
         assert result.returncode != 0, result.stdout
         assert sandbox.read() == sandbox.data
         assert not (sandbox.state_root / 'front-routes.pending').exists()
+
+    @pytest.mark.parametrize('source', ['profile', 'runtime', 'both'])
+    def test_specific_front_next_hop_is_used_without_moving_the_system_default(self, tmp_path, source):
+        """Execute the real YAML/script boundary for a FRONT with no default route."""
+        sandbox = AnsibleRouteSandbox(tmp_path)
+        sandbox.data.update(gateway='', active_gateway='')
+        existing = dict(NEW, dst='172.16.0.0/24', metric=150)
+        if source in ('profile', 'both'):
+            sandbox.data['persistent'].append({'network': existing['dst'], 'gateway': existing['gateway'], 'metric': 150})
+        if source in ('runtime', 'both'):
+            sandbox.data['runtime'].append(dict(existing, protocol='static'))
+        sandbox.save()
+        before = copy.deepcopy(sandbox.data)
+        planned = sandbox.run(check=True)
+        assert planned.returncode == 0, planned.stdout
+        assert sandbox.read() == before
+        applied = sandbox.run()
+        assert applied.returncode == 0, applied.stdout
+        data = sandbox.read()
+        assert data['runtime'] == before['runtime'] + [NEW]
+        assert data['persistent'] == before['persistent'] + [
+            {'network': NEW['dst'], 'gateway': NEW['gateway'], 'metric': NEW['metric']}]
+        repeated = sandbox.run()
+        assert repeated.returncode == 0, repeated.stdout
+        assert sandbox.read() == data
+        assert not (sandbox.state_root / 'front-routes.pending').exists()
+
+    def test_mixed_host_and_subnet_routes_use_the_same_nondefault_front_gateway(self, tmp_path):
+        sandbox = AnsibleRouteSandbox(tmp_path)
+        sandbox.data.update(gateway='', persistent=[
+            {'network': '172.16.0.0/24', 'gateway': NEW['gateway'], 'metric': 150}])
+        sandbox.save()
+        before = copy.deepcopy(sandbox.data)
+        variables = {'bind_cloud_clients': ['203.0.113.25', '172.20.0.0/16']}
+        planned = sandbox.run(check=True, extra_vars=variables)
+        assert planned.returncode == 0, planned.stdout
+        assert sandbox.read() == before
+        applied = sandbox.run(extra_vars=variables)
+        assert applied.returncode == 0, applied.stdout
+        data = sandbox.read()
+        assert data['runtime'][:len(BASE)] == BASE
+        assert len(data['runtime']) == len(BASE) + 2
+        assert data['persistent'][0] == before['persistent'][0]
+        assert {row['network'] for row in data['persistent'][1:]} == {'203.0.113.25/32', '172.20.0.0/16'}
+        assert {row['dst'] for row in data['runtime'][len(BASE):]} == {'203.0.113.25/32', '172.20.0.0/16'}
+        repeated = sandbox.run(extra_vars=variables)
+        assert repeated.returncode == 0, repeated.stdout
+        assert sandbox.read() == data
 
     @pytest.mark.parametrize('failure_phase', [None, 'health', 'reload', 'disabled', 'internal-only'])
     def test_routes_commit_after_dns_health_or_are_removed_by_dns_rollback(self, tmp_path, failure_phase):
@@ -200,7 +245,7 @@ class TestAnsibleNativeFrontRoutes:
             assert len(data['persistent']) == 2
             assert not (sandbox.state_root / 'front-routes.pending').exists(), result.stdout
             assert 'failed=0' in result.stdout
-        assert not (sandbox.state_root / 'front-routes.lock').exists()
+        assert not (sandbox.state_root / 'front-routes.pending').exists()
 
     def test_empty_mutation_stdout_and_second_run_idempotence(self, tmp_path):
         sandbox = AnsibleRouteSandbox(tmp_path)
@@ -209,7 +254,7 @@ class TestAnsibleNativeFrontRoutes:
         data = sandbox.read()
         assert data['runtime'] == BASE + [NEW]
         assert len(data['operations']) == 2
-        assert not (sandbox.state_root / 'front-routes.lock').exists()
+        assert not (sandbox.state_root / 'front-routes.pending').exists()
         second = sandbox.run()
         assert second.returncode == 0, second.stdout
         assert sandbox.read()['operations'] == data['operations']
@@ -230,7 +275,7 @@ class TestAnsibleNativeFrontRoutes:
         assert result.returncode != 0, result.stdout
         data = sandbox.read()
         assert data['persistent'] == [] and data['runtime'] == BASE
-        assert not (sandbox.state_root / 'front-routes.lock').exists()
+        assert not (sandbox.state_root / 'front-routes.pending').exists()
         assert len(data['operations']) == 3  # add persistent, failed active, remove persistent.
 
     def test_verification_failure_rolls_back_profile_and_active_additions(self, tmp_path):
@@ -241,24 +286,20 @@ class TestAnsibleNativeFrontRoutes:
         assert result.returncode != 0, result.stdout
         data = sandbox.read()
         assert data['persistent'] == [] and data['runtime'] == BASE
-        assert not (sandbox.state_root / 'front-routes.lock').exists()
+        assert not (sandbox.state_root / 'front-routes.pending').exists()
         assert len(data['operations']) == 4
 
     def test_interrupted_operation_requires_explicit_recovery(self, tmp_path):
         sandbox = AnsibleRouteSandbox(tmp_path)
-        journal = sandbox.state_root / 'front-routes.lock'
-        journal.mkdir(parents=True, mode=0o700)
-        sandbox.state_root.chmod(0o700)
-        file = journal / 'plan.json'
-        file.write_text(json.dumps(plan()))
-        file.chmod(0o600)
-        sandbox.data['runtime'].append(NEW)
-        sandbox.data['persistent'] = [{'network': NEW['dst'], 'gateway': NEW['gateway'], 'metric': NEW['metric']}]
-        sandbox.save()
+        applied = sandbox.run(extra_vars={'bind_front_routes_defer_commit': True})
+        assert applied.returncode == 0, applied.stdout
+        journal = sandbox.state_root / 'front-routes.pending'
+        before = sandbox.read()
         blocked = sandbox.run()
         assert blocked.returncode != 0
         assert 'routes-recover' in blocked.stdout
-        recovered = sandbox.run('tasks.d/deploy/front_routes_recover.yml')
+        assert sandbox.read() == before
+        recovered = sandbox.run(extra_vars={'bind_front_requested_action': 'recover'})
         assert recovered.returncode == 0, recovered.stdout
         assert sandbox.read()['runtime'] == BASE
         assert sandbox.read()['persistent'] == []

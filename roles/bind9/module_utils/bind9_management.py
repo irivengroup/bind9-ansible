@@ -1383,7 +1383,7 @@ class Manager:
         """
         if writing:
             state = self.root / 'var/lib/Bind9-Ansible'
-            if any(os.path.lexists(str(state / name)) for name in ('front-routes.pending', 'front-routes.lock')):
+            if os.path.lexists(str(state / 'front-routes.pending')):
                 raise ManagementError('A pending FRONT transaction must complete or recover before DNS management writes')
         pointer = self.pending_path()
         if not os.path.lexists(str(pointer)):

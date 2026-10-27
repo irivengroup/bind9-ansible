@@ -13,19 +13,6 @@
       - (bind_front_route_metric | type_debug) in ['int', 'long']
     fail_msg: 'FRONT accepts plan/apply/verify/commit/rollback/recover, an integer metric, and plan only with --check.'
 
-- name: Inspect the previous journal format only for explicit recovery
-  ansible.builtin.stat:
-    path: /var/lib/Bind9-Ansible/front-routes.lock
-    follow: false
-  register: bind_front_legacy_journal
-  when: bind_front_action == 'recover'
-
-- name: Recover the previous journal without converting or overwriting it
-  ansible.builtin.include_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_routes_legacy.yml'
-  when:
-    - bind_front_action == 'recover'
-    - bind_front_legacy_journal.stat.exists | default(false)
-
 - name: Read the real SSH peer before any route mutation
   ansible.builtin.command:
     argv: [printenv, SSH_CONNECTION]
@@ -69,11 +56,10 @@
   check_mode: false
   changed_when: bind_front_operation.rc == 2
   failed_when: bind_front_operation.rc not in [0, 2]
-  when: not (bind_front_legacy_journal.stat.exists | default(false))
 
-- name: Retain only the transaction created by this DNS deployment
+- name: Record pending FRONT changes without trusting an unverified receipt
   ansible.builtin.set_fact:
-    bind_front_transaction_token: '{{ (bind_front_operation.stdout | regex_findall("(?m)^transaction: ([0-9a-f-]{36})\r?$")) | first | default("") }}'
+    bind_front_transaction_token: ''
     bind_front_route_transaction_pending: true
     bind_front_route_rollback_attempted: false
   when:
@@ -84,8 +70,19 @@
 - name: Require an unambiguous receipt before any deferred route operation
   ansible.builtin.assert:
     that:
-      - bind_front_transaction_token | default('') is match('^[0-9a-f-]{36}$')
-    fail_msg: 'FRONT applied routes but its receipt is unavailable. Journal retained; inspect it before routes-recover.'
+      - >-
+        bind_front_operation.stdout | regex_findall('(?m)^transaction:.*$') | length == 1
+      - >-
+        bind_front_operation.stdout | regex_findall('(?m)^transaction: ([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})\r?$') | length == 1
+    fail_msg: 'FRONT applied routes but its receipt is missing, malformed or ambiguous. Journal retained; inspect it before routes-recover.'
+  when:
+    - bind_front_action == 'apply'
+    - bind_front_operation.rc == 2
+    - bind_front_routes_defer_commit | default(false) | bool
+
+- name: Retain only the transaction created by this DNS deployment
+  ansible.builtin.set_fact:
+    bind_front_transaction_token: '{{ (bind_front_operation.stdout | regex_findall("(?m)^transaction: ([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})\r?$")) | first }}'
   when:
     - bind_front_action == 'apply'
     - bind_front_operation.rc == 2

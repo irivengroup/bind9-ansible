@@ -8,9 +8,9 @@ Le rôle produit une configuration unique `/etc/named.conf`, sans vues BIND. Il 
 
 **Configuration live :** le management conserve les clauses non ciblées et refuse toute création sur un nom déjà présent. Routes et management partagent une exclusion de processus, libérée automatiquement à sa fin ; un fichier vide restant ne bloque pas la suite. Les écritures restent conditionnées aux checksums et aux journaux de reprise. Les déploiements complets et interventions manuelles exigent une fenêtre exclusive. Voir [les garanties et limites](docs/VERIFICATION_SYNTAXE_SCRIPTS.md).
 
-**Révision courante : essai du tag `routes` seul sur BIND déjà déployé.** Simulation, ajout persistant et à chaud, puis relance sans changement sur les rôles primaire et secondaire dans un laboratoire EL8. DNSSEC `auto`, fichiers DNS, processus et opérations de service sont préservés. [Résultats et limites](docs/FRONT_ROUTES.md#recette-du-tag-routes-seul).
+**Révision courante : durcissement du moteur FRONT actuel.** La lecture des journaux refuse les octets ignorés, les opérations sans destination cliente correspondante et les propriétés de route dupliquées. Un reçu Ansible doit être unique et contenir un UUID canonique ; une erreur conserve la transaction en attente sans faire confiance à un jeton non vérifié. Les IP, sous-réseaux, métriques existantes et le seul format `front-routes.pending/` sont conservés. [Périmètre, preuves et limites](docs/DURCISSEMENT_FRONT_ACTUEL.md). Le [nettoyage antérieur](docs/NETTOYAGE_FRONT_ACTUEL.md) reste documenté dans son contexte historique.
 
-**Qualification opérationnelle : NON TERMINÉE pour la production.** Aucun serveur de votre environnement n’a été contacté. systemd/firewalld/SELinux restent des contrats de laboratoire ; les preuves courantes figurent dans `DELIVERY.json` et [FRONT_ROUTES.md](docs/FRONT_ROUTES.md#recette-du-tag-routes-seul).
+**Qualification opérationnelle : NON TERMINÉE pour la production.** Aucun serveur de votre environnement n’a été contacté. Les preuves de la révision courante figurent dans `DELIVERY.json` et [DURCISSEMENT_FRONT_ACTUEL.md](docs/DURCISSEMENT_FRONT_ACTUEL.md) ; les anciennes recettes systemd/firewalld/SELinux ne constituent pas une qualification de cette révision sur vos serveurs.
 
 Ce guide s’adresse aux équipes d’exploitation. Les commandes du contrôleur supposent Bash sous Linux, depuis la racine du projet. Les commandes de diagnostic système s’exécutent sur le serveur DNS indiqué. Toutes les adresses et tous les domaines d’exemple doivent être adaptés avant utilisation.
 
@@ -456,7 +456,7 @@ ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml \
 
 JSON préserve ici le booléen. `-e bind_front_routes_enabled=true` produit une chaîne avec Ansible 2.9 et n’est pas la forme attendue. Maintenir `bind_front_routes_enabled: true` dans les variables si cette gestion doit rester activée.
 
-Les routes préexistantes gardent leur identité et leur métrique. Les conflits provoquent un refus sans remplacement. Le journal privé courant est `/var/lib/Bind9-Ansible/front-routes.pending/` ; l’ancien `front-routes.lock/plan.json` reste pris en charge uniquement pour reprise. Un échec pris en charge retire les seuls ajouts confirmés ; une issue ambiguë conserve le journal. Le fichier vide `operations.flock` ne constitue pas un journal et ne doit pas être supprimé pour « débloquer » une opération.
+Les routes préexistantes gardent leur identité et leur métrique. Les conflits provoquent un refus sans remplacement. Le journal privé est `/var/lib/Bind9-Ansible/front-routes.pending/` ; `routes-recover` reprend uniquement ce format. Un échec pris en charge retire les seuls ajouts confirmés ; une issue ambiguë conserve le journal. Le fichier vide `operations.flock` ne constitue pas un journal et ne doit pas être supprimé pour « débloquer » une opération.
 
 Le profil, la passerelle, la table principale et les règles sont relus sous verrou avant le premier ajout. Les trois règles standard doivent être dépourvues de sélecteurs supplémentaires ; VRF, marques, destinations conditionnelles et autres politiques sont refusées. Le rollback valide les deux magasins avant toute suppression et refuse les attributs actifs inattendus, les changements de métrique, de passerelle ou de règles. La reprise protège aussi les adresses ADM/FRONT/BACK actuelles et la source SSH actuelle. Un conflit conserve le journal ; aucune atomicité n’est garantie face à un autre outil modifiant le réseau pendant l’opération.
 
@@ -856,7 +856,7 @@ Bind9-Ansible/
 └── README.md
 ```
 
-La source de cette livraison est `Bind9-Ansible-deploiement-auto-routes.zip`, SHA-256 `1f263838813a9e369a9286f52c03e4a1b2e3eeddda96089b335233bea3913bde`. Révision courante : `2026.10.19-routes-only.1`. L’historique d’hibernation reste dans [AUDIT_HIBERNATE_DEPLOYMENT.md](docs/AUDIT_HIBERNATE_DEPLOYMENT.md) ; les preuves courantes sont dans [FRONT_ROUTES.md](docs/FRONT_ROUTES.md#recette-du-tag-routes-seul) et `DELIVERY.json`.
+La source de cette livraison est `bind9-ansible-v4-actuel.zip`, SHA-256 `0f66737f83de2ea965e2385afc1557b8d1cdfa100a08281f49ddb14177ee3cbf`. Révision courante : `2026.10.26-front-hardening.1`. L’historique d’hibernation reste dans [AUDIT_HIBERNATE_DEPLOYMENT.md](docs/AUDIT_HIBERNATE_DEPLOYMENT.md) ; les preuves de la révision courante sont dans [DURCISSEMENT_FRONT_ACTUEL.md](docs/DURCISSEMENT_FRONT_ACTUEL.md) et `DELIVERY.json`. Les autres rapports conservent leur valeur historique dans leur périmètre d’origine.
 
 Le ZIP source possède une empreinte SHA-256 externe. Sur le contrôleur Linux, depuis le dossier contenant ZIP et empreinte :
 

@@ -13,9 +13,6 @@ PREPARED=false
 CHANGED_RESULT=false
 ACTION=plan FRONT='' BACK='' ADM='' SSH_PEER='' METRIC=100 DEFER=false TOKEN=''
 declare -a CLIENTS=() PEERS=() ADDRESSES=() PROTECTED=() PROFILE=() KERNEL=() OPS=()
-declare -a LEGACY_P=() LEGACY_R=()
-LEGACY_PROFILE_SHA='' LEGACY_KERNEL_SHA='' LEGACY_JOURNAL_SHA='' LEGACY_DIR_ID='' LEGACY_FILE_ID=''
-LEGACY_CHANGED=false
 
 die() { printf 'FRONT: %s\n' "$*" >&2; exit 1; }
 # Reserve rc 2 for deliberate success, never an unhandled native command error.
@@ -62,8 +59,7 @@ safe_file() {
 journal_count() (
     # Count entries without findutils or filename-delimited text parsing.
     shopt -s nullglob dotglob
-    local directory=${1:-$PENDING}
-    local entries=("$directory"/*)
+    local entries=("$PENDING"/*)
     printf '%s' "${#entries[@]}"
 )
 assert_lock() {
@@ -81,6 +77,16 @@ capture() {
     (( $(stat -c '%s' "$WORK/out") <= 1048576 )) || die 'Observation exceeds 1 MiB'
     [[ $(tr -d '\000' <"$WORK/out" | wc -c) == $(wc -c <"$WORK/out") ]] || die 'NUL in native observation'
     printf -v "$variable" '%s' "$(cat "$WORK/out")"
+}
+journal_text() {
+    # Every current journal file is LF-terminated once by durable()/sha256sum.
+    # Bash strips trailing LF/NUL in substitutions: validate bytes first, then
+    # require the original size so hidden records cannot disappear on loading.
+    local target=$1 file=$2 data=''
+    safe_file "$file"
+    capture data cat -- "$file"
+    [[ $(stat -c '%s' -- "$file") == "$(( ${#data} + 1 ))" ]] || die "Malformed journal text framing: $file"
+    printf -v "$target" '%s' "$data"
 }
 durable() {
     local dest=$1 data=$2 temporary
@@ -147,8 +153,14 @@ canonical_kernel() {
         case $net in blackhole|unreachable|prohibit|throw|local|broadcast|multicast|nat) extra="$net;"; net=${parts[1]:-}; offset=2;; esac
         [[ $net != default ]] || net=0.0.0.0/0
         network "$net"; net=$CIDR
+        declare -A seen=()
         while (( offset < ${#parts[@]} )); do
             token=${parts[$offset]}; ((offset+=1))
+            case $token in
+                via|dev|metric|proto|scope|src)
+                    [[ ! ${seen[$token]+yes} ]] || die "Duplicate runtime route field: $token"
+                    seen[$token]=1;;
+            esac
             case $token in
                 via) gw=${parts[$offset]:-}; ip_number "$gw"; ((offset+=1));;
                 dev) dev=${parts[$offset]:-}; ((offset+=1));;
@@ -166,11 +178,39 @@ canonical_kernel() {
     done <<< "$text"
 }
 rows() { if (( $# )); then printf '%s\n' "$@" | sort; fi; }
+discover_front_route_gateway() {
+    # A never-default FRONT can expose its next-hop only in specific routes.
+    # Infer it only when simple routes in its own profile/main-table device
+    # agree; another interface's default route is never a gateway source.
+    local row net gw metric dev attrs low high required=false
+    network "$FRONT_NETWORK"; low=$LOW high=$HIGH
+    for net in "${CLIENTS[@]}"; do
+        network "$net"
+        if (( LOW < low || HIGH > high )); then required=true; break; fi
+    done
+    # Directly connected clients need no inferred next-hop, even when unrelated
+    # FRONT destinations legitimately use different routers.
+    $required || return 0
+    for row in "${PROFILE[@]}"; do
+        IFS='|' read -r net gw metric attrs <<< "$row"
+        [[ $gw != 0.0.0.0 ]] || continue
+        [[ -z $attrs ]] || die 'Unsupported FRONT profile route attributes for gateway discovery'
+        [[ -z $GATEWAY || $GATEWAY == "$gw" ]] || die 'Ambiguous gateways in FRONT routes; no routes changed'
+        GATEWAY=$gw
+    done
+    for row in "${KERNEL[@]}"; do
+        IFS='|' read -r net gw metric dev attrs <<< "$row"
+        [[ $dev == "$DEVICE" && $gw != 0.0.0.0 ]] || continue
+        [[ -z $attrs || $attrs == 'proto=static;' ]] || die 'Unsupported FRONT runtime route attributes for gateway discovery'
+        [[ -z $GATEWAY || $GATEWAY == "$gw" ]] || die 'Ambiguous gateways in FRONT routes; no routes changed'
+        GATEWAY=$gw
+    done
+}
 observe() {
     capture ADDRESS_TEXT ip -o -4 address show up
-    local index dev family address rest hits=0 back_hits=0 adm_hits=0 front_network='' back_dev='' adm_dev='' protected_devices='|'
+    local _index dev family address rest hits=0 back_hits=0 adm_hits=0 front_network='' back_dev='' adm_dev='' protected_devices='|'
     ADDRESSES=() PROTECTED=()
-    while read -r index dev family address rest; do
+    while read -r _index dev family address rest; do
         [[ $family == inet ]] || continue
         dev=${dev%:}; dev=${dev%@*}
         [[ $dev =~ ^[a-zA-Z0-9_.:-]+$ ]] || die 'Unsupported interface name'
@@ -215,6 +255,7 @@ observe() {
             fi
         done
     fi
+    if [[ -z $GATEWAY ]]; then discover_front_route_gateway; fi
     if [[ -n $GATEWAY ]]; then
         # A next-hop must not be any address owned by this server, including
         # aliases/secondary addresses unrelated to the inventory FRONT address.
@@ -315,7 +356,7 @@ build_plan() {
             ip_string "$probe"; check_path "$REPLY" false
             continue
         fi
-        [[ -n $GATEWAY ]] || die 'No IPv4 gateway on the active FRONT profile/device; no global gateway fallback'
+        [[ -n $GATEWAY ]] || die "No IPv4 gateway on the active FRONT profile/device; no global gateway fallback (device=$DEVICE profile=$UUID destination=$target)"
         coverage P "$target" "$lo" "$hi" "$prefix"
         local profile_covered=$COVERED route_metric=${COVER_METRIC:-$METRIC}
         coverage R "$target" "$lo" "$hi" "$prefix"
@@ -398,31 +439,52 @@ prepare() {
 }
 load_journal() {
     secure_dir "$PENDING"
-    local file count expected token
-    for file in meta operations profile kernel addresses rules clients checksums progress; do safe_file "$PENDING/$file"; done
+    local count expected token meta_record operation_records client_records checksums_record progress_record
     count=$(journal_count)
     [[ $count == 9 ]] || die 'Unexpected recovery journal contents; preserve them for inspection'
+    journal_text meta_record "$PENDING/meta"
+    journal_text operation_records "$PENDING/operations"
+    journal_text client_records "$PENDING/clients"
+    journal_text checksums_record "$PENDING/checksums"
+    journal_text progress_record "$PENDING/progress"
+    journal_text BASE_PROFILE "$PENDING/profile"
+    journal_text BASE_KERNEL "$PENDING/kernel"
+    journal_text BASE_ADDRESSES "$PENDING/addresses"
+    journal_text BASE_RULES "$PENDING/rules"
     expected=$(cd "$PENDING"; sha256sum meta operations profile kernel addresses rules clients)
-    [[ $expected == "$(cat "$PENDING/checksums")" ]] || die 'Recovery journal checksum mismatch'
-    IFS='|' read -r token BASE_UUID BASE_DEVICE BASE_GATEWAY FRONT BACK ADM METRIC <"$PENDING/meta"
-    [[ $token =~ ^[0-9a-f-]{36}$ && $BASE_UUID =~ ^[0-9a-fA-F-]{36}$ && $BASE_DEVICE =~ ^[a-zA-Z0-9_.:-]+$ ]] || die 'Malformed route journal identity'
+    [[ $expected == "$checksums_record" ]] || die 'Recovery journal checksum mismatch'
+    [[ $meta_record != *$'\n'* && $meta_record =~ ^[^\|]+(\|[^\|]+){7}$ ]] || die 'Malformed route journal metadata'
+    IFS='|' read -r token BASE_UUID BASE_DEVICE BASE_GATEWAY FRONT BACK ADM METRIC <<< "$meta_record"
+    [[ $token =~ ^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$ && $BASE_UUID =~ ^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$ && $BASE_DEVICE =~ ^[a-zA-Z0-9_.:-]+$ ]] || die 'Malformed route journal identity'
     [[ -z $TOKEN || $TOKEN == "$token" ]] || die 'Transaction token does not own this pending operation'
     TOKEN=$token
-    ip_number "$FRONT"; ip_number "$BACK"; ip_number "$ADM"; ip_number "$BASE_GATEWAY"; uint "$METRIC" || die 'Invalid journal metric'
-    mapfile -t OPS <"$PENDING/operations"; mapfile -t CLIENTS <"$PENDING/clients"
-    BASE_PROFILE=$(cat "$PENDING/profile"); BASE_KERNEL=$(cat "$PENDING/kernel")
-    BASE_ADDRESSES=$(cat "$PENDING/addresses"); BASE_RULES=$(cat "$PENDING/rules")
-    local op store net gw mt extra
-    (( ${#OPS[@]} <= 1024 )) || die 'Oversized operation journal'
+    ip_number "$FRONT"; ip_number "$BACK"; ip_number "$ADM"; ip_number "$BASE_GATEWAY"
+    if ! uint "$METRIC" || (( METRIC == 0 )); then die 'Invalid journal metric'; fi
+    mapfile -t OPS <<< "$operation_records"; mapfile -t CLIENTS <<< "$client_records"
+    (( ${#OPS[@]} >= 1 && ${#OPS[@]} <= 1024 )) || die 'Invalid operation journal size'
+    (( ${#CLIENTS[@]} >= 1 && ${#CLIENTS[@]} <= 512 )) || die 'Invalid journal client count'
+    # Rebuild the same exact CIDR union as planning, including aggregated
+    # siblings. An operation outside that union has no recorded ownership.
+    collapse_clients
+    local op store net gw mt key destination
+    declare -A allowed=() seen_operations=()
+    for destination in "${WANTED[@]}"; do allowed[$destination]=1; done
     for op in "${OPS[@]}"; do
-        IFS='|' read -r store net gw mt extra <<< "$op"
-        if [[ $store != P && $store != R ]] || [[ -n $extra || $gw != "$BASE_GATEWAY" ]] || ! uint "$mt"; then
+        [[ $op =~ ^[PR]\|[^\|]+\|[^\|]+\|[0-9]+$ ]] || die 'Invalid journal operation fields'
+        IFS='|' read -r store net gw mt <<< "$op"
+        if [[ $gw != "$BASE_GATEWAY" ]] || ! uint "$mt"; then
             die 'Invalid journal operation'
         fi
         network "$net"; [[ $CIDR == "$net" && $PREFIX -gt 0 ]] || die 'Invalid journal destination'
+        [[ ${allowed[$net]+yes} ]] || die 'Journal operation outside recorded client union'
+        key="$store|$net"
+        [[ ! ${seen_operations[$key]+yes} ]] || die 'Duplicate journal operation ownership'
+        seen_operations[$key]=1
+        [[ $store != P ]] || (( mt > 0 )) || die 'Invalid persistent journal metric'
     done
-    read -r PROGRESS PHASE extra <"$PENDING/progress"
-    uint "$PROGRESS" && (( PROGRESS <= ${#OPS[@]} )) && [[ $PHASE == 'done' || $PHASE == 'intent' ]] && [[ -z ${extra:-} ]] || die 'Malformed journal progress'
+    [[ $progress_record =~ ^(0|[1-9][0-9]{0,9})[[:blank:]](done|intent)$ ]] || die 'Malformed journal progress'
+    read -r PROGRESS PHASE <<< "$progress_record"
+    if ! uint "$PROGRESS" || (( PROGRESS > ${#OPS[@]} )); then die 'Malformed journal progress'; fi
 }
 remove_journal() {
     # Never recursively delete a journal directory: unexpected evidence stays.
@@ -446,79 +508,6 @@ mutate() {
         local verb=add; $inverse && verb=del
         capture discard ip -4 route "$verb" "$net" via "$gw" dev "$BASE_DEVICE" metric "$mt" table main
     fi
-}
-legacy_recovery() {
-    # Controller-side legacy validation is retained. This process rechecks its
-    # exact observations under the same kernel lock as all new operations.
-    local legacy=$STATE/front-routes.lock file=$STATE/front-routes.lock/plan.json
-    local value raw store spec net gw mt row index matches expected_p expected_r
-    if [[ $ACTION == legacy-cleanup && ! -e $legacy && ! -L $legacy ]]; then return 0; fi
-    [[ -d $legacy && ! -L $legacy && $(stat -c '%u:%a' "$legacy") == 0:700 ]] || die 'Unsafe legacy journal directory'
-    [[ $(stat -c '%d:%i' "$legacy") == "$LEGACY_DIR_ID" ]] || die 'Legacy journal directory ownership changed'
-    safe_file "$file"
-    [[ $(stat -c '%d:%i' "$file") == "$LEGACY_FILE_ID" ]] || die 'Legacy journal file ownership changed'
-    value=$(sha256sum "$file"); value=${value%% *}
-    [[ $value == "$LEGACY_JOURNAL_SHA" && $(journal_count "$legacy") == 1 ]] || die 'Legacy journal changed or contains operator evidence'
-    if [[ $ACTION == legacy-cleanup ]]; then
-        assert_lock
-        rm -- "$file"
-        rmdir -- "$legacy"
-        sync -- "$STATE"
-        LEGACY_CHANGED=true
-        return 0
-    fi
-    [[ ! -e $PENDING && ! -L $PENDING ]] || die 'Both legacy and current FRONT journals exist; preserve both'
-    ip_number "$FRONT"; ip_number "$BACK"; ip_number "$ADM"
-    local expected_uuid=$TOKEN expected_gateway=$GATEWAY
-    observe
-    [[ $UUID == "$expected_uuid" && $GATEWAY == "$expected_gateway" ]] || die 'Legacy FRONT profile or gateway changed'
-    capture raw ip -j -4 route show table main
-    value=$(printf '%s' "$raw" | sha256sum); value=${value%% *}
-    [[ $value == "$LEGACY_KERNEL_SHA" ]] || die 'Legacy runtime observation changed before removal'
-    capture raw nmcli -g ipv4.routes connection show uuid "$UUID"
-    value=$(printf '%s' "$raw" | sha256sum); value=${value%% *}
-    [[ $value == "$LEGACY_PROFILE_SHA" ]] || die 'Legacy persistent observation changed before removal'
-    local -a expected_profile=("${PROFILE[@]}") expected_kernel=("${KERNEL[@]}")
-    OPS=()
-    normalize_ssh
-    for store in P R; do
-        local -a specs=()
-        if [[ $store == P ]]; then specs=("${LEGACY_P[@]}"); else specs=("${LEGACY_R[@]}"); fi
-        for spec in "${specs[@]}"; do
-            read -ra parts <<< "$spec"
-            (( ${#parts[@]} == 2 || ${#parts[@]} == 3 )) || die 'Invalid legacy route arguments'
-            net=${parts[0]} gw=${parts[1]}
-            if (( ${#parts[@]} == 3 )); then mt=${parts[2]}; elif [[ $store == P ]]; then mt=-1; else mt=0; fi
-            network "$net"; [[ $net == "$CIDR" && $PREFIX -gt 0 && $gw == "$GATEWAY" ]] || die 'Invalid legacy route identity'
-            if [[ -n $SSH_IPV4 ]]; then
-                local lo=$LOW hi=$HIGH; ip_number "$SSH_IPV4"
-                (( NUMBER < lo || NUMBER > hi )) || die 'Legacy recovery would affect the current SSH peer'
-            fi
-            [[ $mt == -1 && $store == P ]] || uint "$mt" || die 'Invalid legacy route metric'
-            matches=0
-            if [[ $store == P ]]; then
-                for index in "${!expected_profile[@]}"; do
-                    if [[ ${expected_profile[$index]} == "$net|$gw|$mt|" ]]; then unset 'expected_profile[index]'; ((matches+=1)); fi
-                done
-            else
-                for index in "${!expected_kernel[@]}"; do
-                    row=${expected_kernel[$index]}
-                    if [[ $row == "$net|$gw|$mt|$DEVICE|" || $row == "$net|$gw|$mt|$DEVICE|proto=static;" ]]; then
-                        unset 'expected_kernel[index]'; ((matches+=1))
-                    fi
-                done
-            fi
-            (( matches == 1 )) || die 'A legacy route changed before native removal'
-            OPS+=("$store|$net|$gw|$mt")
-        done
-    done
-    expected_p=$(rows "${expected_profile[@]}"); expected_r=$(rows "${expected_kernel[@]}")
-    BASE_UUID=$UUID BASE_DEVICE=$DEVICE
-    for row in "${OPS[@]}"; do mutate "$row" true; done
-    if (( ${#OPS[@]} )); then LEGACY_CHANGED=true; fi
-    observe
-    [[ $OBSERVED_PROFILE == "$expected_p" && $OBSERVED_KERNEL == "$expected_r" ]] || die 'Legacy recovery stores changed; original journal preserved'
-    printf 'Legacy FRONT removals completed under the process lock.\n'
 }
 rollback() {
     load_journal
@@ -606,18 +595,12 @@ while (( $# )); do
         --peer-back-ip) PEERS+=("${2:?}"); shift 2;; --ssh-peer) SSH_PEER=${2-}; shift 2;;
         --client) CLIENTS+=("${2:?}"); shift 2;; --metric) METRIC=${2:?}; shift 2;;
         --token) TOKEN=${2:?}; shift 2;; --defer-commit) DEFER=true; shift;;
-        --legacy-profile-sha) LEGACY_PROFILE_SHA=${2:?}; shift 2;;
-        --legacy-kernel-sha) LEGACY_KERNEL_SHA=${2:?}; shift 2;;
-        --legacy-journal-sha) LEGACY_JOURNAL_SHA=${2:?}; shift 2;;
-        --legacy-dir-id) LEGACY_DIR_ID=${2:?}; shift 2;; --legacy-file-id) LEGACY_FILE_ID=${2:?}; shift 2;;
-        --legacy-gateway) GATEWAY=${2:?}; shift 2;;
-        --legacy-profile-route) LEGACY_P+=("${2:?}"); shift 2;; --legacy-runtime-route) LEGACY_R+=("${2:?}"); shift 2;;
         --help) printf 'Actions: plan, apply, verify, commit, rollback, recover. IPv4 routes only; rc 0 unchanged, 2 changed/planned, 1 refused.\n'; exit 0;;
         *) die "Unknown argument: $1";;
     esac
 done
 [[ $EUID == 0 ]] || die 'Root is required'
-[[ $ACTION =~ ^(plan|apply|verify|commit|rollback|recover|legacy-rollback|legacy-cleanup)$ ]] || die 'Unsupported route action'
+[[ $ACTION =~ ^(plan|apply|verify|commit|rollback|recover)$ ]] || die 'Unsupported route action'
 for required in ip nmcli flock timeout stat mktemp sync sha256sum sort tr wc sed cat head chmod mv rm rmdir mkdir; do
     command -v "$required" >/dev/null 2>&1 || die "Missing native prerequisite: $required; install the corresponding EL8 system package before retrying"
 done
@@ -631,11 +614,6 @@ exec 9<>"$LOCK"
 [[ $(stat -Lc '%d:%i' /proc/self/fd/9) == $(stat -c '%d:%i' "$LOCK") ]] || die 'Operation lock changed while opening'
 flock -n 9 || die 'Another route or management operation is active; retry after it ends'
 WORK=$(mktemp -d "$STATE/.route-work.XXXXXXXX")
-if [[ $ACTION == legacy-rollback || $ACTION == legacy-cleanup ]]; then
-    legacy_recovery
-    $LEGACY_CHANGED && changed_result
-    exit 0
-fi
 if [[ $ACTION == recover || $ACTION == rollback || $ACTION == commit || $ACTION == verify ]]; then
     [[ -d $PENDING && ! -L $PENDING ]] || die 'No pending FRONT transaction to recover'
     [[ $ACTION == recover || -n $TOKEN ]] || die 'Transaction token is required'
@@ -646,7 +624,6 @@ if [[ $ACTION == recover || $ACTION == rollback || $ACTION == commit || $ACTION 
         commit) (( PROGRESS == ${#OPS[@]} )) && [[ $PHASE == 'done' ]] || die 'Incomplete transaction cannot commit'; verify; remove_journal; printf 'FRONT transaction committed.\n'; exit 0;;
     esac
 fi
-[[ ! -e $STATE/front-routes.lock && ! -L $STATE/front-routes.lock ]] || die 'Legacy FRONT journal found: use routes-recover for legacy recovery before a new operation'
 [[ ! -e $PENDING && ! -L $PENDING ]] || die 'Pending FRONT journal: inspect it, then use routes-recover; it is not a stale process lock'
 ip_number "$FRONT"; ip_number "$BACK"; ip_number "$ADM"
 [[ $FRONT != "$BACK" && $FRONT != "$ADM" && $BACK != "$ADM" ]] || die 'FRONT/BACK/ADM addresses must differ'
