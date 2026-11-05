@@ -40,7 +40,20 @@ class NativeNetworkDouble:
                              ''.join(' ' + key + ' ' + str(value) for key, value in row.items()
                                      if key not in ('priority', 'src', 'table')) for row in self.state['rules'])
         if args == ['-o', '-4', 'route', 'show', 'table', 'main']:
+            if self.state.get('drift_front_kernel_on_second_read'):
+                self.state['kernel_reads'] = self.state.get('kernel_reads', 0) + 1
+                if self.state['kernel_reads'] == 2:
+                    for row in self.state['runtime']:
+                        if row.get('dev') == 'front0' and 'gateway' in row:
+                            row['gateway'] = '198.51.100.254'
+                self.save()
             return self.state.get('runtime_text', '\n'.join(self.route_text(row) for row in self.state['runtime']))
+        if args[:5] == ['-o', '-4', 'route', 'show', 'match'] and len(args) == 6:
+            if 'matched_text' in self.state:
+                return self.state['matched_text']
+            address = ipaddress.IPv4Address(args[5])
+            return '\n'.join(self.route_text(row) for row in self.state['runtime']
+                             if address in ipaddress.IPv4Network(row.get('dst', 'default').replace('default', '0.0.0.0/0')))
         if args[:3] == ['-4', 'route', 'get']:
             result = self.ip(['-j', '-4', 'route', 'get'] + args[3:])
             return self.route_text(result[0])
@@ -93,11 +106,6 @@ class NativeNetworkDouble:
             return self.state.get('active_gateway', '')
         if args[:1] == ['-g'] and args[2:6] == ['connection', 'show', 'uuid', self.state['uuid']]:
             if args[1] == 'ipv4.gateway':
-                if self.state.get('drift_gateway_on_second_read'):
-                    self.state['gateway_reads'] = self.state.get('gateway_reads', 0) + 1
-                    if self.state['gateway_reads'] == 2:
-                        self.state['gateway'] = '198.51.100.254'
-                    self.save()
                 return self.state['gateway']
             if args[1] == 'ipv4.route-table':
                 return self.state.get('route_table', '0')

@@ -9,6 +9,7 @@ journal records ownership before mutation so rollback/removal is recoverable.
 import argparse
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -17,6 +18,7 @@ import stat
 import subprocess  # nosec B404
 import sys
 import tempfile
+import time
 
 
 class PrivateDnssec:
@@ -27,9 +29,17 @@ class PrivateDnssec:
     LIMIT = 1048576
 
     def __init__(self, config='/etc/named.conf', state='/var/lib/Bind9-Ansible/dnssec-owned.json',
-                 rndc='/usr/sbin/rndc', key='/etc/rndc.key', port=953, runner=subprocess.run):
+                 rndc='/usr/sbin/rndc', key='/etc/rndc.key', port=953, runner=subprocess.run, lock_timeout=30):
         self.config, self.state = Path(config), Path(state)
         self.rndc, self.key, self.port, self.runner = str(rndc), str(key), port, runner
+        try:
+            valid_timeout = (type(lock_timeout) in (int, float) and
+                             math.isfinite(lock_timeout) and lock_timeout >= 0)
+        except OverflowError:
+            valid_timeout = False
+        if not valid_timeout:
+            raise ValueError('DNSSEC lock timeout must be a finite nonnegative number')
+        self.lock_timeout = lock_timeout
 
     @classmethod
     def domains(cls, values):
@@ -65,8 +75,15 @@ class PrivateDnssec:
 
     def owned(self):
         """Return previously recorded ownership; malformed state fails closed."""
+        def unique_fields(pairs):
+            value = {}
+            for key, item in pairs:
+                if key in value:
+                    raise ValueError('Duplicate DNSSEC ownership field')
+                value[key] = item
+            return value
         try:
-            value = json.loads(self.read(self.state))
+            value = json.loads(self.read(self.state), object_pairs_hook=unique_fields)
         except FileNotFoundError:
             return []
         if (not isinstance(value, dict) or set(value) != {'version', 'domains'} or
@@ -78,11 +95,15 @@ class PrivateDnssec:
         """Atomically persist root-only ownership before executing RNDC mutations."""
         name = None
         try:
-            with tempfile.NamedTemporaryFile(mode='w', dir=str(self.state.parent), delete=False) as stream:
+            with tempfile.NamedTemporaryFile(mode='w+b', dir=str(self.state.parent), delete=False) as stream:
                 name = stream.name
-                json.dump({'version': 1, 'domains': domains}, stream, sort_keys=True)
-                stream.write('\n')
+                expected = (json.dumps({'version': 1, 'domains': domains}, sort_keys=True) + '\n').encode('utf-8')
+                if stream.write(expected) != len(expected):
+                    raise OSError('DNSSEC private write was incomplete')
                 stream.flush()
+                stream.seek(0)
+                if stream.read(len(expected) + 1) != expected:
+                    raise OSError('DNSSEC private verification failed')
                 os.fsync(stream.fileno())
             os.replace(name, str(self.state))
             # Persist the renamed directory entry before RNDC can change trust.
@@ -120,15 +141,28 @@ class PrivateDnssec:
             if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or (writable and not sticky_ancestor):
                 raise ValueError('Unsafe DNSSEC state directory: ' + str(parent))
         lock = self.state.parent / 'dnssec.lock'
-        with os.fdopen(os.open(str(lock), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600), 'a+') as stream:
-            info = os.fstat(stream.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
+        # Locking needs a descriptor, not a seekable text stream. Validate before
+        # flock so FIFOs and other special objects fail explicitly and promptly.
+        descriptor = os.open(str(lock), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600)
+        try:
+            info = os.fstat(descriptor)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077 or info.st_nlink != 1:
                 raise ValueError('Unsafe DNSSEC lock permissions')
-            return self.locked(stream.fileno())
+            return self.locked(descriptor)
+        finally:
+            os.close(descriptor)
 
     def locked(self, descriptor):
         """Hold one advisory lock across the ownership journal and all mutations."""
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        deadline = time.monotonic() + self.lock_timeout
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise ValueError('DNSSEC lock timed out; inspect the active reconciler')
+                time.sleep(0.05)
         # A timer may have waited while a deploy replaced the canonical file.
         desired = self.desired()
         previous = self.owned()
@@ -151,6 +185,8 @@ def main():
     parser.add_argument('--key', default='/etc/rndc.key', help='Native RNDC key file; never a secret in argv')
     parser.add_argument('--port', type=int, default=953, help='RNDC port on 127.0.0.1')
     parser.add_argument('--check', action='store_true', help='Show proposed changes without RNDC or writes')
+    parser.add_argument('--lock-timeout', type=float, default=30,
+                        help='Maximum lock wait in seconds (finite nonnegative number; default: 30)')
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error('Root required')

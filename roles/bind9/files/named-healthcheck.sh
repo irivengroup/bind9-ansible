@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# Protocol tokens and DNS case folding use ASCII, independent of the caller.
+export LC_ALL=C
 [[ $# -ge 1 ]] || { echo 'usage: named-healthcheck LOCAL_BACK_IP [ZONE...]' >&2; exit 2; }
 ip=$1; shift
 systemctl is-active --quiet named || { echo 'CRITICAL named inactive'; exit 2; }
@@ -8,7 +10,7 @@ systemctl is-active --quiet named || { echo 'CRITICAL named inactive'; exit 2; }
 complete_answer() {
   local response=$1
   [[ $(grep -c 'status:' <<<"$response") == 1 ]] &&
-    grep -q 'status: NOERROR' <<<"$response" &&
+    grep -Eq '^;; .*status: NOERROR([,[:space:]]|$)' <<<"$response" &&
     [[ $(grep -c '^;; flags:' <<<"$response") == 1 ]] &&
     ! grep -Eq '^;; flags:([^;]*[[:space:]])tc([[:space:]]|;)' <<<"$response" &&
     grep -Eq '^;; flags:.*ANSWER: 1([,[:space:]]|$)' <<<"$response" &&
@@ -21,7 +23,10 @@ check_loopback() {
     echo "CRITICAL loopback query failed: $name $type $transport"; exit 2;
   }
   if ! complete_answer "$result" ||
-     ! grep -Eq 'flags:.*\baa\b' <<<"$result" ||
+     ! grep -Eq '^;; flags: ([a-z]+ )*aa([[:space:]]|;)' <<<"$result" ||
+     ! awk -v owner="${name%.}." -v kind="$type" '
+       tolower($1) == tolower(owner) && $2 ~ /^[0-9]+$/ && $3 == "IN" && $4 == kind { found=1 }
+       END { exit !found }' <<<"$result" ||
      ! grep -Eq "[[:space:]]IN[[:space:]]+${type}[[:space:]]+${expected}[[:space:]]*$" <<<"$result"; then
     echo "CRITICAL loopback answer invalid: $name $type $transport"; exit 2
   fi
@@ -33,7 +38,7 @@ done
 for zone in "$@"; do
   result=$(dig -r -4 -b "$ip" @"$ip" +tcp +time=3 +tries=1 +norecurse +noall +comments +answer "$zone" SOA) || { echo "CRITICAL DNS query failed: $zone"; exit 2; }
   complete_answer "$result" || { echo "CRITICAL DNS incomplete/status: $zone"; exit 2; }
-  grep -Eq 'flags:.*\baa\b' <<<"$result" || { echo "CRITICAL non-authoritative: $zone"; exit 2; }
+  grep -Eq '^;; flags: ([a-z]+ )*aa([[:space:]]|;)' <<<"$result" || { echo "CRITICAL non-authoritative: $zone"; exit 2; }
   awk -v owner="${zone%.}." 'tolower($1) == tolower(owner) && $3 == "IN" && $4 == "SOA" { found=1 } END { exit !found }' <<<"$result" || {
     echo "CRITICAL SOA owner/type: $zone"; exit 2;
   }

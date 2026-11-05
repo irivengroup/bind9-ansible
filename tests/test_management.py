@@ -74,11 +74,11 @@ class Lab:
         if Path(argv[0]).name == 'dig':
             name, kind = argv[-2:]
             if kind == 'A':
-                return ';; status: NOERROR\nlocalhost. 60 IN A 127.0.0.1\n'
+                return ';; status: NOERROR\n;; flags: qr aa; QUERY: 1, ANSWER: 1\nlocalhost. 60 IN A 127.0.0.1\n'
             config = M.Configuration(M.SafeFiles(self.root))
             zone = config.zones.get(name)
             serial = M.ZoneDocument(config.contents[zone['file']].decode(), name).serial().text if zone and zone.get('file') in config.contents else '1'
-            return ';; status: NOERROR\n;; flags: qr aa;\n' + name + ' 300 IN SOA ns1.example.test. hostmaster.example.test. ' + serial + ' 3600 900 604800 300\n'
+            return ';; status: NOERROR\n;; flags: qr aa; QUERY: 1, ANSWER: 1\n' + name + ' 300 IN SOA ns1.example.test. hostmaster.example.test. ' + serial + ' 3600 900 604800 300\n'
         return ''
 
     def manager(self, resource='option', action='read', name='minimal-responses', **fields):

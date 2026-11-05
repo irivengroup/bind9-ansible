@@ -9,7 +9,6 @@ from ansible.errors import AnsibleError
 from ansible.parsing.dataloader import DataLoader
 from ansible.playbook.conditional import Conditional
 from ansible.template import Templar
-import yaml
 
 
 class TaskExpressions:
@@ -62,5 +61,10 @@ class TaskExpressions:
 
     @classmethod
     def load(cls, filename):
-        """Read the current production task file without compatibility aliases."""
-        return yaml.safe_load((cls.TASKS / filename).read_text())
+        """Read native values and their source positions without changing tasks.
+
+        Reading first preserves FileNotFoundError for removed task filenames;
+        DataLoader then adds the same provenance used by actual Ansible runs.
+        """
+        path = cls.TASKS / filename
+        return DataLoader().load(path.read_text(encoding='utf-8'), file_name=str(path))

@@ -8,9 +8,9 @@ Le rôle produit une configuration unique `/etc/named.conf`, sans vues BIND. Il 
 
 **Configuration live :** le management conserve les clauses non ciblées et refuse toute création sur un nom déjà présent. Routes et management partagent une exclusion de processus, libérée automatiquement à sa fin ; un fichier vide restant ne bloque pas la suite. Les écritures restent conditionnées aux checksums et aux journaux de reprise. Les déploiements complets et interventions manuelles exigent une fenêtre exclusive. Voir [les garanties et limites](docs/VERIFICATION_SYNTAXE_SCRIPTS.md).
 
-**Révision courante : durcissement du moteur FRONT actuel.** La lecture des journaux refuse les octets ignorés, les opérations sans destination cliente correspondante et les propriétés de route dupliquées. Un reçu Ansible doit être unique et contenir un UUID canonique ; une erreur conserve la transaction en attente sans faire confiance à un jeton non vérifié. Les IP, sous-réseaux, métriques existantes et le seul format `front-routes.pending/` sont conservés. [Périmètre, preuves et limites](docs/DURCISSEMENT_FRONT_ACTUEL.md). Le [nettoyage antérieur](docs/NETTOYAGE_FRONT_ACTUEL.md) reste documenté dans son contexte historique.
+**Révision courante : 2026.11.04-coverage-hardening.2.** Découverte FRONT par IP et routes candidates classées numériquement, UUID actif et passerelle de la seule table du device. Replis de profil supprimés, destinations IP/CIDR dédoublonnées, rollback conservé. Trois Bash durcis (archives bornées et en-têtes dig), chevauchements ACL réservés refusés. Quinze composants Python/Jinja satisfont leurs seuils applicables ; 39 composants exécutables restent sans couverture complète et deux YAML littéraux sont NON APPLICABLE. L’observation Ansible des prédicats reste partielle. Voir [le rapport courant](REVUE_DURCISSEMENT_COUVERTURE.md) et [les compteurs complets](COUVERTURE.json). Les fiches docs/ conservent les phases précédentes ; le présent guide et le rapport décrivent FRONT actuel.
 
-**Qualification opérationnelle : NON TERMINÉE pour la production.** Aucun serveur de votre environnement n’a été contacté. Les preuves de la révision courante figurent dans `DELIVERY.json` et [DURCISSEMENT_FRONT_ACTUEL.md](docs/DURCISSEMENT_FRONT_ACTUEL.md) ; les anciennes recettes systemd/firewalld/SELinux ne constituent pas une qualification de cette révision sur vos serveurs.
+**Qualification opérationnelle : NON TERMINÉE pour la production.** Le contrôle CI des cinq métriques refuse les mesures manquantes ou inférieures à 98 %, globalement et par composant, avant arrondi. Aucun serveur de votre environnement n’a été contacté. `DELIVERY.json` distingue les contrôles de construction des preuves historiques ; le reçu externe lié au SHA-256 du ZIP complète le [rapport courant](REVUE_DURCISSEMENT_COUVERTURE.md) avec le rejeu de son extraction.
 
 Ce guide s’adresse aux équipes d’exploitation. Les commandes du contrôleur supposent Bash sous Linux, depuis la racine du projet. Les commandes de diagnostic système s’exécutent sur le serveur DNS indiqué. Toutes les adresses et tous les domaines d’exemple doivent être adaptés avant utilisation.
 
@@ -42,7 +42,7 @@ Ce guide s’adresse aux équipes d’exploitation. Les commandes du contrôleur
 | OS cible | **Red Hat Enterprise Linux 8**. Déploiement système réel : **NON EXÉCUTÉ**. Le garde accepte `RedHat` de version majeure ≥ 8 ; cela ne qualifie pas les versions supérieures. Rocky Linux, AlmaLinux et Ubuntu sont refusés par ce garde. |
 | Ansible minimal déclaré | **2.9**, dans les métadonnées du rôle. Version des contrôles locaux enregistrés : **2.9.27**. Les autres correctifs 2.9 n’ont pas tous été exécutés. |
 | Python requis sur les cibles | **3.6.8** dans le contexte retenu. Compilation, composants et transports locaux sur le véritable Python 3.6.8 EL8 : **EXÉCUTÉ**. Modules Ansible/DNF sur votre serveur : **NON EXÉCUTÉ**. |
-| Contrôleur de cette passe | Linux, Python **3.6.8**, Ansible **2.9.27**, Jinja2 **2.10.3**. Les essais Python 3.8.20/Jinja 3.0.3 appartiennent aux rapports historiques. |
+| Contrôleurs de cette passe | Linux, Python **3.11.15**, Ansible Core **2.16.14**, Jinja2 **3.1.6** pour les cinq métriques. Compatibilité des changements et matrice DNS native : Python **3.6.8**, Ansible **2.9.27**, Jinja2 **2.10.3**. L’observateur QA exige Python 3.11 ; il n’est pas déployé sur les cibles. |
 | BIND de laboratoire de la livraison source | **9.11.36-16.el8_10.16**, paquets EL8 installés dans un conteneur Rocky Linux 8.9 avec paquets EL8.10. Ce n’est pas une recette système RHEL. Les essais BIND 9.18.24 restent historiques. |
 | NetworkManager de laboratoire de la livraison source | **1.40.16-21.el8_10**, moteur natif et noyau Linux dans un espace réseau jetable, avec route par défaut BACK et passerelle propre à FRONT. La version de vos serveurs reste à recetter. |
 | Familles d’adresses | Écoute DNS et clients déclarés : **IPv4**. Forwarders, transport sortant et données DNS : **IPv4/IPv6**. Routes gérées : **IPv4 uniquement**. |
@@ -90,7 +90,7 @@ Le rôle ne configure pas les adresses des interfaces, `/etc/resolv.conf`, le ro
 - Fichiers natifs présents : `/etc/named.rfc1912.zones`, `/var/named/named.localhost`, `/var/named/named.loopback`, `/var/named/named.empty`, `/etc/crypto-policies/back-ends/bind.config`. L’include de politique cryptographique doit résoudre vers un fichier régulier.
 - RNDC et `named-setup-rndc.service` natifs disponibles. Le rôle utilise ce générateur pour préparer `/etc/rndc.key` dans tous les modes DNSSEC.
 - Horloges synchronisées pour TSIG ; espace disque pour zones, archives et journaux.
-- **Routes FRONT activées seulement :** Bash, `iproute`, NetworkManager actif/`nmcli`, `util-linux` (`flock`), GNU coreutils et `sed`. Découverte limitée à l’interface portant l’IP FRONT et à son profil actif ; sa passerelle peut être déclarée dans le profil ou observée sur cette même interface. La route par défaut du système peut rester exclusivement sur BACK. FRONT/BACK/ADM doivent être distinctes ; table principale et trois règles standard, sans VRF ni politique personnalisée. Aucun `jq`, Python de routage ou dépendance Galaxy.
+- **Routes FRONT activées seulement :** Bash, `iproute`, NetworkManager actif/`nmcli`, `util-linux` (`flock`), GNU coreutils et `sed`. Interface portant l’IP FRONT et UUID actif vérifiés ; prochain saut unique lu uniquement dans les routes IPv4 main de ce device, sans propriété de passerelle du profil. La route par défaut du système peut rester exclusivement sur BACK. FRONT/BACK/ADM doivent être distinctes ; table principale et trois règles standard, sans VRF ni politique personnalisée. Aucun `jq`, Python de routage ou dépendance Galaxy.
 - **DNSSEC activé seulement :** `/usr/bin/python3`, ancres officielles `/etc/named.root.key` à jour et accès aux données nécessaires à la validation. Le rôle ne remplace pas les ancres de distribution.
 
 `ansible.cfg` utilise la découverte `auto_silent`. Si nécessaire, définir `ansible_python_interpreter: /usr/bin/python3` dans l’inventaire après vérification de ce chemin et des bindings DNF. La contrainte Python 3.6.8 concerne le serveur, pas le contrôleur.
@@ -287,12 +287,14 @@ Le booléen YAML `false` sans guillemets est valide. Les chaînes CLI exactes `t
 
 Avec DNSSEC actif, un suffixe forward `dnssec_validate: false` et ses descendants reçoivent une **ancre négative de confiance** (NTA) native : durée sept jours, renouvellement quotidien et au démarrage/reload. Ces suffixes n’ont pas de garantie de validation DNSSEC. Le helper utilise RNDC et `/var/lib/Bind9-Ansible/dnssec-owned.json` ; les NTA manuelles ne sont pas revendiquées. En mode global `false`, aucune exception privée n’est déployée. Détails : [DNSSEC.md](docs/DNSSEC.md).
 
+Le helper vérifie les octets du journal privé avant publication et avant toute mutation RNDC. Les champs JSON dupliqués sont refusés. L’attente de son verrou est limitée à 30 secondes par défaut ; le CLI expose `--lock-timeout`, qui exige un nombre fini positif ou nul. Une attente expirée échoue explicitement et préserve le journal.
+
 <a id="secrets"></a>
 ## 🔐 TSIG, secrets et Ansible Vault
 
 ### Cycle de vie de la clé
 
-Au début de `deploy` ou `configure`, après validation clients/DNSSEC et identification des pairs, `tsig-secret.py` s’exécute sur le **contrôleur**, sans élévation. Il crée **32 octets aléatoires encodés en Base64** si le fichier manque, sinon vérifie et réutilise la clé existante. Le répertoire est `0700`, le fichier `0600`, avec contrôle des ancêtres/propriétaires, refus des liens et fichiers spéciaux, lecture bornée et verrou de 30 secondes. La publication atomique n’expose pas de clé partiellement écrite. La clé n’est pas régénérée à chaque passage.
+Au début de `deploy` ou `configure`, après validation clients/DNSSEC et identification des pairs, `tsig-secret.py` s’exécute sur le **contrôleur**, sans élévation. Il crée **32 octets aléatoires encodés en Base64** si le fichier manque, sinon vérifie et réutilise la clé existante. Le répertoire est `0700`, le fichier `0600`, avec contrôle des ancêtres/propriétaires, refus des liens et fichiers spéciaux, lecture bornée et verrou de 30 secondes. L’écriture complète et la relecture sont vérifiées avant publication atomique ; une écriture incomplète ou altérée est refusée avant de créer la clé définitive. La clé n’est pas régénérée à chaque passage.
 
 Le helper crée les répertoires privés manquants après contrôle de chaque ancêtre. Un répertoire existant non sûr est refusé ; le rôle ne modifie plus ses permissions avant ces contrôles.
 
@@ -415,6 +417,8 @@ Les réglages de chemins, écoute, contrôle d’accès et runtime DNSSEC resten
 | `monitor` | Installation/activation du moniteur si `bind_monitoring_enabled: true`. |
 | `always` | Validation DNSSEC/clients, découverte des pairs, calcul des zones et type d’activation des routes, même avec un tag ciblé. |
 
+Un échec avec un tag partiel termine désormais le playbook en erreur, même si les tâches de bookkeeping du rescue réussissent. Le diagnostic indique que la restauration automatique n’a pas été sélectionnée ; examiner la configuration et les sauvegardes avant de poursuivre.
+
 **Procédure normale : `--tags deploy`.** Les tags techniques partiels ne garantissent pas ensemble sauvegarde, activation, faits nécessaires et santé. Ne pas utiliser `--skip-tags always`. Sans `--tags`, le moniteur est aussi sélectionné si son booléen est vrai ; `routes-recover` reste exclu. Avec `--tags deploy`, ajouter explicitement `monitor` pour installer le moniteur.
 
 <a id="operations"></a>
@@ -440,7 +444,7 @@ L’absence des unités privées est attendue après nettoyage en mode désactiv
 
 ### Gérer les routes de retour FRONT
 
-La fonction est **désactivée par défaut**. Elle découvre l’interface portant l’IP FRONT, puis son profil NetworkManager actif par UUID et sa propre passerelle IPv4. **La route par défaut système reste sur BACK : FRONT n’a pas besoin d’une route par défaut active.** Aucune passerelle BACK/ADM/globale n’est utilisée comme repli. Seules les routes manquantes vers `bind_cloud_clients` sont ajoutées au profil et au noyau, sans réactivation de connexion. Les clients directement connectés n’exigent pas de route par passerelle ; leur chemin reste vérifié.
+La fonction est **désactivée par défaut**. Elle confirme l’interface portant l’IP FRONT par `ip -o -4 route show match`, plus long préfixe numérique puis métrique, identifie son UUID NetworkManager actif et cherche le prochain saut unique parmi les routes main de ce device. Le profil peut avoir un autre nom que l’interface ; `ipv4.gateway` et `IP4.GATEWAY` ne sont plus interrogés. **La route par défaut système reste sur BACK : FRONT n’a pas besoin d’une route par défaut active.** Aucune passerelle BACK/ADM/globale n’est utilisée comme repli. Seules les routes manquantes vers `bind_cloud_clients` sont ajoutées au profil et au noyau, sans réactivation de connexion. Les clients directement connectés n’exigent pas de route par passerelle ; leur chemin reste vérifié.
 
 Prévisualiser puis appliquer sur un hôte :
 
@@ -457,6 +461,8 @@ ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml \
 JSON préserve ici le booléen. `-e bind_front_routes_enabled=true` produit une chaîne avec Ansible 2.9 et n’est pas la forme attendue. Maintenir `bind_front_routes_enabled: true` dans les variables si cette gestion doit rester activée.
 
 Les routes préexistantes gardent leur identité et leur métrique. Les conflits provoquent un refus sans remplacement. Le journal privé est `/var/lib/Bind9-Ansible/front-routes.pending/` ; `routes-recover` reprend uniquement ce format. Un échec pris en charge retire les seuls ajouts confirmés ; une issue ambiguë conserve le journal. Le fichier vide `operations.flock` ne constitue pas un journal et ne doit pas être supprimé pour « débloquer » une opération.
+
+Les doublons IP nue et /32 sont normalisés et ajoutés une fois. Passerelle absente de la table FRONT ou plusieurs prochains sauts distincts : refus avant écriture. Sans route via sur FRONT, deux IP ne permettent pas d’inventer la passerelle. Aucun `device reapply` global : les réglages en attente restent intacts.
 
 Le profil, la passerelle, la table principale et les règles sont relus sous verrou avant le premier ajout. Les trois règles standard doivent être dépourvues de sélecteurs supplémentaires ; VRF, marques, destinations conditionnelles et autres politiques sont refusées. Le rollback valide les deux magasins avant toute suppression et refuse les attributs actifs inattendus, les changements de métrique, de passerelle ou de règles. La reprise protège aussi les adresses ADM/FRONT/BACK actuelles et la source SSH actuelle. Un conflit conserve le journal ; aucune atomicité n’est garantie face à un autre outil modifiant le réseau pendant l’opération.
 
@@ -686,6 +692,8 @@ sudo /usr/local/sbin/bind-configtool list --root /var/backups/Bind9-Ansible/bind
 
 Une racine existante doit déjà être root `0700`, sans ancêtre symbolique ou non fiable ; l’outil refuse de changer les droits d’un répertoire général fourni par erreur. Les archives et empreintes importées doivent être privées, root, régulières, avec un seul lien. Les sources/destinations BIND ne doivent contenir ni lien physique/symbolique ni fichier spécial. Les empreintes doivent décrire une seule archive et les TAR utiliser des chemins canoniques sans doublon. Préparation et migration : [DURCISSEMENT_SECURITE.md](docs/DURCISSEMENT_SECURITE.md).
 
+Les entrées après les blocs zéro TAR sont inspectées. Budgets fixes : contenu logique 1 Gio, 65 536 membres, chemins 4 096 octets, catalogues 16 Mio, flux physique/compressé 1 140 860 928 octets, lectures 60 secondes puis cinq secondes avant arrêt forcé. Dépassements refusés explicitement ; ces limites ne sont pas un quota de rétention.
+
 `backup` annonce `BACKUP_CREATED` suivi du chemin ; `list` contrôle les empreintes et affiche les noms, plus récents d’abord. Adapter `--root` à `bind_backup_root` si modifié. `backup --force` est accepté ; chaque appel crée déjà une archive. Un retour non nul impose de traiter l’erreur. Ces commandes ne démarrent ni n’arrêtent `named`.
 
 Une erreur de lecture du catalogue initial arrête la commande. Une erreur pendant le catalogue de rétention n’efface aucune archive et n’émet pas `BACKUP_CREATED` ; l’archive qui vient d’être créée et son empreinte peuvent être présentes et doivent être contrôlées avant réutilisation. `restore` exige la lecture complète des membres avant de supprimer des zones : une sortie partielle de `tar` provoque un refus qui préserve les fichiers live. Ne pas supprimer les données de reprise pour masquer un échec.
@@ -856,12 +864,12 @@ Bind9-Ansible/
 └── README.md
 ```
 
-La source de cette livraison est `bind9-ansible-v4-actuel.zip`, SHA-256 `0f66737f83de2ea965e2385afc1557b8d1cdfa100a08281f49ddb14177ee3cbf`. Révision courante : `2026.10.26-front-hardening.1`. L’historique d’hibernation reste dans [AUDIT_HIBERNATE_DEPLOYMENT.md](docs/AUDIT_HIBERNATE_DEPLOYMENT.md) ; les preuves de la révision courante sont dans [DURCISSEMENT_FRONT_ACTUEL.md](docs/DURCISSEMENT_FRONT_ACTUEL.md) et `DELIVERY.json`. Les autres rapports conservent leur valeur historique dans leur périmètre d’origine.
+La référence immuable est `remediation-2026.11.04-coverage-hardening.1.zip`, SHA-256 `b8ef36e938957c03f73540219d29137bf643fddf21d04fe018059bb302cb6bff`. Révision courante : `2026.11.04-coverage-hardening.2`. Les résultats courants sont dans [REVUE_DURCISSEMENT_COUVERTURE.md](REVUE_DURCISSEMENT_COUVERTURE.md), [COUVERTURE.json](COUVERTURE.json) et `DELIVERY.json`. L’historique d’hibernation reste dans [AUDIT_HIBERNATE_DEPLOYMENT.md](docs/AUDIT_HIBERNATE_DEPLOYMENT.md) ; le [durcissement FRONT](docs/DURCISSEMENT_FRONT_ACTUEL.md) conserve sa portée historique. Les anciennes preuves ne remplacent pas le rejeu de cette archive.
 
 Le ZIP source possède une empreinte SHA-256 externe. Sur le contrôleur Linux, depuis le dossier contenant ZIP et empreinte :
 
 ```bash
-sha256sum -c Bind9-Ansible-routes-seules.zip.sha256
+sha256sum -c remediation-2026.11.04-coverage-hardening.2.zip.sha256
 ```
 
 Après extraction, depuis la racine du projet :

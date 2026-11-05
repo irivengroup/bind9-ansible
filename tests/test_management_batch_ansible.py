@@ -36,7 +36,7 @@ class PairRunner(Runner):
         dig = self.bin / 'dig'
         dig.write_text('#!' + str(self.python) + '\nimport pathlib,re,sys\n'
             'name,kind=sys.argv[-2:]\n'
-            'if kind=="A": print(";; status: NOERROR\\nlocalhost. 60 IN A 127.0.0.1")\n'
+            'if kind=="A": print(";; status: NOERROR\\n;; flags: qr aa; QUERY: 1, ANSWER: 1\\nlocalhost. 60 IN A 127.0.0.1")\n'
             'else:\n'
             ' path=pathlib.Path(' + repr(str(self.lab.root / 'var/named')) + ') / ("empty-root.zone" if name=="." else "zones/"+name.rstrip(".")+".zone")\n'
             ' serial=re.search(r"\\(\\s*(\\d+)",path.read_text()).group(1)\n'

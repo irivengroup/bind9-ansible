@@ -129,6 +129,9 @@ class TestAnsibleNativeFrontRoutes:
     def test_missing_gateway_is_rejected_before_any_write(self, tmp_path):
         sandbox = AnsibleRouteSandbox(tmp_path)
         sandbox.data['gateway'] = ''
+        # The kernel table is now the approved source; a missing profile
+        # property alone no longer represents a missing FRONT gateway.
+        sandbox.data['runtime'] = copy.deepcopy(BASE[:2])
         sandbox.save()
         result = sandbox.run()
         assert result.returncode != 0, result.stdout

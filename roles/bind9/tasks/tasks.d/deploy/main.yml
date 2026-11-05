@@ -267,14 +267,18 @@
       tags: [deploy]
 
     - name: Stop deployment after rollback
+      # A selected partial tag can skip every deploy-only restoration task.
+      # Successful rescue bookkeeping must never turn its original error green.
       ansible.builtin.fail:
         msg: >-
-          named deployment failed; managed files restored. Inspect service and logs.
+          {{ 'named deployment failed; managed files restored. Inspect service and logs.'
+          if ('all' in ansible_run_tags or 'deploy' in ansible_run_tags) else
+          'named partial deployment failed; automatic DNS restoration was not selected. Inspect the live configuration and backups before retrying.' }}
           {{ ('FRONT rollback incomplete: ' ~
           (bind_front_route_rollback_error | default('see the failed route task')) ~
           '. Recovery journal retained.')
           if (bind_front_route_transaction_pending | default(false) | bool) else '' }}
-      tags: [deploy]
+      tags: [always]
 
 
 - name: Configure periodic DNS health monitoring

@@ -57,7 +57,7 @@ def test_soa_probe_requires_the_exact_zone_owner(lab, monkeypatch):
     manager.config = M.Configuration(manager.files)
     manager.changes['/var/named/zones/example.test.zone'] = M.ZoneDocument(ZONE, 'example.test.').bump().encode()
     original = lab.runner
-    manager.runner = lambda argv: (';; status: NOERROR\n;; flags: qr aa;\n'
+    manager.runner = lambda argv: (';; status: NOERROR\n;; flags: qr aa; QUERY: 1, ANSWER: 1\n'
         'other.test. 300 IN SOA ns1.example.test. hostmaster.example.test. 42 3600 900 604800 300\n'
         if argv[-1] == 'SOA' else original(argv))
     monkeypatch.setattr(M.time, 'sleep', lambda seconds: None)
@@ -107,12 +107,12 @@ def test_read_and_check_hold_the_operation_lease(tmp_path, native):
     ('example.test.', 'SOA', None, 'example.test. 60 IN SOA ns. host. x 1 2 3 4', False),
 ])
 def test_dns_reply_accepts_only_the_expected_answer(name, kind, expected, answer, accepted):
-    reply = M.DnsReply(';; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 1\n;; flags: qr aa;\n' + answer)
+    reply = M.DnsReply(';; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 1\n;; flags: qr aa; QUERY: 1, ANSWER: 1\n' + answer)
     assert reply.matches(name, kind, expected) is accepted
 
 
 def test_non_authoritative_soa_cannot_prove_a_local_zone_is_loaded():
-    reply = M.DnsReply(';; status: NOERROR\nexample.test. 60 IN SOA ns. host. 42 1 2 3 4\n')
+    reply = M.DnsReply(';; status: NOERROR\n;; flags: qr; QUERY: 1, ANSWER: 1\nexample.test. 60 IN SOA ns. host. 42 1 2 3 4\n')
     assert not reply.matches('example.test.', 'SOA', '42')
     assert reply.matches('example.test.', 'SOA', None)
 

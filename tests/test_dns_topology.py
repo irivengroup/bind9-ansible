@@ -111,6 +111,21 @@ class TestDnsTopology:
     def test_client_transport_and_closed_resolver_guard(self, client, expected):
         assert FilterModule().filters()['dns_client_safe'](client) is expected
 
+    @pytest.mark.parametrize('front,back', [('0.0.0.0', '10.0.0.1'), ('224.0.0.1', '10.0.0.1'),
+                                           ('169.254.1.1', '10.0.0.1')])
+    def test_identity_refuses_each_nonunicast_address_category(self, front, back):
+        assert FilterModule.identity(front, back, 'site-transfer', 'hmac-sha256',
+                                     base64.b64encode(bytes(range(32))).decode()) is False
+
+    def test_unspecified_host_does_not_become_an_inbound_dns_client(self):
+        assert FilterModule.client('0.0.0.0/32') is False
+
+    def test_boolean_validation_and_unrelated_authority_records_are_accepted(self):
+        planner = DnsTopology([{'domain': 'unrelated.test', 'records': [{'name': 'app'}]}],
+                              [forwarding(dnssec_validate=True)])
+        assert planner.delegations('unrelated.test') == []
+        assert len(planner.delegations('.')) == 1
+
     @pytest.mark.parametrize('server,expected', [({'address': '192.0.2.53'}, True),
         ({'address': '2001:db8::53', 'port': '5353'}, True), ({'address': 'bad'}, False),
         ({'address': '0.0.0.0'}, False), ({'address': '224.0.0.1'}, False),

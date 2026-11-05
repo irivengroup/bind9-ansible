@@ -62,6 +62,7 @@ class NativeRouteIntegration:
         before = self.routes()
         assert any(row.get('dst') == 'default' and row.get('dev') == 'back0' for row in before)
         assert not any(row.get('dst') == 'default' and row.get('dev') == 'front0' for row in before)
+        assert any(row.get('dst') == '198.0.0.0/8' and row.get('dev') == 'back0' for row in before)
         profile = self.command('nmcli', '-g', 'ipv4.routes', 'connection', 'show', 'front')
         active_dns = self.command('nmcli', '-g', 'IP4.DNS', 'device', 'show', 'front0')
         self.command('nmcli', 'connection', 'modify', 'front', 'ipv4.dns', '198.51.100.53')
@@ -129,7 +130,8 @@ class NativeRouteIntegration:
             row for row in before_specific if row.get('dst') == 'default']
         print(json.dumps({'networkmanager': self.command('nmcli', '-g', 'VERSION', 'general'),
             'ansible_workflows': self.workflows, 'native_plan_apply_recover': True,
-            'idempotence_after_profile_reload': True, 'active_gateway_fallback': True, 'automatic_metric_observed': True,
+            'idempotence_after_profile_reload': True, 'kernel_gateway_with_empty_profile_property': True,
+            'numeric_lpm_over_broader_back_route': True, 'automatic_metric_observed': True,
             'front_gateway_without_front_default_route': True,
             'specific_front_route_gateway_without_any_front_default': True,
             'pending_dns_unapplied': True, 'back_adm_and_default_preserved': True}))

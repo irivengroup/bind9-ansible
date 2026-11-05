@@ -23,7 +23,11 @@ ADDRESSES = json.dumps([{'ifname': name, 'operstate': 'UP', 'addr_info': [
     {'family': 'inet', 'local': address, 'prefixlen': 24}]} for name, address in
     [('front0', '198.51.100.2'), ('back0', '10.0.0.2'), ('adm0', '192.0.2.2')]])
 BASE = [{'dst': 'default', 'gateway': '10.0.0.1', 'dev': 'back0', 'metric': 100},
-        {'dst': '198.51.100.0/24', 'dev': 'front0', 'protocol': 'kernel', 'scope': 'link'}]
+        {'dst': '198.51.100.0/24', 'dev': 'front0', 'protocol': 'kernel', 'scope': 'link'},
+        # The approved discovery contract requires an actual FRONT next-hop in
+        # the kernel, independently of NetworkManager's gateway properties.
+        {'dst': '172.31.255.254/32', 'gateway': '198.51.100.1', 'dev': 'front0',
+         'metric': 150, 'protocol': 'static'}]
 NEW = {'dst': '203.0.113.0/24', 'gateway': '198.51.100.1', 'dev': 'front0', 'metric': 100}
 
 
@@ -91,6 +95,15 @@ def plan(**kwargs):
         lab.data.update(gateway=values['gateway'], runtime=json.loads(values['runtime']),
                         rules=json.loads(values['rules']), route_table=values['route_table'], uuid=values['profile'],
                         profile_text=values['persistent'])
+        if 'gateway' in kwargs:
+            # Invalid-gateway contracts now exercise the authoritative table,
+            # rather than the superseded profile-property lookup.
+            for row in lab.data['runtime']:
+                if row.get('dev') == 'front0' and 'gateway' in row:
+                    if values['gateway']:
+                        row['gateway'] = values['gateway']
+                    else:
+                        del row['gateway']
         if 'addresses' in values:
             lab.data['addresses'] = values['addresses']
         result = lab.run('plan', values['clients'], ['--metric', str(values['metric']), '--ssh-peer', values['ssh']])
@@ -377,7 +390,7 @@ os.execv(os.environ['BIND_REAL_SORT'], [os.environ['BIND_REAL_SORT']] + sys.argv
         if mode == '0777':
             assert not lab.data['operations']
 
-    def test_gateway_from_active_front_device_when_profile_property_is_empty(self, tmp_path):
+    def test_gateway_from_front_kernel_table_when_profile_property_is_empty(self, tmp_path):
         lab = NativeRouteLab(tmp_path)
         lab.data.update(gateway='', active_gateway='198.51.100.1')
         result = lab.run()
@@ -408,7 +421,7 @@ os.execv(os.environ['BIND_REAL_SORT'], [os.environ['BIND_REAL_SORT']] + sys.argv
         assert not any(row.get('dst') == 'default' and row.get('dev') == 'front0'
                        for row in lab.data['runtime'])
 
-    @pytest.mark.parametrize('source', ['profile', 'runtime', 'both'])
+    @pytest.mark.parametrize('source', ['runtime', 'both'])
     def test_conflicting_front_specific_next_hops_are_refused_before_writes(self, tmp_path, source):
         lab = NativeRouteLab(tmp_path)
         lab.data.update(gateway='', active_gateway='')
@@ -448,6 +461,7 @@ os.execv(os.environ['BIND_REAL_SORT'], [os.environ['BIND_REAL_SORT']] + sys.argv
         lab = NativeRouteLab(tmp_path)
         lab.data.update(gateway='', persistent=[
             {'network': '172.16.0.0/24', 'gateway': gateway, 'metric': 100}])
+        lab.data['runtime'] = copy.deepcopy(BASE[:2]) + [dict(BASE[2], gateway=gateway)]
         before = copy.deepcopy(lab.data)
         result = lab.run()
         assert result.returncode == 1, result.stdout
@@ -467,6 +481,7 @@ os.execv(os.environ['BIND_REAL_SORT'], [os.environ['BIND_REAL_SORT']] + sys.argv
     def test_a_connected_front_route_does_not_turn_the_back_default_into_a_front_gateway(self, tmp_path):
         lab = NativeRouteLab(tmp_path)
         lab.data['gateway'] = ''
+        lab.data['runtime'] = copy.deepcopy(BASE[:2])
         before = copy.deepcopy(lab.data)
         result = lab.run()
         assert result.returncode == 1, result.stdout
@@ -484,18 +499,25 @@ os.execv(os.environ['BIND_REAL_SORT'], [os.environ['BIND_REAL_SORT']] + sys.argv
         assert lab.data == before
 
     @pytest.mark.parametrize('source', ['profile', 'runtime'])
-    def test_attributed_routes_cannot_supply_an_implicit_front_next_hop(self, tmp_path, source):
+    def test_gateway_source_is_the_kernel_even_when_route_attributes_are_present(self, tmp_path, source):
         lab = NativeRouteLab(tmp_path)
         lab.data['gateway'] = ''
         if source == 'profile':
             lab.data['profile_text'] = '{ ip = 172.16.0.0/24, nh = 198.51.100.1, mt = 100, table = 123 }'
+            lab.data['runtime'] = copy.deepcopy(BASE[:2])
         else:
             lab.data['runtime'].append(dict(NEW, dst='172.16.0.0/24', onlink=True))
         before = copy.deepcopy(lab.data)
         result = lab.run()
-        assert result.returncode == 1, result.stdout
-        assert 'route attributes for gateway discovery' in result.stdout
-        assert lab.data == before
+        if source == 'profile':
+            assert result.returncode == 1, result.stdout
+            assert 'No IPv4 gateway' in result.stdout
+            assert lab.data == before
+        else:
+            # A native next-hop remains a next-hop with onlink/proto metadata.
+            # Conflict checks for a requested destination still run separately.
+            assert result.returncode == 2, result.stdout
+            assert lab.data['runtime'] == before['runtime'] + [NEW]
 
     @pytest.mark.parametrize('action', ['verify', 'commit', 'recover'])
     def test_static_next_hop_is_preserved_during_deferred_completion(self, tmp_path, action):
@@ -552,7 +574,7 @@ os.execv(os.environ['BIND_REAL_SORT'], [os.environ['BIND_REAL_SORT']] + sys.argv
     @pytest.mark.parametrize('field,value', [('runtime_text', ''), ('runtime_text', 'partial route'),
                                            ('rules_text', ''), ('rules_text', '0: from all lookup local'),
                                            ('addresses_text', ''), ('profile_text', '{ broken }'),
-                                           ('active_gateway', '198.51.100.254')])
+                                           ('uuid', 'not-an-active-profile')])
     def test_invalid_or_conflicting_observation_never_becomes_an_empty_plan(self, tmp_path, field, value):
         lab = NativeRouteLab(tmp_path)
         lab.data[field] = value

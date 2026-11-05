@@ -13,6 +13,23 @@ private_file() {
     echo 'Unsafe file ownership, permissions or link count' >&2; return 1;
   fi
 }
+bounded_archive_capture() (
+  # Temporary output is private and bounded before it becomes a Bash string.
+  # A failing producer, timeout or cleanup never becomes an empty observation.
+  local work size
+  work=$(mktemp -d "$root/.verify.XXXXXXXX") || return 1
+  trap 'rm -f -- "$work/out" "$work/err" && rmdir -- "$work" || exit 1' EXIT
+  if ! (ulimit -f 32768; timeout --kill-after=5 60 "$@") >"$work/out" 2>"$work/err"; then
+    head -c 2048 -- "$work/err" >&2
+    echo 'Archive observation failed or exceeded its time/output budget' >&2
+    return 1
+  fi
+  size=$(stat -c '%s' -- "$work/out") || return 1
+  if [[ ! $size =~ ^(0|[1-9][0-9]{0,9})$ ]] || (( size > 16777216 )); then
+    echo 'Invalid or oversized archive catalog size' >&2; return 1
+  fi
+  cat -- "$work/out"
+)
 # END ARCHIVE SAFETY HELPERS
 usage() { echo 'usage: bind-configtool {backup [--force]|list|restore --archive FILE} [--root ABSOLUTE_DIR] | check-front-axfr FRONT_DNS_IP ZONE CLIENT_SOURCE_IP ROOT_ONLY_TSIG_KEYFILE' >&2; exit 2; }
 [[ $# -ge 1 ]] || usage
@@ -102,9 +119,16 @@ catalog=$(printf '%s\n' "${archives[@]}" | sed '/^$/d' | sort -r) || { echo 'Arc
 sorted=()
 if [[ -n $catalog ]]; then mapfile -t sorted <<< "$catalog"; fi
 verify() {
-  local file=$1 entry listing details expected actual duplicate tar_bytes tail_bytes checksum_size
+  local file=$1 entry listing details expected actual duplicate tar_bytes tail_bytes checksum_size archive_size
+  local mode owner size rest count=0 payload=0 max_payload=1073741824 max_stream=1140860928 max_members=65536
   local -a checksum_lines=()
   private_file "$file" && private_file "$file.sha256" || return 1
+  # Match the reverse reconciler's existing 1 GiB payload / 65,536-member
+  # budget, allowing bounded TAR metadata and padding in the physical stream.
+  archive_size=$(stat -c '%s' -- "$file") || return 1
+  if [[ ! $archive_size =~ ^(0|[1-9][0-9]{0,9})$ ]] || (( archive_size > max_stream )); then
+    echo 'Invalid or oversized compressed archive' >&2; return 1
+  fi
   checksum_size=$(stat -c '%s' -- "$file.sha256") || return 1
   if [[ ! $checksum_size =~ ^(0|[1-9][0-9]*)$ ]] || (( checksum_size > 512 )); then
     echo 'Invalid or oversized checksum file' >&2; return 1;
@@ -119,17 +143,23 @@ verify() {
   [[ ${actual%% *} == "$expected" ]] || { echo 'Checksum mismatch' >&2; return 1; }
   # GNU tar can accept a short non-tar stream as an empty archive. Require
   # complete 512-byte records and the two zero end-of-archive blocks as well.
-  tar_bytes=$(gzip -cd -- "$file" | wc -c) || return 1
-  (( tar_bytes >= 1024 && tar_bytes % 512 == 0 )) || { echo 'Incomplete tar records' >&2; return 1; }
-  tail_bytes=$(gzip -cd -- "$file" | tail -c 1024 | tr -d '\000' | wc -c) || return 1
+  tar_bytes=$(timeout --kill-after=5 60 gzip -cd -- "$file" | head -c "$((max_stream+1))" | wc -c) || return 1
+  (( tar_bytes <= max_stream && tar_bytes >= 1024 && tar_bytes % 512 == 0 )) || { echo 'Incomplete or oversized tar records' >&2; return 1; }
+  tail_bytes=$(timeout --kill-after=5 60 gzip -cd -- "$file" | head -c "$((max_stream+1))" | tail -c 1024 | tr -d '\000' | wc -c) || return 1
   (( tail_bytes == 0 )) || { echo 'Missing tar end-of-archive blocks' >&2; return 1; }
   # Capture producer status explicitly: process substitution hides tar failures.
-  listing=$(tar --list --gzip --absolute-names --quoting-style=escape --file "$file") || {
+  # Scan beyond zero end markers: concatenated records must not hide an unsafe
+  # path, link or duplicate from validation while sharing a valid checksum.
+  listing=$(bounded_archive_capture tar --list --ignore-zeros --gzip --absolute-names --quoting-style=escape --file "$file") || {
     echo 'Unreadable or truncated tar archive' >&2; return 1;
   }
-  details=$(tar --list --verbose --gzip --absolute-names --numeric-owner --quoting-style=escape --file "$file") || return 1
-  [[ -n $listing ]] || return 0  # A first deployment may back up an empty layout.
+  details=$(bounded_archive_capture tar --list --ignore-zeros --verbose --gzip --absolute-names --numeric-owner --quoting-style=escape --file "$file") || return 1
+  if [[ -z $listing ]]; then
+    [[ -z $details ]] || { echo 'Inconsistent empty archive catalog' >&2; return 1; }
+    return 0  # A first deployment may back up an empty layout.
+  fi
   while IFS= read -r entry; do
+    (( ${#entry} <= 4096 )) || { echo 'Archive path exceeds 4096 bytes' >&2; return 1; }
     [[ $entry != *\\* ]] || { echo 'Escaped/control characters in archive path' >&2; return 1; }
     entry=${entry%/}
     case /$entry/ in *'/../'*|*'/./'*|*'//'*) echo 'Non-canonical archive path' >&2; return 1 ;; esac
@@ -142,6 +172,12 @@ verify() {
   [[ -z $duplicate ]] || { echo 'Duplicate archive members' >&2; return 1; }
   while IFS= read -r entry; do
     [[ $entry == [-d]* ]] || { echo 'Unsupported archive member type' >&2; return 1; }
+    read -r mode owner size rest <<< "$entry"
+    if [[ ! $size =~ ^(0|[1-9][0-9]{0,9})$ ]] || (( size > max_payload )); then
+      echo 'Invalid or oversized archive member' >&2; return 1
+    fi
+    count=$((count+1)); payload=$((payload+size))
+    (( count <= max_members && payload <= max_payload )) || { echo 'Archive member/payload budget exceeded' >&2; return 1; }
   done <<< "$details"
 }
 
@@ -185,7 +221,7 @@ backup() {
   else
     tar --create --gzip --file "$partial" --files-from /dev/null || { rm -f -- "$partial"; return 1; }
   fi
-  tar -tzf "$partial" >/dev/null || { rm -f -- "$partial"; return 1; }
+  tar -tzf "$partial" --ignore-zeros >/dev/null || { rm -f -- "$partial"; return 1; }
   mv -- "$partial" "$target"
   (cd "$root" && sha256sum -- "$(basename "$target")" >"$(basename "$target").sha256")
   chmod 0600 -- "$target" "$target.sha256"
@@ -223,7 +259,7 @@ restore() {
   }
   # Refuse a failed/partial member list before creating safety data or deleting
   # any live project-owned zone. A process substitution would hide tar errors.
-  member_listing=$(tar -tzf "$target" | sed 's#^\./##') || {
+  member_listing=$(tar -tzf "$target" --ignore-zeros | sed 's#^\./##') || {
     echo 'Restore member catalog read failed; live data preserved' >&2; return 1;
   }
   safety=$(mktemp "$root/.restore-safety.XXXXXXXX")
@@ -251,12 +287,12 @@ restore() {
     fi
   done
   # BIND validation follows extraction; service inactivity was checked above.
-  if tar --extract --gzip --acls --xattrs --selinux --numeric-owner --same-owner -f "$target" -C / && named-checkconf -z /etc/named.conf && restore_labels; then
+  if tar --extract --ignore-zeros --gzip --acls --xattrs --selinux --numeric-owner --same-owner -f "$target" -C / && named-checkconf -z /etc/named.conf && restore_labels; then
     rm -f -- "$safety"
     echo "RESTORED $target"
   else
     echo 'Restore failed; recovering pre-restore safety archive' >&2
-    if ! tar --extract --gzip --acls --xattrs --selinux --numeric-owner --same-owner -f "$safety" -C / ||
+    if ! tar --extract --ignore-zeros --gzip --acls --xattrs --selinux --numeric-owner --same-owner -f "$safety" -C / ||
        ! named-checkconf -z /etc/named.conf || ! restore_labels; then
       echo "Safety recovery incomplete; preserved private archive: $safety" >&2
       return 1

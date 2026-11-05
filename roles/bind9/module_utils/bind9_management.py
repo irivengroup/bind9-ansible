@@ -22,6 +22,10 @@ import tempfile
 import time
 
 
+# DNS case-insensitivity concerns ASCII A-Z, not Unicode lookalike characters.
+ASCII_CASE = str.maketrans('ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')
+
+
 class ManagementError(ValueError):
     """A safe, operator-facing refusal; never include configuration secrets."""
 
@@ -430,7 +434,7 @@ def canonical_name(value, origin='.'):
         raise ManagementError('Use an ordinary DNS name without presentation escapes')
     if value == '@':
         return origin
-    name = value.lower() if value.endswith('.') else value.lower() + ('.' if origin == '.' else '.' + origin)
+    name = value.translate(ASCII_CASE) if value.endswith('.') else value.translate(ASCII_CASE) + ('.' if origin == '.' else '.' + origin)
     if len(name) > 254 or any(not label or len(label) > 63 or not re.fullmatch(r'[a-z0-9_*\-]+', label) for label in name.rstrip('.').split('.')):
         if name != '.':
             raise ManagementError('Invalid DNS name')
@@ -459,6 +463,8 @@ class ZoneDocument:
                 origin = canonical_name(values[1], origin)
                 continue
             if values[0].upper() == '$TTL':
+                if len(values) != 2 or not re.fullmatch(r'[0-9]+[WDHMSwdhms0-9]*', values[1]):
+                    raise ManagementError('Invalid $TTL')
                 ttl = values[1]
                 continue
             if values[0].startswith('$'):
@@ -547,7 +553,7 @@ class ZoneDocument:
         if len(records) != 1 or len(records[0]['tokens']) != 7:
             raise ManagementError('Expected exactly one ordinary apex SOA')
         token = records[0]['tokens'][2]
-        if not token.text.isdigit() or not 0 <= int(token.text) <= 4294967295:
+        if not re.fullmatch(r'[0-9]+', token.text) or int(token.text) > 4294967295:
             raise ManagementError('Invalid SOA serial')
         return token
 
@@ -599,17 +605,25 @@ class DnsReply:
     """
 
     def __init__(self, text):
+        self.success, self.authoritative, self.answers = False, False, []
+        if not isinstance(text, str) or len(text) > NativeCommand.LIMIT or '\x00' in text:
+            return
         statuses = re.findall(r'^;; [^\n]*\bstatus: ([A-Z]+)(?:,|\s*$)', text, re.M)
         flags = re.findall(r'^;; flags: ([^;\n]*);', text, re.M)
-        self.success = statuses == ['NOERROR'] and len(flags) <= 1 and not any('tc' in item.split() for item in flags)
+        self.success = statuses == ['NOERROR'] and len(flags) == 1 and not any('tc' in item.split() for item in flags)
         self.authoritative = bool(re.search(r'^;; flags: [^;\n]*\baa\b', text, re.M))
-        self.answers = []
+        rows = 0
         for line in text.splitlines():
+            if not line.strip() or line.startswith(';'):
+                continue
+            rows += 1
             fields = line.split()
             if len(fields) >= 5 and fields[1].isdigit() and fields[2].upper() == 'IN':
-                self.answers.append((fields[0].lower(), fields[3].upper(), fields[4:]))
+                self.answers.append((fields[0].translate(ASCII_CASE), fields[3].upper(), fields[4:]))
         counts = re.findall(r'^;; flags: [^\n]*\bANSWER:\s*([0-9]+)', text, re.M)
-        if counts and (len(counts) != 1 or int(counts[0]) != len(self.answers)):
+        # These probes ask for one A/SOA with +noall +comments +answer.
+        # Missing counts and ignored/unexpected rows cannot prove DNS health.
+        if len(counts) != 1 or int(counts[0]) != 1 or len(self.answers) != 1 or rows != 1:
             self.success = False
 
     def matches(self, name, kind, expected):
@@ -617,7 +631,7 @@ class DnsReply:
         if not self.success:
             return False
         for owner, record_type, data in self.answers:
-            if owner != name.lower() or record_type != kind:
+            if owner != name.translate(ASCII_CASE) or record_type != kind:
                 continue
             if kind == 'A' and data == [expected]:
                 return True
@@ -1000,15 +1014,19 @@ class Manager:
     def authority(self, domain):
         context = self.context
         key = context.get('tsig_key_name', '')
-        if not re.fullmatch('[A-Za-z0-9][A-Za-z0-9._-]{0,127}', key) or key == 'rndc-key':
+        if not isinstance(key, str) or not re.fullmatch('[A-Za-z0-9][A-Za-z0-9._-]{0,127}', key) or key == 'rndc-key':
             raise ManagementError('Invalid site transfer key identity')
         keys = [c.header[1].value for syntax in self.config.configs.values() for c in syntax.clauses if c.name == 'key']
         if key not in keys:
             raise ManagementError('The site transfer key must already exist in the live configuration')
         for name in ('primary_front', 'secondary_front', 'primary_back', 'secondary_back'):
             try:
-                address = ipaddress.IPv4Address(context.get(name, ''))
-                if address.is_multicast or address.is_unspecified:
+                value = context.get(name, '')
+                if not isinstance(value, str):
+                    raise ValueError()
+                address = ipaddress.IPv4Address(value)
+                if (address.is_multicast or address.is_unspecified or address.is_loopback or
+                        address.is_link_local or str(address) == '255.255.255.255'):
                     raise ValueError()
             except ValueError:
                 raise ManagementError('Invalid peer identity for authoritative zone creation')
@@ -1049,6 +1067,12 @@ class Manager:
             domain = canonical_name(clause.header[1].value)
             if domain not in zones or zones[domain]['kind'] != 'forward':
                 continue
+            # Validate the namespace before selecting writable primary data.
+            # A secondary must reject the same masking/nesting as its primary.
+            if any(domain != other and (domain.endswith('.' + other) or other.endswith('.' + domain)) for other, zone in zones.items() if zone['kind'] == 'forward'):
+                raise ManagementError('Nested forwarding zones are not supported')
+            if any(a != '.' and (a == domain or a.endswith('.' + domain)) for a in auth):
+                raise ManagementError('A forward zone cannot mask an authoritative zone')
             ancestors = [a for a in auth if a == '.' or domain.endswith('.' + a)]
             if not ancestors:
                 continue  # A secondary does not modify primary data files.
@@ -1060,10 +1084,6 @@ class Manager:
             for server in block.children():
                 address = ipaddress.ip_address(server.header[0].value)
                 servers.append(str(address))
-            if any(domain != other and (domain.endswith('.' + other) or other.endswith('.' + domain)) for other, zone in zones.items() if zone['kind'] == 'forward'):
-                raise ManagementError('Nested forwarding zones are not supported')
-            if any(a != '.' and (a == domain or a.endswith('.' + domain)) for a in auth):
-                raise ManagementError('A forward zone cannot mask an authoritative zone')
             names = ['bind-forwarder-' + str(i) + '.' + domain for i in range(1, len(servers) + 1)]
             cuts[(parent, domain, 'NS')] = names
             for owner, address in zip(names, servers):
@@ -1393,7 +1413,7 @@ class Manager:
         try:
             value = VerifiedIO.read_json(pointer, 4096)
             transaction = value.get('transaction')
-            if value.get('schema') != 1 or not isinstance(transaction, str) or not re.fullmatch('/var/backups/Bind9-Ansible/management/transaction-[a-zA-Z0-9_-]+', transaction):
+            if type(value.get('schema')) is not int or value['schema'] != 1 or not isinstance(transaction, str) or not re.fullmatch('/var/backups/Bind9-Ansible/management/transaction-[a-zA-Z0-9_-]+', transaction):
                 raise ManagementError('Malformed pending management marker')
             folder = self.root / transaction.lstrip('/')
             cursor = self.root
@@ -1403,7 +1423,7 @@ class Manager:
                 if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
                     raise ManagementError('Unsafe pending transaction ancestor')
             manifest = VerifiedIO.read_json(folder / 'manifest.json', 1024 * 1024)
-            if manifest.get('schema') != 1:
+            if type(manifest.get('schema')) is not int or manifest['schema'] != 1:
                 raise ManagementError('Unsupported pending transaction manifest')
             if manifest.get('status') in ('committed', 'rolled-back'):
                 self.clear_pending(folder)
@@ -1443,7 +1463,7 @@ class Manager:
             if not os.path.lexists(str(path)):
                 continue  # Older code could stop before journal publication.
             manifest = VerifiedIO.read_json(path, 1024 * 1024)
-            if manifest.get('schema') != 1:
+            if type(manifest.get('schema')) is not int or manifest['schema'] != 1:
                 raise ManagementError('Unsupported legacy management journal schema')
             status = manifest.get('status')
             if status in ('committed', 'rolled-back', 'aborted-before-publication'):

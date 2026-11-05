@@ -178,10 +178,31 @@ canonical_kernel() {
     done <<< "$text"
 }
 rows() { if (( $# )); then printf '%s\n' "$@" | sort; fi; }
-discover_front_route_gateway() {
-    # A never-default FRONT can expose its next-hop only in specific routes.
-    # Infer it only when simple routes in its own profile/main-table device
-    # agree; another interface's default route is never a gateway source.
+select_front_route_match() {
+    # LPM is numeric, not a lexical sort of route strings. Lower metrics break
+    # equal-prefix ties; equally ranked alternatives are not a safe choice.
+    local row net gw mt dev attrs address best_prefix=-1 best_metric=4294967296 ambiguous=false
+    MATCH_KEY='' MATCH_DEVICE=''
+    ip_number "$FRONT"; address=$NUMBER
+    for row in "${KERNEL[@]}"; do
+        IFS='|' read -r net gw mt dev attrs <<< "$row"
+        [[ $dev != lo ]] || continue
+        network "$net"
+        (( address >= LOW && address <= HIGH )) || continue
+        if (( PREFIX > best_prefix || (PREFIX == best_prefix && mt < best_metric) )); then
+            best_prefix=$PREFIX best_metric=$mt MATCH_KEY=$row MATCH_DEVICE=$dev ambiguous=false
+        elif (( PREFIX == best_prefix && mt == best_metric )); then
+            ambiguous=true
+        fi
+    done
+    [[ -n $MATCH_KEY && -n $MATCH_DEVICE ]] || die 'No usable non-loopback routing match for the FRONT address'
+    ! $ambiguous || die 'Ambiguous equally ranked FRONT routing matches; no routes changed'
+}
+discover_front_table_gateway() {
+    # The active connection identifies the device; only that device's main
+    # IPv4 routing table supplies its gateway. Profile gateway properties are
+    # intentionally not consulted: they may be empty or stale on never-default
+    # interfaces. A route's protocol/attributes do not change its next-hop.
     local row net gw metric dev attrs low high required=false
     network "$FRONT_NETWORK"; low=$LOW high=$HIGH
     for net in "${CLIENTS[@]}"; do
@@ -191,17 +212,9 @@ discover_front_route_gateway() {
     # Directly connected clients need no inferred next-hop, even when unrelated
     # FRONT destinations legitimately use different routers.
     $required || return 0
-    for row in "${PROFILE[@]}"; do
-        IFS='|' read -r net gw metric attrs <<< "$row"
-        [[ $gw != 0.0.0.0 ]] || continue
-        [[ -z $attrs ]] || die 'Unsupported FRONT profile route attributes for gateway discovery'
-        [[ -z $GATEWAY || $GATEWAY == "$gw" ]] || die 'Ambiguous gateways in FRONT routes; no routes changed'
-        GATEWAY=$gw
-    done
     for row in "${KERNEL[@]}"; do
         IFS='|' read -r net gw metric dev attrs <<< "$row"
         [[ $dev == "$DEVICE" && $gw != 0.0.0.0 ]] || continue
-        [[ -z $attrs || $attrs == 'proto=static;' ]] || die 'Unsupported FRONT runtime route attributes for gateway discovery'
         [[ -z $GATEWAY || $GATEWAY == "$gw" ]] || die 'Ambiguous gateways in FRONT routes; no routes changed'
         GATEWAY=$gw
     done
@@ -222,13 +235,18 @@ observe() {
     done <<< "$ADDRESS_TEXT"
     (( hits == 1 && back_hits == 1 && adm_hits == 1 )) && [[ -n $back_dev && -n $adm_dev && $protected_devices != *"|$DEVICE|"* ]] || die 'FRONT must be uniquely present/up and distinct from BACK/ADM interfaces'
     FRONT_NETWORK=$front_network
+    local address_device=$DEVICE selected_match selected_device
+    capture MATCH_TEXT ip -o -4 route show match "$FRONT"
+    canonical_kernel "$MATCH_TEXT"
+    select_front_route_match
+    selected_match=$MATCH_KEY selected_device=$MATCH_DEVICE
+    [[ $selected_device == "$address_device" ]] || die 'The best FRONT routing match does not use the interface owning its address'
+    DEVICE=$selected_device
     local link=''
     capture link ip -o link show dev "$DEVICE"
     [[ $link != *' master '* ]] || die 'Enslaved FRONT interface is unsupported'
     capture UUID nmcli -g GENERAL.CON-UUID device show "$DEVICE"
     [[ $UUID =~ ^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$ ]] || die 'FRONT has no unique active profile UUID'
-    capture CONFIGURED_GW nmcli -g ipv4.gateway connection show uuid "$UUID"
-    capture ACTIVE_GW nmcli -g IP4.GATEWAY device show "$DEVICE"
     capture PROFILE_TEXT nmcli -g ipv4.routes connection show uuid "$UUID"
     capture TABLE nmcli -g ipv4.route-table connection show uuid "$UUID"
     [[ $TABLE == 0 || $TABLE == 254 ]] || die 'Only main-table FRONT profiles are supported'
@@ -238,24 +256,10 @@ observe() {
     [[ -n $KERNEL_TEXT ]] || die 'Empty main routing table observation; no route plan accepted'
     canonical_profile "$PROFILE_TEXT"
     canonical_kernel "$KERNEL_TEXT"
-    for dev in CONFIGURED_GW ACTIVE_GW; do
-        trim "${!dev}"; printf -v "$dev" '%s' "$REPLY"
-        [[ ${!dev} != -- ]] || printf -v "$dev" ''
-        [[ -z ${!dev} ]] || ip_number "${!dev}"
-    done
-    [[ -z $CONFIGURED_GW || -z $ACTIVE_GW || $CONFIGURED_GW == "$ACTIVE_GW" ]] || die 'Configured and active FRONT gateways disagree; no routes changed'
-    GATEWAY=${CONFIGURED_GW:-$ACTIVE_GW}
-    if [[ -z $GATEWAY ]]; then
-        local net gw metric attrs
-        for rest in "${PROFILE[@]}"; do
-            IFS='|' read -r net gw metric attrs <<< "$rest"
-            if [[ $net == 0.0.0.0/0 && $gw != 0.0.0.0 && -z $attrs ]]; then
-                [[ -z $GATEWAY || $GATEWAY == "$gw" ]] || die 'Ambiguous gateways in FRONT profile routes'
-                GATEWAY=$gw
-            fi
-        done
-    fi
-    if [[ -z $GATEWAY ]]; then discover_front_route_gateway; fi
+    select_front_route_match
+    [[ $MATCH_KEY == "$selected_match" && $MATCH_DEVICE == "$selected_device" ]] || die 'FRONT routing match disagrees with the complete main table; no routes changed'
+    GATEWAY=''
+    discover_front_table_gateway
     if [[ -n $GATEWAY ]]; then
         # A next-hop must not be any address owned by this server, including
         # aliases/secondary addresses unrelated to the inventory FRONT address.
@@ -356,7 +360,7 @@ build_plan() {
             ip_string "$probe"; check_path "$REPLY" false
             continue
         fi
-        [[ -n $GATEWAY ]] || die "No IPv4 gateway on the active FRONT profile/device; no global gateway fallback (device=$DEVICE profile=$UUID destination=$target)"
+        [[ -n $GATEWAY ]] || die "No IPv4 gateway in the FRONT device routing table; no profile/global gateway fallback (device=$DEVICE profile=$UUID destination=$target)"
         coverage P "$target" "$lo" "$hi" "$prefix"
         local profile_covered=$COVERED route_metric=${COVER_METRIC:-$METRIC}
         coverage R "$target" "$lo" "$hi" "$prefix"
@@ -411,9 +415,15 @@ verify() {
         else expected_r+=$'\n'"$net|$gw|$mt|$BASE_DEVICE|"; fi
     done
     observe
-    [[ $UUID == "$BASE_UUID" && $DEVICE == "$BASE_DEVICE" && $GATEWAY == "$BASE_GATEWAY" && $ADDRESS_TEXT == "$BASE_ADDRESSES" && $RULES_TEXT == "$BASE_RULES" ]] || die 'FRONT profile, addresses or gateway changed during operation'
+    [[ $UUID == "$BASE_UUID" && $DEVICE == "$BASE_DEVICE" && $ADDRESS_TEXT == "$BASE_ADDRESSES" && $RULES_TEXT == "$BASE_RULES" ]] || die 'FRONT profile, addresses or rules changed during operation'
     [[ $(printf '%s\n' "$expected_p" | sed '/^$/d' | sort) == "$OBSERVED_PROFILE" && $(printf '%s\n' "$expected_r" | sed '/^$/d' | sort) == "$OBSERVED_KERNEL" ]] || die 'Routing stores differ from the additive plan; preserve the journal'
+    # A predecessor journal may have taken its gateway from a profile property
+    # while its baseline table had no via route. After removing its last owned
+    # route, exact restoration of BOTH stores proves rollback completion; the
+    # table-derived gateway can then legitimately be empty. Apply/commit still
+    # require the same gateway and the live return-path checks below.
     [[ ${1:-true} == true ]] || return 0
+    [[ $GATEWAY == "$BASE_GATEWAY" ]] || die 'FRONT gateway changed during operation'
     local client lo hi prefix
     for client in "${CLIENTS[@]}"; do
         network "$client"; lo=$LOW hi=$HIGH prefix=$PREFIX

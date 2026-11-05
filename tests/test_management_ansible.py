@@ -36,7 +36,7 @@ class Runner:
         self.bin.mkdir()
         self.python = self.bin / 'python'
         self.python.symlink_to(sys.executable)
-        for executable, content in [('checkconf', 'exit 0'), ('rndc', 'exit 0'), ('restorecon', 'exit 0'), ('sync', 'exit 0'), ('dig', "printf ';; status: NOERROR\\nlocalhost. 300 IN A 127.0.0.1\\n'")]:
+        for executable, content in [('checkconf', 'exit 0'), ('rndc', 'exit 0'), ('restorecon', 'exit 0'), ('sync', 'exit 0'), ('dig', "printf ';; status: NOERROR\\n;; flags: qr aa; QUERY: 1, ANSWER: 1\\nlocalhost. 300 IN A 127.0.0.1\\n'")]:
             path = self.bin / executable
             path.write_text('#!/bin/sh\n' + content + '\n')
             path.chmod(0o755)

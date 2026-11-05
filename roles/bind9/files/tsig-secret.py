@@ -7,6 +7,7 @@ import argparse
 import base64
 import binascii
 import fcntl
+import math
 import os
 from pathlib import Path
 import secrets
@@ -24,6 +25,14 @@ class TsigSecretStore:
 
     def __init__(self, path, lock_timeout=30, create_parent=False):
         self.path = Path(path)
+        # NaN/Infinity bypass deadline comparisons and would make contention unbounded.
+        try:
+            valid_timeout = (type(lock_timeout) in (int, float) and
+                             math.isfinite(lock_timeout) and lock_timeout >= 0)
+        except OverflowError:
+            valid_timeout = False
+        if not valid_timeout:
+            raise ValueError('TSIG lock timeout must be a finite nonnegative number')
         self.lock_timeout = lock_timeout
         self.create_parent = create_parent
 
@@ -100,13 +109,18 @@ class TsigSecretStore:
         return True
 
     def publish(self, parent):
-        """Write/fsync privately, then link atomically without replacing any key."""
+        """Verify and sync the private bytes before publishing without replacement."""
         temporary = '.bind-tsig-' + secrets.token_hex(16) + '.tmp'
-        descriptor = self.checked_open(parent, temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+        descriptor = self.checked_open(parent, temporary, os.O_RDWR | os.O_CREAT | os.O_EXCL)
         try:
-            with os.fdopen(descriptor, 'wb') as stream:
-                stream.write(base64.b64encode(secrets.token_bytes(32)) + b'\n')
+            with os.fdopen(descriptor, 'w+b') as stream:
+                expected = base64.b64encode(secrets.token_bytes(32)) + b'\n'
+                if stream.write(expected) != len(expected):
+                    raise OSError('TSIG private write was incomplete')
                 stream.flush()
+                stream.seek(0)
+                if stream.read(len(expected) + 1) != expected:
+                    raise OSError('TSIG private verification failed')
                 os.fsync(stream.fileno())
             os.link(temporary, self.path.name, src_dir_fd=parent, dst_dir_fd=parent,
                     follow_symlinks=False)

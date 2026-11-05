@@ -39,6 +39,17 @@ class TestSoaHealth:
         with pytest.raises(ValueError):
             SoaHealth.checked_serial(output, 'example.test')
 
+    @pytest.mark.parametrize('serial', ['-1', '+1', '4294967296'])
+    def test_serial_bounds_and_unsigned_decimal_grammar_are_preserved(self, serial):
+        with pytest.raises(ValueError):
+            SoaHealth.checked_serial('zone example.test/IN: loaded serial ' + serial, 'example.test')
+
+    def test_blank_lines_are_ignored_but_duplicate_soa_answers_are_refused(self):
+        header = ';; status: NOERROR\n;; flags: qr aa; QUERY: 1, ANSWER: 2\n\n'
+        row = 'example.test. 300 IN SOA ns.example. mail.example. 12 3600 900 1209600 300\n'
+        assert SoaHealth.response_complete(header + row + row)
+        assert not SoaHealth.matches(header + row + row, 'example.test', 12)
+
     def test_package_install_precedes_primary_readiness_on_new_secondary(self):
         main = (ROOT / 'roles/bind9/tasks/tasks.d/deploy/main.yml').read_text()
         assert main.index('tasks.d/deploy/packages.yml') < main.index('tasks.d/deploy/primary_readiness.yml')

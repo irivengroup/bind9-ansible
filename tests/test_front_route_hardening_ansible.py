@@ -40,13 +40,15 @@ class TestFrontRecoveryPreconditions:
 
     def test_gateway_drift_under_lock_refuses_writes_and_releases_only_our_lock(self, tmp_path):
         sandbox = AnsibleRouteSandbox(tmp_path)
-        sandbox.data['drift_gateway_on_second_read'] = True
+        sandbox.data['drift_front_kernel_on_second_read'] = True
         sandbox.save()
         result = sandbox.run()
         assert result.returncode != 0, result.stdout
         assert 'Routing changed after planning' in result.stdout
         current = sandbox.read()
-        assert current['persistent'] == [] and current['runtime'] == BASE
+        expected = [dict(row, gateway='198.51.100.254') if row.get('dev') == 'front0' and 'gateway' in row else row for row in BASE]
+        assert current['persistent'] == [] and current['runtime'] == expected
+        assert current['operations'] == [], 'Only the injected external gateway change may remain'
         assert current['operations'] == []
         assert not (sandbox.state_root / 'front-routes.pending').exists()
 

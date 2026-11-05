@@ -15,7 +15,8 @@ class DnsTopology:
     NATIVE = ('localhost', 'localhost.localdomain', '127.in-addr.arpa',
               '0.in-addr.arpa', '255.in-addr.arpa',
               ipaddress.IPv6Address('::1').reverse_pointer)
-    DOMAIN = re.compile(r'^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$')
+    DOMAIN = re.compile(r'^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$',
+                        re.ASCII | re.IGNORECASE)
 
     def __init__(self, authoritative, forwarded):
         self.forwarded = forwarded
@@ -50,7 +51,7 @@ class DnsTopology:
     @classmethod
     def domain(cls, value):
         """Accept canonical suffix spelling; compare DNS names without case."""
-        if not isinstance(value, str) or not cls.DOMAIN.fullmatch(value.lower()):
+        if not isinstance(value, str) or not cls.DOMAIN.fullmatch(value):
             raise ValueError('Invalid DNS zone suffix: ' + str(value))
         return value.lower()
 
@@ -83,6 +84,9 @@ class DnsTopology:
 
 class FilterModule:
     """Expose strict preflight validation and derived delegation records."""
+
+    CLIENT_FORBIDDEN = tuple(ipaddress.IPv4Network(value) for value in
+                             ('0.0.0.0/32', '169.254.0.0/16', '224.0.0.0/4', '255.255.255.255/32'))
 
     def filters(self):
         return {'dns_topology_valid': self.valid, 'forward_delegations': self.delegations,
@@ -122,8 +126,10 @@ class FilterModule:
         """Inbound DNS is IPv4; reject unrestricted ACLs and non-unicast clients."""
         try:
             network = ipaddress.ip_network(value, strict=True)
+            # Network.is_* checks both endpoints; a wider CIDR can contain a
+            # forbidden range without either endpoint having that property.
             return (network.version == 4 and network.prefixlen > 0 and
-                    not network.is_multicast and not network.is_unspecified and not network.is_link_local)
+                    not any(network.overlaps(blocked) for blocked in FilterModule.CLIENT_FORBIDDEN))
         except (ValueError, TypeError):
             return False
 
@@ -143,7 +149,8 @@ class FilterModule:
             return False
         try:
             addresses = [ipaddress.IPv4Address(front), ipaddress.IPv4Address(back)]
-            if front == back or any(x.is_loopback or x.is_unspecified or x.is_multicast or x.is_link_local for x in addresses):
+            if front == back or any(x.is_loopback or x.is_unspecified or x.is_multicast or x.is_link_local or
+                                    str(x) == '255.255.255.255' for x in addresses):
                 return False
             decoded = base64.b64decode(secret, validate=True)
         except (ValueError, binascii.Error):
