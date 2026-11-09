@@ -19,11 +19,14 @@ from ansible.plugins.loader import filter_loader
 try:
     from ansible.plugins.loader import init_plugin_loader
 except ImportError:
-    # Ansible 2.9 predates this collection-loader initialization API. Keep
-    # native EL8 functional runs separate from the pinned 2.16 observer.
-    if release.__version__ != '2.9.27':
+    # These inspected controllers expose different native startup APIs.
+    # Keep real collection loading; an unknown API/version still fails closed.
+    if release.__version__ == '2.9.27':
+        init_plugin_loader = None
+    elif release.__version__ in ('2.13.13', '2.14.18'):
+        from ansible.plugins.loader import _configure_collection_loader as init_plugin_loader
+    else:
         raise
-    init_plugin_loader = None
 from ansible.vars.manager import VariableManager
 from ansible.utils.vars import load_options_vars
 import yaml

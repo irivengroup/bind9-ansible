@@ -3,7 +3,9 @@ import copy
 
 import pytest
 
-from test_front_kernel_gateway import lab_revision
+from test_front_kernel_gateway import lab_revision, pytestmark as native_marks
+
+pytestmark = native_marks
 
 
 @pytest.mark.parametrize('clients', [['198.51.100.0/24'], ['198.51.100.25']])

@@ -7,7 +7,9 @@ import sys
 
 import pytest
 
-pytestmark = pytest.mark.skipif(sys.version_info < (3, 11), reason='The QA collector requires Python 3.11')
+# Apply the existing controller boundary before importing its Ansible API.
+if sys.version_info < (3, 11):
+    pytest.skip('The QA collector requires Python 3.11', allow_module_level=True)
 QUALITY = Path(__file__).resolve().parents[1] / 'tools/quality'
 sys.path.insert(0, str(QUALITY))
 coverage = pytest.importorskip('coverage', reason='Install the pinned optional QA coverage dependency')

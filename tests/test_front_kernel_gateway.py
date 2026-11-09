@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from test_native_front_routes import NativeRouteLab, BASE, NEW, ROOT
+from test_native_front_routes import NativeRouteLab, BASE, NEW, ROOT, pytestmark as native_marks
+
+# The engine requires real root. CI schedules these integration modules in a
+# required privileged step on every matrix entry and in the full measured run.
+pytestmark = native_marks
 
 
 FRONT_REFERENCE = {'dst': '172.31.255.254/32', 'gateway': '198.51.100.1',
