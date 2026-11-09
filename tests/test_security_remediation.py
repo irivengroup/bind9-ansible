@@ -40,8 +40,10 @@ def test_ipv4_transport_does_not_disable_ipv6_record_data():
         assert module.valid_client_address(value) is expected
     assert module.valid_dns_record({'type': 'AAAA', 'value': '::1'})
     exported = module.FilterModule().filters()
-    assert set(exported) == {'valid_client_address', 'valid_ip_address', 'valid_dns_record'}
+    assert set(exported) == {'valid_client_address', 'valid_ip_address', 'valid_dns_record', 'valid_dns_ttl'}
     assert exported['valid_ip_address']('2001:db8::1') is False
+    assert exported['valid_dns_ttl']('1h30m') is True
+    assert exported['valid_dns_ttl']('300\n@ IN TXT "injected"') is False
 
 
 def test_record_validator_rejects_invalid_shapes_empty_data_and_control_characters():
@@ -51,6 +53,15 @@ def test_record_validator_rejects_invalid_shapes_empty_data_and_control_characte
                    {'type': 'A', 'value': 'invalid'}):
         assert module.valid_dns_record(record) is False
     assert module.valid_dns_record({'type': 'TXT', 'value': '"private DNS"'})
+
+
+@pytest.mark.parametrize('value', [True, False])
+def test_ttl_boolean_is_not_an_integer_duration(value):
+    # bool subclasses int in Python; rejecting text "True" does not exercise
+    # the native boolean boundary of this public filter.
+    module = load('acl_ttl_boolean', ROOT / 'filter_plugins/client_acl.py')
+    assert module.valid_dns_ttl(value) is False
+    assert module.valid_dns_ttl(int(value)) is True
 
 
 def test_bind_restore_is_independent_of_committed_native_network_routes():

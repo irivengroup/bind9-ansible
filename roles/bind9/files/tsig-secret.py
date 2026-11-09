@@ -72,11 +72,15 @@ class TsigSecretStore:
         """Return only an owned, private, singly linked regular file descriptor."""
         descriptor = os.open(name, flags | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
                              0o600, dir_fd=parent)
-        info = os.fstat(descriptor)
-        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or
-                info.st_mode & 0o077 or info.st_nlink != 1):
+        try:
+            info = os.fstat(descriptor)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or
+                    info.st_mode & 0o077 or info.st_nlink != 1):
+                raise ValueError('Unsafe TSIG file type, owner, permissions or link count')
+        except BaseException:
+            # A failed metadata syscall owns an open descriptor too.
             os.close(descriptor)
-            raise ValueError('Unsafe TSIG file type, owner, permissions or link count')
+            raise
         return descriptor
 
     def acquire(self, descriptor):

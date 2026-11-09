@@ -15,8 +15,8 @@
       - bind_primary_group | length > 0
       - bind_secondary_group | length > 0
       - bind_primary_group != bind_secondary_group
-      - bind_site_name in group_names
       - bind_site_name in groups
+      - bind_site_name in group_names
       - "bind_primary_group in groups"
       - "bind_secondary_group in groups"
     fail_msg: >-

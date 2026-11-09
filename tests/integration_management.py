@@ -25,8 +25,10 @@ class NativeManagement:
         spec = importlib.util.spec_from_file_location('management', self.project / 'roles/bind9/module_utils/bind9_management.py')
         self.module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.module)
-        self.context = dict(primary=True, primary_front='127.0.0.2', secondary_front='127.0.0.4',
-                            primary_back='127.0.0.3', secondary_back='127.0.0.5', tsig_key_name='site-transfer', named_gid=0)
+        # Peer identities follow the real unicast input contract. DNS probes
+        # still target the separate, explicitly bound loopback test listener.
+        self.context = dict(primary=True, primary_front='192.0.2.11', secondary_front='192.0.2.12',
+                            primary_back='10.0.0.11', secondary_back='10.0.0.12', tsig_key_name='site-transfer', named_gid=0)
         self.transactions = 0
         # Standard containers need no extra loopback address or network capability.
         self.upstream = os.environ.get('BIND_MANAGEMENT_TEST_UPSTREAM', '127.0.0.6')
@@ -45,7 +47,7 @@ class NativeManagement:
         return self.module.Manager.command(argv)
 
     def prepare(self):
-        for directory in ('/var/named/zones', '/var/named/slaves', '/var/named/data', '/var/named/dynamic', '/run/named'):
+        for directory in ('/var/named/zones', '/var/named/slaves', '/var/named/data', '/var/named/dynamic', '/var/log/named', '/run/named'):
             Path(directory).mkdir(parents=True, exist_ok=True)
             # The isolated lab daemon runs as the harness user. Native RPMs
             # may have already created named-owned runtime directories.
@@ -179,6 +181,25 @@ zone "example.test" {type master; file "zones/example.test.zone"; allow-update {
         assert not Path('/var/named/zones/batch.test.zone').exists()
         assert self.query('app.batch.test') == '' and self.query('app.forward.test') == ''
 
+    def block_resources(self):
+        """Exercise ACL/logging CRUD through real validation, archives and reloads."""
+        self.action('acl', 'create', 'office', value='192.0.2.0/24;')
+        self.action('acl', 'update', 'office', value='198.51.100.0/24;')
+        logging = 'channel managed { file "/var/log/named/managed.log" versions 2 size 1m; severity info; }; category default { managed; };'
+        self.action('logging', 'create', 'logging', value=logging)
+        self.action('logging', 'update', 'logging', value=logging.replace('severity info;', 'severity notice;'))
+        for resource, name, fragment in [('acl', 'office', '198.51.100.0/24;'),
+                ('logging', 'logging', 'severity notice;')]:
+            reader = self.module.Manager(dict(resource=resource, action='read', name=name), self.context, runner=self.command)
+            assert fragment in reader.run()['value']
+            catalog = self.module.Manager(dict(resource=resource, action='list'), self.context, runner=self.command).run()
+            assert any(item['name'] == name for item in catalog['items'])
+        assert Path('/var/log/named/managed.log').is_file()
+        assert self.query('localhost') == '127.0.0.1'
+        self.action('acl', 'delete', 'office')
+        self.action('logging', 'delete', 'logging')
+        assert self.query('localhost') == '127.0.0.1'
+
     def run(self):
         assert os.environ.get('BIND_MANAGEMENT_ISOLATED') == '1' and os.geteuid() == 0
         self.prepare()
@@ -203,6 +224,12 @@ zone "example.test" {type master; file "zones/example.test.zone"; allow-update {
                     time.sleep(0.1)
                 else:
                     raise AssertionError('Native BIND did not start')
+                self.block_resources()
+                self.action('option', 'create', 'max-cache-ttl', value='3600')
+                self.action('option', 'update', 'max-cache-ttl', value='7200')
+                assert self.module.Manager(dict(resource='option', action='read', name='max-cache-ttl'),
+                    self.context, runner=self.command).run()['value'] == '7200'
+                self.action('option', 'delete', 'max-cache-ttl')
                 self.action('option', 'update', 'minimal-responses', value='no')
                 assert '// operator annotation must survive' in Path('/etc/named.conf').read_text()
                 self.action('record', 'update', 'www', zone='example.test', type='A', values=['192.0.2.81'])
@@ -212,6 +239,8 @@ zone "example.test" {type master; file "zones/example.test.zone"; allow-update {
                 self.action('record', 'delete', 'v6', zone='example.test', type='AAAA')
                 assert self.query('v6.example.test', 'AAAA') == ''
                 self.action('zone', 'create', 'new.test', kind='authoritative')
+                assert self.query('new.test', 'SOA').split()[2] == '1'
+                self.action('zone', 'update', 'new.test', settings={'max-records': '1000'})
                 assert self.query('new.test', 'SOA').split()[2] == '1'
                 self.action('record', 'create', 'app', zone='new.test', type='A', values=['192.0.2.90'])
                 assert self.query('app.new.test') == '192.0.2.90'
@@ -238,7 +267,7 @@ zone "example.test" {type master; file "zones/example.test.zone"; allow-update {
                 self.action('zone', 'delete', 'forward.test')
                 assert self.query('app.forward.test') == ''
                 self.batches()
-                print(json.dumps({'transactions': self.transactions, 'dnssec': self.dnssec, 'native_validation_reload_wire_dns': True, 'real_archives': True, 'unavailable_forwarder_rollback_after_cached_answer': True, 'mixed_batch_transactions': 2, 'joint_batch_rollback': True, 'invalid_late_batch_rdata_refused': True, 'catalogs_native': True, 'selinux_double': True}))
+                print(json.dumps({'transactions': self.transactions, 'dnssec': self.dnssec, 'native_validation_reload_wire_dns': True, 'acl_logging_crud_native': True, 'real_archives': True, 'unavailable_forwarder_rollback_after_cached_answer': True, 'mixed_batch_transactions': 2, 'joint_batch_rollback': True, 'invalid_late_batch_rdata_refused': True, 'catalogs_native': True, 'selinux_double': True}))
             finally:
                 daemon.terminate()
                 daemon.wait(timeout=10)

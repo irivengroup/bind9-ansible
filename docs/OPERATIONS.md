@@ -8,6 +8,8 @@
 
 Le rôle déploie **un seul fichier de configuration** : `/etc/named.conf`.
 
+Avant la transaction DNS, le rôle observe l’activité et l’activation au démarrage de `named`. En cas d’échec, il restaure ces deux états après les fichiers : un service initialement arrêté reste arrêté, notamment lors d’une première installation. Un service initialement actif est redémarré sur sa configuration restaurée. Les états `failed`, `masked` ou non reconnus sont refusés avant publication ; aucune valeur de remplacement n’est déduite. Si les fichiers de runtime ne peuvent pas être restaurés, le service reste arrêté et les preuves de reprise sont conservées.
+
 Les préconditions renforcées des secrets, archives, chemins et reprises FRONT
 figurent dans [DURCISSEMENT_SECURITE.md](DURCISSEMENT_SECURITE.md).
 La restauration refuse désormais un `named` actif, les destinations contenant

@@ -56,3 +56,57 @@ def test_success_marker_follows_every_health_probe_and_seal_requires_it():
     assert 'routes-recover' in entry[1]['block'][0]['when']
     assert 'backup' in entry[1]['block'][0]['when']
     assert 'routes' in entry[1]['block'][0]['when']
+
+
+@pytest.mark.parametrize('tags,expected', [(['never'], False), (['all'], False),
+    (['preflight'], False), (['routes'], False), (['routes-recover'], True),
+    (['never', 'routes-recover'], True)])
+def test_recovery_requires_its_explicit_action_even_when_reserved_tags_select_it(tags, expected):
+    # Ansible's explicit `never` selector selects every never-tagged task.
+    # Evaluate the original task's tags and guard without invoking the device.
+    from ansible.parsing.dataloader import DataLoader
+    from ansible.playbook.task import Task
+    from ansible.template import Templar
+    loader = DataLoader()
+    tasks = loader.load_from_file(str(TASKS / 'deploy/main.yml'))
+    mapping = next(task for task in tasks if task.get('name') ==
+                   'Recover an explicitly requested interrupted FRONT operation')
+    task = Task.load(mapping, loader=loader)
+    scope = {'ansible_run_tags': tags}
+    assert task.evaluate_tags(['never'], [], scope) is True
+    assert task.evaluate_conditional(Templar(loader=loader, variables=scope), scope) is expected
+
+
+@pytest.mark.parametrize('tags,deferred', [
+    (['all'], True), (['deploy'], True), (['routes'], False), (['configure'], False),
+])
+def test_deployment_selection_resets_stale_route_ownership_and_defers_only_full_runs(tags, deferred):
+    # Evaluate the original set_fact fields with their native source positions.
+    # This supplies data-field evidence, never task-dispatch or network credit.
+    task, = [item for item in TaskExpressions.load('deploy/main.yml') if item.get('name') ==
+             'Determine whether routes belong to a complete DNS deployment']
+    result = TaskExpressions(dict(ansible_run_tags=tags, bind_front_route_transaction_pending=True,
+        bind_front_route_rollback_attempted=True)).run('', tasks=[task])
+    assert result['bind_front_routes_defer_commit'] is deferred
+    assert result['bind_front_route_transaction_pending'] is False
+    assert result['bind_front_route_rollback_attempted'] is False
+
+
+@pytest.mark.parametrize('tags,runtime_incomplete,pending,expected', [
+    (['all'], False, False, 'named deployment failed; managed files restored. Inspect service and logs.'),
+    (['deploy'], True, False, 'named deployment failed; runtime recovery incomplete. DNS backup restoration was attempted; services remain stopped and operation ownership is retained. Inspect the preserved runtime paths and snapshot before manual recovery.'),
+    (['configure'], False, False, 'named partial deployment failed; automatic DNS restoration was not selected. Inspect the live configuration and backups before retrying.'),
+    (['configure'], True, True, 'named partial deployment failed; automatic DNS restoration was not selected. Inspect the live configuration and backups before retrying. FRONT rollback incomplete: synthetic rollback refusal. Recovery journal retained.'),
+    (['deploy'], False, True, 'named deployment failed; managed files restored. Inspect service and logs. FRONT rollback incomplete: synthetic rollback refusal. Recovery journal retained.'),
+])
+def test_fatal_deployment_diagnostic_distinguishes_partial_runs_and_incomplete_recovery(
+        tags, runtime_incomplete, pending, expected):
+    from ansible.parsing.dataloader import DataLoader
+    from ansible.template import Templar
+    block, = [item for item in TaskExpressions.load('deploy/main.yml') if item.get('name') ==
+              'Apply DNS changes with rollback on failure']
+    failure, = [item for item in block['rescue'] if item.get('name') == 'Stop deployment after rollback']
+    values = dict(ansible_run_tags=tags, bind_runtime_restore_incomplete=runtime_incomplete,
+        bind_front_route_transaction_pending=pending, bind_front_route_rollback_error='synthetic rollback refusal')
+    message = Templar(loader=DataLoader(), variables=values).template(failure['ansible.builtin.fail']['msg'])
+    assert message.strip() == expected

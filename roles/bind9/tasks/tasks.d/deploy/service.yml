@@ -12,4 +12,4 @@
     argv: [systemctl, is-active, named]
   register: bind_service_active
   changed_when: false
-  failed_when: bind_service_active.stdout | trim != 'active'
+  failed_when: bind_service_active.rc != 0 or bind_service_active.stdout | trim != 'active'

@@ -8,13 +8,19 @@ import yaml
 
 pytest.importorskip('ansible')
 from route_task_expressions import TaskExpressions
+from test_ansible_canonical_predicates import CanonicalPredicates
 
 ROOT = Path(__file__).resolve().parents[1]
-TASKS = yaml.safe_load((ROOT / 'roles/bind9/tasks/tasks.d/deploy/firewall.yml').read_text())
+TASKS = TaskExpressions.load('deploy/firewall.yml')
 
 
 class TestDnsFirewall:
     """Keep ingress restricted to discovered listener zones without network resets."""
+
+    def test_observed_contract_keeps_exact_original_values_and_loader_positions(self):
+        path = ROOT / 'roles/bind9/tasks/tasks.d/deploy/firewall.yml'
+        assert TASKS == yaml.safe_load(path.read_text())
+        assert TASKS[0]['failed_when'].ansible_pos[0] == str(path)
 
     @staticmethod
     def run_tasks(evaluator, tasks):
@@ -92,6 +98,48 @@ class TestDnsFirewall:
         imported = next(t for t in main if t.get('ansible.builtin.import_tasks') == '{{ role_path }}/tasks/tasks.d/deploy/firewall.yml')
         assert imported['tags'] == ['deploy', 'firewall']
         assert imported['environment'] == {'LC_ALL': 'C'}
-        source = yaml.safe_dump(TASKS)
+        # Ansible's source-attributed containers are JSON-compatible but have
+        # no SafeDumper representer. Scan the same values without discarding
+        # original positions or including unrelated YAML comments.
+        source = json.dumps(TASKS, sort_keys=True)
         for forbidden in ('--reload', '--complete-reload', '--runtime-to-permanent', '--add-interface', '--change-interface', '--set-default-zone'):
             assert forbidden not in source
+
+
+@pytest.mark.parametrize('rc,stdout,failed', [(0, 'running', False), (0, 'inactive', True), (1, 'running', True)])
+def test_native_firewall_state_guard_requires_status_and_output_to_agree(rc, stdout, failed):
+    CanonicalPredicates('deploy/firewall.yml').check('Require an already running firewalld daemon',
+        {'bind_dns_firewall_state': {'rc': rc, 'stdout': stdout}}, failed, 'failed_when')
+
+
+@pytest.mark.parametrize('output,accepted', [('[]', True), ('null', False), ('{}', False),
+                                          ('"scalar"', False), ('false', False), ('', False)])
+def test_native_firewall_address_contract_refuses_malformed_observation_types(output, accepted):
+    CanonicalPredicates('deploy/firewall.yml').check('Require nonempty IPv4 interface observations',
+        {'bind_dns_firewall_addresses': {'stdout': output}}, accepted)
+
+
+@pytest.mark.parametrize('output,accepted', [('public', True), (' dns_front-1\n', True),
+                                          ('', False), ('no zone', False), ('public\ninjected', False)])
+def test_native_firewall_default_zone_contract_accepts_only_one_safe_name(output, accepted):
+    CanonicalPredicates('deploy/firewall.yml').check('Require a valid existing default zone name',
+        {'bind_dns_firewall_default_zone': {'stdout': output}}, accepted)
+
+
+@pytest.mark.parametrize('rc,stdout,stderr,failed', [(0, 'public', '', False), (2, 'no zone', '', False),
+    (2, '', 'no zone', False), (2, '', 'bad', True), (13, 'no zone', '', True)])
+def test_native_firewall_discovery_command_refuses_errors_and_accepts_only_explicit_unbound_results(rc, stdout, stderr, failed):
+    CanonicalPredicates('deploy/firewall.yml').check('Discover existing runtime and permanent DNS interface zones',
+        {'bind_dns_firewall_interface_zones': {'rc': rc, 'stdout': stdout, 'stderr': stderr}}, failed, 'failed_when')
+
+
+@pytest.mark.parametrize('rc,stdout,failed', [(0, 'yes', False), (1, 'yes', True), (0, 'no', True)])
+def test_native_firewall_postcheck_cannot_accept_failure_or_a_negative_answer(rc, stdout, failed):
+    CanonicalPredicates('deploy/firewall.yml').check('Verify DNS service is authorized at runtime and permanently',
+        {'bind_dns_firewall_verified': {'rc': rc, 'stdout': stdout}}, failed, 'failed_when')
+
+
+@pytest.mark.parametrize('check_mode', [False, True])
+def test_native_firewall_postcheck_follows_the_actual_check_mode_guard(check_mode):
+    CanonicalPredicates('deploy/firewall.yml').check('Verify DNS service is authorized at runtime and permanently',
+        {'ansible_check_mode': check_mode}, not check_mode, 'when')

@@ -14,12 +14,14 @@
         path: /etc/named.conf
         follow: false
         get_checksum: false
+        get_mime: false
+        get_attributes: false
       register: bind_hibernation_config_stat
     - name: Require a bounded private canonical configuration before native parsing
       ansible.builtin.assert:
         that:
-          - bind_hibernation_config_stat.stat.exists and (bind_hibernation_config_stat.stat.isreg | default(false))
           - not (bind_hibernation_config_stat.stat.islnk | default(false))
+          - bind_hibernation_config_stat.stat.exists and (bind_hibernation_config_stat.stat.isreg | default(false))
           - bind_hibernation_config_stat.stat.uid == 0 and bind_hibernation_config_stat.stat.nlink == 1
           - bind_hibernation_config_stat.stat.mode is match('^0[0-7][0145][0145]$')
           - bind_hibernation_config_stat.stat.size > 0 and bind_hibernation_config_stat.stat.size <= 16777216

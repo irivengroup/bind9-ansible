@@ -97,6 +97,14 @@ def test_missing_dnssec_option_retains_the_native_enabled_default():
     assert M.Manager.dnssec_active('options { dnssec-validation no; };') is False
 
 
+def test_enabled_dnssec_without_private_zones_requires_no_private_helper(lab):
+    lab.put('/etc/named.conf', CONF.replace('dnssec-validation no;', 'dnssec-validation yes;'))
+    result = lab.write(value='no')
+    assert result['changed']
+    assert lab.manager().run()['value'] == 'no'
+    assert not (lab.root / 'usr/local/sbin/bind-private-dnssec').exists()
+
+
 @pytest.mark.parametrize('source', ['$TTL\n', '$TTL 300 extra\n', '$TTL invalid\n'])
 def test_malformed_ttl_directive_is_refused_explicitly(source):
     with pytest.raises(M.ManagementError, match=r'Invalid \$TTL'):
@@ -318,6 +326,72 @@ def test_read_reports_an_existing_private_forwarding_marker(lab):
     assert result['forwarders'] == [{'address': '198.51.100.53', 'port': 5353}]
 
 
+def test_read_native_forwarders_without_an_explicit_port_uses_dns_default(lab):
+    lab.put('/etc/named.conf', CONF +
+            'zone "private.test" { type forward; forwarders { 198.51.100.53; }; };')
+    assert lab.manager('zone', 'read', 'private.test').run()['forwarders'] == [
+        {'address': '198.51.100.53', 'port': 53}]
+
+
+@pytest.mark.parametrize('server', ['198.51.100.53 unexpected 5353', '198.51.100.53 5353',
+                                    '198.51.100.53 port 0', '198.51.100.53 port bad',
+                                    '198.51.100.53 port 65536'])
+def test_read_forwarders_cannot_silently_drop_unsupported_syntax(lab, server):
+    source = CONF + 'zone "private.test" { type forward; forwarders { ' + server + '; }; };'
+    lab.put('/etc/named.conf', source)
+    with pytest.raises(M.ManagementError, match='forwarder declaration'):
+        lab.manager('zone', 'read', 'private.test').run()
+    assert (lab.root / 'etc/named.conf').read_text() == source
+    assert not lab.calls
+
+
+@pytest.mark.parametrize('name', [None, 'bad;name'])
+def test_option_identity_is_rechecked_at_planning_after_request_state_changes(lab, name):
+    manager = lab.manager(action='update', value='no')
+    manager.request.update(name=name, expected_checksum=M.Configuration(manager.files).revision())
+    with pytest.raises(M.ManagementError, match='Invalid or deployment-owned option'):
+        manager.run()
+    assert not lab.calls
+    assert (lab.root / 'etc/named.conf').read_text() == CONF
+
+
+def test_acl_validation_without_acl_declarations_has_no_native_side_effect(lab):
+    manager = lab.manager()
+    manager.final_config = M.Configuration(M.SnapshotFiles(manager.files, {
+        '/etc/named.conf': b'options { directory "/var/named"; };'}))
+    stage = lab.root / 'acl-stage'
+    stage.mkdir()
+    manager.validate_acls(stage)
+    assert not list(stage.iterdir())
+    assert not lab.calls
+
+
+def test_an_empty_zone_cannot_become_a_primary_by_adding_an_ordinary_record():
+    document = M.ZoneDocument('(\n)\n', 'example.test.')
+    assert not document.records
+    with pytest.raises(M.ManagementError, match='SOA'):
+        M.ZoneDocument('', 'example.test.').change('create', 'www.example.test.', 'A', ['192.0.2.80'])
+
+
+@pytest.mark.parametrize('approval', [None, '', 17, 'not-a-sha256'])
+def test_candidate_approval_cannot_disappear_between_validation_and_commit(lab, monkeypatch, approval):
+    """A missing approval must never turn the complete-graph check off."""
+    manager = lab.manager(action='update', value='no')
+    manager.request['expected_checksum'] = M.Configuration(manager.files).revision()
+    validate = manager.validate
+
+    def lose_approval():
+        validate()
+        manager.candidate_revision = approval
+
+    monkeypatch.setattr(manager, 'validate', lose_approval)
+    with manager.lease(), pytest.raises(M.ManagementError, match='approved candidate'):
+        manager.run()
+    assert (lab.root / 'etc/named.conf').read_text() == CONF
+    assert not any('bind-configtool' in call[0] or call[-1] == 'reload' for call in lab.calls)
+    assert not (lab.root / 'var/backups/Bind9-Ansible/management').exists()
+
+
 def test_a_nontext_backup_root_cannot_reach_the_backup_command(lab):
     manager = lab.manager(action='update', value='no')
     manager.context['backup_root'] = None
@@ -334,10 +408,32 @@ def test_block_setting_contract_refuses_invalid_names(name):
         M.Manager.block_setting('zone "example.test" { type master; };', name, 'yes')
 
 
-def test_forwarding_without_primary_data_produces_no_delegation_writes(lab):
+@pytest.mark.parametrize('zones', [{}, {'corp.test.': {'kind': 'forward'}}])
+def test_forwarding_without_primary_data_produces_no_delegation_writes(lab, zones):
     manager = lab.manager()
     syntax = M.Syntax('zone "corp.test" { type forward; forwarders { 198.51.100.53; }; };')
-    assert manager.cuts({'corp.test.': {'kind': 'forward'}}, syntax) == {}
+    assert manager.cuts(zones, syntax) == {}
+
+
+@pytest.mark.parametrize('text,name,block', [
+    ('', 'x', False), ('x yes; y no;', 'x', False), ('y yes;', 'x', False),
+    ('x yes;', 'x', True), ('x { yes; } extra { no; };', 'x', True),
+])
+def test_selected_statement_boundary_refuses_ambiguous_or_wrong_shapes(text, name, block):
+    with pytest.raises(M.ManagementError, match='selected boundary'):
+        M.Syntax(text).selected(name, 'selected boundary', block)
+
+
+def test_selected_statement_boundary_preserves_the_original_clause():
+    syntax = M.Syntax('x { yes; };')
+    assert syntax.selected('x', 'selected boundary', block=True) is syntax.clauses[0]
+
+
+def test_named_block_read_refuses_a_second_block_attached_to_the_same_statement(lab):
+    lab.put('/etc/named.conf', CONF + 'acl "operator" { any; } extra { none; };')
+    with pytest.raises(M.ManagementError, match='Unsupported named block'):
+        lab.manager('acl', 'read', 'operator').run()
+    assert not lab.calls
 
 
 def test_prepared_static_observations_check_journals_before_a_final_candidate(lab):

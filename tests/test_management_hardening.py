@@ -33,10 +33,23 @@ def test_forwarder_address_must_be_an_explicit_ip_string(lab, address):
 @pytest.mark.parametrize('address', ['255.255.255.255', '::ffff:255.255.255.255',
     '::ffff:224.0.0.1', '::ffff:0.0.0.0', '::ffff:169.254.0.53'])
 def test_mapped_addresses_cannot_bypass_forwarder_unicast_policy(lab, address):
+    assert_forwarder_unicast_refusal(lab, address)
+
+
+def assert_forwarder_unicast_refusal(lab, address):
+    """Keep the public operation and no-mutation assertions shared by parsers."""
     with pytest.raises(M.ManagementError, match='forwarder'):
         lab.write('zone', 'create', 'private.test', kind='forward',
                   forwarders=[{'address': address}])
     assert not lab.calls
+    assert (lab.root / 'etc/named.conf').read_text() == CONF
+
+
+@pytest.mark.parametrize('address', ['::ffff:224.0.0.1', '::ffff:0.0.0.0', '::ffff:169.254.0.53'])
+def test_legacy_mapped_addresses_cannot_bypass_forwarder_unicast_policy(lab, address, monkeypatch, legacy_ipaddress):
+    """EL8 classifies the outer IPv6 value separately from its IPv4 endpoint."""
+    monkeypatch.setattr(M, 'ipaddress', legacy_ipaddress)
+    assert_forwarder_unicast_refusal(lab, address)
 
 
 @pytest.mark.parametrize('answer', [

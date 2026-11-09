@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
 import socket
 import subprocess
 import tempfile
@@ -50,9 +51,17 @@ class LoggingIntegration(LoopbackIntegration):
             for path in [sandbox] + list(sandbox.rglob('*')):
                 os.chown(path, account.pw_uid, account.pw_gid)
             config.chmod(0o640)
+            # The native service's default mask is 0022 unless its real role
+            # drop-in supplies UMask. Apply that policy to this direct daemon
+            # launch; the parent laboratory process keeps its own mask intact.
+            override = self.jinja.get_template('named-runtime-override.j2').render(**context)
+            masks = [line.split('=', 1)[1] for line in override.splitlines() if line.startswith('UMask=')]
+            assert len(masks) <= 1 and all(re.fullmatch('[0-7]{4}', value) for value in masks)
+            mask = masks[0] if masks else '0022'
             with (folder / 'startup.log').open('w+') as startup:
                 # -g redirects channels to stderr; use -f to test real files.
-                process = subprocess.Popen([str(self.named), '-f', '-u', account.pw_name, '-c', str(config),
+                process = subprocess.Popen(['/bin/bash', '-c', 'umask "$1"; shift; exec "$@"',
+                                            'bind-logging-mask', mask, str(self.named), '-f', '-u', account.pw_name, '-c', str(config),
                                             '-n', '1', '-U', '1'], stdout=startup, stderr=startup)
                 try:
                     for _ in range(100):
@@ -92,6 +101,7 @@ class LoggingIntegration(LoopbackIntegration):
                     assert not (logs / 'default.log.5').exists()
                     assert all((logs / name).stat().st_uid == account.pw_uid for name in records)
                     modes = {name: oct((logs / name).stat().st_mode & 0o777) for name in records}
+                    assert all(value == '0o640' for value in modes.values()), modes
                 finally:
                     process.terminate()
                     try:

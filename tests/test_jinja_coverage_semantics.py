@@ -31,18 +31,35 @@ class Value:
 
 
 @contextmanager
-def observed(root):
+def unobserved_parser():
+    """Suspend every known layer for an independent native render or fixture."""
     previous = jinja2.Environment._parse
-    parent = getattr(previous, '_bind9_observer', None)
-    if parent:
-        jinja2.Environment._parse = parent.original_parse
-    collector = JinjaCollector(root)
-    collector.install()
+    parser, seen = previous, set()
+    # The production chain can contain both the Ansible and Jinja observers.
+    # A fixture scope owns neither layer; restore the whole chain afterward.
+    while getattr(parser, '_bind9_observer', None):
+        if id(parser) in seen or len(seen) >= 16:
+            raise InstrumentationError('Cyclic or excessive outer observer chain')
+        seen.add(id(parser))
+        parser = parser._bind9_observer.original_parse
     try:
-        yield collector
+        jinja2.Environment._parse = parser
+        yield
     finally:
-        collector.close()
         jinja2.Environment._parse = previous
+
+
+@contextmanager
+def observed(root):
+    with unobserved_parser():
+        collector = None
+        try:
+            collector = JinjaCollector(root)
+            collector.install()
+            yield collector
+        finally:
+            if collector is not None:
+                collector.close()
 
 
 def evaluate(source, values, escape=False, partial=False):
@@ -72,6 +89,36 @@ def evaluate(source, values, escape=False, partial=False):
 
 EXPRESSIONS = ['x and y', 'x or y', '(x and y) or z', 'x and (y or z)',
                '(x or y) and (z or x)', 'not (x and y) or z']
+
+
+def test_environment_can_be_reused_by_a_later_collector(tmp_path):
+    source = '{% if x %}yes{% else %}no{% endif %}'
+    path = tmp_path / 'roles/bind9/example.j2'
+    path.parent.mkdir(parents=True)
+    path.write_text(source, encoding='utf-8')
+    environment = jinja2.Environment()
+    original = environment.code_generator_class
+    with observed(tmp_path) as first:
+        assert environment.from_string(source).render(x=True) == 'yes'
+    before = first.payload()
+    assert environment.code_generator_class is original
+    with observed(tmp_path) as second:
+        assert environment.from_string(source).render(x=False) == 'no'
+    assert second.conditions and first.payload() == before
+
+
+def test_retained_template_keeps_native_semantics_without_extending_closed_measurements(tmp_path):
+    source = '{% if x %}yes{% else %}no{% endif %}'
+    path = tmp_path / 'roles/bind9/example.j2'
+    path.parent.mkdir(parents=True)
+    path.write_text(source, encoding='utf-8')
+    environment = jinja2.Environment()
+    with observed(tmp_path) as collector:
+        template = environment.from_string(source)
+        assert template.render(x=True) == 'yes'
+    before = collector.payload()
+    assert template.render(x=False) == 'no'
+    assert collector.payload() == before
 
 
 @pytest.mark.parametrize('expression', EXPRESSIONS)

@@ -3,7 +3,7 @@ Description=Bind9-Ansible authoritative DNS healthcheck
 After=named.service
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/named-healthcheck {{ bind_back_ip }}{% for zone in (bind_managed_zones | default(bind_authoritative_zones | default([], true), true)) %} {{ zone.domain }}{% endfor %}
+ExecStart=/usr/local/sbin/named-healthcheck {{ bind_back_ip }} {{ (bind_managed_zones | default(bind_authoritative_zones | default([], true), true)) | map(attribute='domain') | join(' ') }}
 User=root
 NoNewPrivileges=yes
 PrivateTmp=yes

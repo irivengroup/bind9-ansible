@@ -26,10 +26,22 @@ class CanonicalPredicates:
     def __init__(self, filename):
         self.loader = DataLoader()
         filter_loader.add_directory(str(ROOT / 'roles/bind9/filter_plugins'))
-        self.tasks = self.loader.load_from_file(str(TASKS / filename))
+        path = (TASKS / filename).resolve()
+        path.relative_to(ROOT / 'roles/bind9/tasks')
+        self.tasks = self.loader.load_from_file(str(path))
 
     def check(self, name, variables, expected, key='that'):
-        task, = [value for value in self.tasks if value.get('name') == name]
+        pending, matches, seen = list(self.tasks), [], set()
+        while pending:
+            task = pending.pop()
+            if id(task) in seen or len(seen) >= 10000:
+                raise ValueError('Canonical guard lookup refuses cyclic or excessive task trees')
+            seen.add(id(task))
+            if task.get('name') == name:
+                matches.append(task)
+            for field in ('block', 'rescue', 'always'):
+                pending.extend(task.get(field, []))
+        task, = matches
         expression = task['ansible.builtin.assert']['that'] if key == 'that' else task[key]
         before = copy.deepcopy(variables)
         condition = Conditional(loader=self.loader)
@@ -129,3 +141,10 @@ def test_front_native_return_codes_do_not_mask_a_refusal(rc, failed, changed):
     variables = {'bind_front_operation': {'rc': rc}}
     case.check('Run the single native FRONT transaction with bounded observations', variables, failed, 'failed_when')
     case.check('Run the single native FRONT transaction with bounded observations', variables, changed, 'changed_when')
+
+
+@pytest.mark.parametrize('rc,state,expected', [(0, 'active', False), (0, ' active\n', False),
+    (0, 'inactive', True), (1, 'active', True), (3, 'active', True), (3, 'inactive', True)])
+def test_service_health_does_not_accept_partial_output_from_a_failed_command(rc, state, expected):
+    CanonicalPredicates('deploy/service.yml').check('Check named is active',
+        {'bind_service_active': {'rc': rc, 'stdout': state}}, expected, 'failed_when')

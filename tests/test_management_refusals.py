@@ -31,6 +31,8 @@ def test_clause_block_and_scalar_contracts():
         M.Syntax('x { yes; };').clauses[0].scalar()
     compound = M.Syntax('inet 127.0.0.1 allow { localhost; } keys { key; };').clauses[0]
     assert not compound.simple_block()
+    # Clause also refuses a partial token group supplied by a caller.
+    assert not M.Clause(M.Syntax('x { yes; };').clauses[0].tokens[:-2]).simple_block()
 
 
 @pytest.mark.parametrize('virtual', ['relative.conf', '/etc/../named.conf', '/tmp/named.conf'])
@@ -49,7 +51,8 @@ def test_unsafe_parent_and_bounded_file_size(lab, monkeypatch):
         lab.manager().run()
 
 
-def test_vendor_crypto_policy_link_is_bounded_and_readable(lab):
+@pytest.mark.parametrize('ancestor', ['writable', 'foreign-owner'])
+def test_vendor_crypto_policy_link_is_bounded_and_readable(lab, ancestor):
     parent = lab.root / 'etc/crypto-policies/back-ends'
     parent.mkdir(parents=True)
     target = lab.root / 'usr/share/crypto-policies/DEFAULT/bind.txt'
@@ -59,14 +62,21 @@ def test_vendor_crypto_policy_link_is_bounded_and_readable(lab):
     link.symlink_to(target)
     files = M.SafeFiles(lab.root)
     assert files.read('/etc/crypto-policies/back-ends/bind.config') == target.read_bytes()
-    target.parent.chmod(0o777)
+    if ancestor == 'writable':
+        target.parent.chmod(0o777)
+    else:
+        os.chown(str(target.parent), 1, 0)
     with pytest.raises(M.ManagementError, match='ancestor'):
         files.read('/etc/crypto-policies/back-ends/bind.config')
     target.parent.chmod(0o755)
+    os.chown(str(target.parent), 0, 0)
     link.unlink()
     link.symlink_to(lab.root / 'var/named/empty-root.zone')
     with pytest.raises(M.ManagementError, match='link target'):
         files.read('/etc/crypto-policies/back-ends/bind.config')
+    link.unlink()
+    link.write_text(target.read_text())
+    assert files.read('/etc/crypto-policies/back-ends/bind.config') == target.read_bytes()
 
 
 @pytest.mark.parametrize('change', [

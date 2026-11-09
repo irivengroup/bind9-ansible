@@ -66,6 +66,7 @@ def test_runtime_dropin_keeps_native_startup_and_an_explicit_local_rndc_reload()
     rendered = environment().get_template('named-runtime-override.j2').render()
     lines = [line for line in rendered.splitlines() if not line.startswith('#')]
     assert '[Service]' in lines
+    assert [line for line in lines if line.startswith('UMask=')] == ['UMask=0027']
     assert [line for line in lines if line.startswith('ExecReload=')] == [
         'ExecReload=', 'ExecReload=/usr/sbin/rndc -s 127.0.0.1 -k /etc/rndc.key reload']
     assert not any(line.startswith('ExecStart=') for line in lines)

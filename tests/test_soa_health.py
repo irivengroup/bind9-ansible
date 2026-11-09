@@ -12,6 +12,20 @@ SoaHealth = MODULE.SoaHealth
 
 
 class TestSoaHealth:
+    @pytest.mark.parametrize('kind,expected,accepted', [
+        ('valid', None, True), ('valid', 12, True), ('valid', 13, False),
+        ('owner', None, False), ('rdata', None, False), ('overflow', None, False),
+        ('additional', 12, False)])
+    def test_unknown_serial_skips_only_equality_and_preserves_complete_soa_validation(self, kind, expected, accepted):
+        row = 'EXAMPLE.TEST. 300 IN SOA ns.example. mail.example. 12 3600 900 1209600 300\n'
+        answer = ';; status: NOERROR\n;; flags: qr aa; QUERY: 1, ANSWER: 1\n' + row
+        if kind == 'owner': answer = answer.replace('EXAMPLE.TEST.', 'other.test.')
+        elif kind == 'rdata': answer = answer.replace('ns.example. mail.example. 12 3600 900 1209600 300', 'incomplete')
+        elif kind == 'overflow': answer = answer.replace(' 12 3600 ', ' 4294967296 3600 ')
+        elif kind == 'additional':
+            answer = answer.replace('ANSWER: 1', 'ANSWER: 2') + 'unrelated.test. 300 IN A 192.0.2.1\n'
+        assert SoaHealth.matches(answer, 'example.test', expected) is accepted
+
     def test_dns_owner_comparison_is_case_insensitive(self):
         assert SoaHealth.checked_serial('zone example.test/IN: loaded serial 12', 'EXAMPLE.TEST') == 12
         answer = ';; status: NOERROR\n;; flags: qr aa; QUERY: 1, ANSWER: 1\nexample.test. 300 IN SOA ns.example. mail.example. 12 3600 900 1209600 300\n'
@@ -53,3 +67,9 @@ class TestSoaHealth:
     def test_package_install_precedes_primary_readiness_on_new_secondary(self):
         main = (ROOT / 'roles/bind9/tasks/tasks.d/deploy/main.yml').read_text()
         assert main.index('tasks.d/deploy/packages.yml') < main.index('tasks.d/deploy/primary_readiness.yml')
+
+    @pytest.mark.parametrize('flags', ['qr aa-invalid', 'qr invalid-aa', 'qr x-aa-x'])
+    def test_aa_must_be_a_whole_header_flag_token(self, flags):
+        answer = (';; status: NOERROR\n;; flags: ' + flags + '; QUERY: 1, ANSWER: 1\n'
+                  'example.test. 300 IN SOA ns.example. mail.example. 12 3600 900 1209600 300\n')
+        assert not SoaHealth.matches(answer, 'example.test', 12)

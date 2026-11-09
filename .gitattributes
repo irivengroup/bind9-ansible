@@ -8,3 +8,4 @@
 *.ini text eol=lf
 *.cfg text eol=lf
 *.json text eol=lf
+tests/fixtures/PYTHON36_LICENSE.txt text eol=lf

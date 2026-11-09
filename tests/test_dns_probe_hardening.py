@@ -90,7 +90,7 @@ def test_all_ansible_dns_probes_ignore_digrc_and_select_ipv4():
 
 
 @pytest.mark.skipif(not shutil.which('bash'), reason='Requires Linux shell')
-@pytest.mark.parametrize('scenario', ['valid', 'tc', 'missing', 'duplicate', 'wrong_owner'])
+@pytest.mark.parametrize('scenario', ['valid', 'tc', 'missing', 'duplicate', 'wrong_owner', 'soa_bad_ttl'])
 def test_periodic_monitor_rejects_corrupt_replies_and_preserves_transport(tmp_path, scenario):
     systemctl = tmp_path / 'systemctl'
     systemctl.write_text('#!/bin/sh\nexit 0\n')
@@ -108,7 +108,8 @@ printf ';; status: NOERROR\\n;; flags: %s; QUERY: 1, ANSWER: 1\\n' "$flags"
 case $kind in
  A) printf '%s. 300 IN A 127.0.0.1\\n' "$name" ;;
  PTR) printf '%s. 300 IN PTR localhost.\\n' "$name" ;;
- SOA) printf '%s. 300 IN SOA ns.test. host.test. 12 3600 900 604800 300\\n' "$name" ;;
+ SOA) ttl=300; [[ $PROBE_SCENARIO != soa_bad_ttl ]] || ttl=not-a-ttl
+      printf '%s. %s IN SOA ns.test. host.test. 12 3600 900 604800 300\\n' "$name" "$ttl" ;;
 esac
 ''')
     dig.chmod(0o755)

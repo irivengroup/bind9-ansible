@@ -43,7 +43,8 @@ logrotate pour les mêmes fichiers. [Référence ISC](https://bind9.readthedocs.
 Le rôle crée `/var/log/named` en `named:named 0750`, puis prépare les trois
 fichiers en `named:named 0640`. Les fichiers existants ne sont pas tronqués
 et leurs dates d’accès/modification sont conservées. Le préflight refuse
-les liens symboliques sur ces chemins gérés.
+les liens symboliques sur ces chemins gérés. Les tâches d’écriture des
+répertoires refusent aussi un lien introduit après ce contrôle initial.
 
 Quand SELinux est activé, le rôle :
 
@@ -53,7 +54,10 @@ Quand SELinux est activé, le rôle :
 3. Réutilise une règle exacte déjà correcte sans nouvelle mutation.
 4. Applique `restorecon -RF` au répertoire et à son contenu, ainsi qu’aux
    chemins BIND déjà gérés.
-5. Vérifie le type `named_log_t` sur le répertoire et les trois fichiers.
+5. Vérifie `named_log_t` sur chacun des quatre chemins exacts, sans doublon
+   ni correspondance partielle de type ou de chemin.
+6. Exige une étiquette `named_conf_t` pour le seul `/etc/named.conf`.
+   Une étiquette absente ou une sortie ambiguë est refusée.
 
 Cette association persistante couvre les fichiers créés lors des rotations
 et les futurs relabels. Les outils SELinux proviennent du paquet
@@ -61,12 +65,13 @@ et les futurs relabels. Les outils SELinux proviennent du paquet
 collection ni dépendance supplémentaire n’est ajoutée. Aucun changement
 de mode enforcing ni autorisation SELinux globale n’est effectué.
 
-Le démon utilise son comportement natif pour les permissions des nouveaux
-fichiers après rotation. Le laboratoire observe notamment `0644` pour le
-nouveau `default.log` avec le masque natif ; le répertoire `0750` limite
-toujours l’accès à named, son groupe et root. Les fichiers préparés par
-Ansible sont remis en `0640` au prochain déploiement. Aucun réglage global
-de masque du service n’est introduit.
+Le drop-in `bind9-runtime.conf` fixe `UMask=0027` pour le seul service
+`named`. Les fichiers recréés lors des rotations conservent ainsi le mode
+`0640`. Le handler existant redémarre le service lorsque ce drop-in change,
+puis conserve le chemin de rechargement natif lorsque l’unité est inchangée.
+La rotation réelle sous BIND EL8 9.11.36 a reproduit le mode `0644` avant
+cette correction, puis confirmé `0640` sur les trois journaux avec le même
+scénario et la politique du drop-in corrigé. Le répertoire reste en `0750`.
 
 Les journaux peuvent contenir des IP clientes, des noms demandés lors de
 refus et des informations opérationnelles. Leur accès et leur conservation
@@ -116,6 +121,7 @@ pas automatiquement une règle potentiellement préexistante.
 | Fichier | Modification nécessaire |
 |---|---|
 | `roles/bind9/templates/named.conf.j2` | Canaux, catégories, désactivation explicite des requêtes ; renommage de l’ACL et de ses deux références |
+| `roles/bind9/templates/named-runtime-override.j2` | Masque de création `0027`, conservant les journaux en `0640` après rotation |
 | `roles/bind9/tasks/tasks.d/deploy/directories.yml` | Répertoire privé et préparation non destructive des trois fichiers |
 | `roles/bind9/tasks/tasks.d/path_safety.yml` | Protection des nouveaux chemins contre les liens symboliques |
 | `roles/bind9/tasks/tasks.d/deploy/security.yml` | Règle SELinux persistante, relabel récursif et contrôle des labels |
@@ -133,7 +139,18 @@ pytest ajoutés sont découverts par la CI existante ; la CI distante n’a pas
 
 ## Vérifications et limites
 
-Les résultats exacts courants sont enregistrés dans `DELIVERY.json`.
+La passe courante conserve ses preuves de recette et de couverture séparément
+de la livraison antérieure. Les comptages ci-dessous sont historiques ; ils
+ne constituent pas les mesures globales de la version en cours.
+
+La recette actuelle a exécuté le scénario de rotation avec le démon BIND EL8
+non privilégié et vérifié les trois modes `0640`, les cinq archives et la
+suppression de la plus ancienne. Le validateur d’unités EL8 a lu `UMask=0027`.
+Les modules Ansible de publication et le handler ont également été exercés,
+avec une frontière de commande systemd doublée, pour le redémarrage et
+l’idempotence. Ces contrôles ne qualifient pas un démarrage système réel.
+
+### Recettes historiquement consignées
 
 La recette locale de cette livraison comprend 489 tests contrôleur sous
 chacun des moteurs Jinja 2.10.3 et 3.0.3, puis 12 workflows de fichiers/SELinux

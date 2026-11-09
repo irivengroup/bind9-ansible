@@ -290,3 +290,21 @@ def test_unchanged_shared_native_style_data_remains_readable(lab):
     lab.put('/etc/named.conf', CONF + 'zone "alias.test" { type master; file "zones/example.test.zone"; };\n')
     preview = lab.execute([mixed()[0]])
     assert preview['would_change']
+
+
+def test_secondary_authority_creation_checks_soa_without_creating_slave_runtime_data(lab):
+    operations = [dict(resource='zone', action='create', name='new.test', kind='authoritative')]
+    previewer = lab.batch(operations)
+    previewer.context['primary'] = False
+    with previewer.lease():
+        preview = previewer.run()
+    manager = lab.batch(operations, 'apply', preview)
+    manager.context['primary'] = False
+    with manager.lease():
+        result = manager.run()
+    assert result['changed'] and result['status'] == 'committed'
+    zone = M.Configuration(M.SafeFiles(lab.root)).zones['new.test.']
+    assert zone['kind'] == 'slave'
+    assert not (lab.root / 'var/named/slaves/new.test.zone').exists()
+    assert (lab.root / 'var/named/zones/example.test.zone').read_text() == ZONE
+    assert any(call[-2:] == ['new.test.', 'SOA'] for call in lab.calls)

@@ -3,12 +3,21 @@
   ansible.builtin.stat:
     path: "{{ item }}"
     follow: false
+    # Establish inode safety before any content reader can open the file.
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
   loop:
     - /etc/named.conf
     - /etc/named
     - /etc/named/zones
     - /etc/systemd/system/named.service.d
     - /usr/local/sbin
+    # Legacy cleanup uses file(state=absent); reject directories before it can
+    # recursively remove operator data at an old executable's pathname.
+    - /usr/local/sbin/bind-backup.sh
+    - /usr/local/sbin/bind-configtool.sh
+    - /usr/local/sbin/named-transaction
     - /var/named
     - /var/named/zones
     - /var/named/slaves
@@ -35,6 +44,9 @@
   vars:
     bind_managed_file_paths:
       - /etc/named.conf
+      - /usr/local/sbin/bind-backup.sh
+      - /usr/local/sbin/bind-configtool.sh
+      - /usr/local/sbin/named-transaction
       - /var/log/named/default.log
       - /var/log/named/security.log
       - /var/log/named/xfer.log

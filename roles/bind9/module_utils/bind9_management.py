@@ -245,6 +245,17 @@ class Syntax:
     def replace(self, clause, replacement):
         return self.text[:clause.start] + replacement + self.text[clause.end:]
 
+    def selected(self, name, message, block=False):
+        """Select exactly the requested statement, optionally one complete block.
+
+        Managed bodies and scalar settings share this injection boundary. Keep
+        the name check here even when the current caller constructs its prefix.
+        """
+        if (len(self.clauses) != 1 or self.clauses[0].name != name or
+                (block and not self.clauses[0].simple_block())):
+            raise ManagementError(message)
+        return self.clauses[0]
+
 
 class SafeFiles:
     """Read bounded regular files, refusing links and writable/untrusted parents."""
@@ -672,8 +683,8 @@ class Manager:
         self.check = check
         self.action = request.get('action')
         self.resource = request.get('resource')
-        if self.action not in ('create', 'read', 'list', 'update', 'delete') or self.resource not in ('option', 'zone', 'record'):
-            raise ManagementError('Use resource option/zone/record and action create/read/list/update/delete')
+        if self.action not in ('create', 'read', 'list', 'update', 'delete') or self.resource not in ('option', 'zone', 'record', 'acl', 'logging'):
+            raise ManagementError('Use resource option/zone/record/acl/logging and action create/read/list/update/delete')
         allowed = {'action', 'resource', 'name', 'expected_checksum'}
         if self.action == 'list':
             allowed = {'action', 'resource', 'expected_checksum', 'offset', 'limit'}
@@ -682,7 +693,7 @@ class Manager:
             offset, limit = request.get('offset', 0), request.get('limit', 100)
             if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0 or isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
                 raise ManagementError('Listing requires integer offset >= 0 and limit between 1 and 500')
-        elif self.resource == 'option' and self.action in ('create', 'update'):
+        elif self.resource in ('option', 'acl', 'logging') and self.action in ('create', 'update'):
             allowed |= {'value'}
         elif self.resource == 'record':
             allowed |= {'zone', 'type'}
@@ -697,6 +708,10 @@ class Manager:
         name = request.get('name')
         if self.action != 'list' and (not isinstance(name, str) or not name or (self.resource == 'option' and not re.fullmatch('[a-z][a-z0-9-]*', name))):
             raise ManagementError('Supply an explicit name with valid resource syntax')
+        if self.resource == 'acl' and self.action != 'list' and not re.fullmatch('[A-Za-z][A-Za-z0-9_-]{0,62}', name):
+            raise ManagementError('ACL name must be a simple identifier of at most 63 characters')
+        if self.resource == 'logging' and self.action != 'list' and name != 'logging':
+            raise ManagementError('The logging resource uses the singleton name logging')
         if 'purge_data' in request and not isinstance(request['purge_data'], bool):
             raise ManagementError('purge_data must be a YAML boolean')
         self.changes, self.originals = {}, {}
@@ -752,7 +767,16 @@ class Manager:
         offset, limit = self.request.get('offset', 0), self.request.get('limit', 100)
         end = offset + limit
         items, catalog = [], []
-        if self.resource == 'option':
+        if self.resource in ('acl', 'logging'):
+            declarations = self.named_blocks()
+            items = [{'name': name, 'source': source,
+                      'value': self.config.contents[source].decode('utf-8')[clause.tokens[clause.open].end:clause.tokens[-2].start].strip()}
+                     for name, clause, source in declarations]
+            items.sort(key=lambda item: (item['name'], item['source']))
+            total = len(items)
+            items = items[offset:end]
+            catalog = [{'name': item['name'], 'source': item['source']} for item in items]
+        elif self.resource == 'option':
             options = Syntax.one(self.config.configs['/etc/named.conf'].clauses, 'options')
             for clause, source in self.option_declarations(options.children(), '/etc/named.conf'):
                 text = self.config.contents[source].decode('utf-8')
@@ -799,6 +823,10 @@ class Manager:
                     yield item
 
     def read(self):
+        if self.resource in ('acl', 'logging'):
+            clause, source = self.named_block_location()
+            value = self.config.contents[source].decode('utf-8')[clause.tokens[clause.open].end:clause.tokens[-2].start].strip() if clause else None
+            return {'found': clause is not None, 'value': value, 'source': source}
         if self.resource == 'option':
             clause, source = self.option_location(self.request.get('name', ''))
             value = self.config.contents[source].decode('utf-8')[clause.tokens[0].end:clause.tokens[-1].start].strip() if clause else None
@@ -814,7 +842,16 @@ class Manager:
                 result['forwarders'] = []
                 for server in Syntax.one(zone['clause'].children(), 'forwarders').children():
                     header = [token.value for token in server.header]
-                    result['forwarders'].append({'address': header[0], 'port': int(header[2]) if len(header) == 3 and header[1] == 'port' else 53})
+                    # A read must not report a default port after discarding
+                    # unknown tokens. Refuse syntax this workflow cannot model.
+                    if len(header) == 1:
+                        port = 53
+                    elif (len(header) == 3 and header[1] == 'port' and
+                          re.fullmatch('[0-9]{1,5}', header[2]) and 1 <= int(header[2]) <= 65535):
+                        port = int(header[2])
+                    else:
+                        raise ManagementError('Unsupported forwarder declaration; expected an address and optional port 1..65535')
+                    result['forwarders'].append({'address': header[0], 'port': port})
                 marker = '// Bind9-Ansible DNSSEC-PRIVATE ' + domain.rstrip('.')
                 result['dnssec_validate'] = not bool(re.search(r'(?m)^' + re.escape(marker) + r'[ \t]*$', source))
             if zone and zone['kind'] in ('master', 'primary'):
@@ -840,7 +877,9 @@ class Manager:
         return owner, kind
 
     def plan(self):
-        if self.resource == 'option':
+        if self.resource in ('acl', 'logging'):
+            self.named_block()
+        elif self.resource == 'option':
             self.option()
         elif self.resource == 'record':
             zone = self.selected_zone()
@@ -854,6 +893,82 @@ class Manager:
             self.changes[zone['file']] = document.change(self.action, owner, kind, self.request.get('values'), self.request.get('ttl')).encode('utf-8')
         else:
             self.zone()
+
+    def named_blocks(self):
+        """Discover top-level declarations, retaining their include provenance."""
+        result, names = [], set()
+        for source, syntax in self.config.configs.items():
+            for clause in syntax.clauses:
+                if clause.name != self.resource:
+                    continue
+                expected = 2 if self.resource == 'acl' else 1
+                if len(clause.header) != expected or not clause.simple_block():
+                    raise ManagementError('Unsupported named block declaration')
+                name = clause.header[1].value if expected == 2 else 'logging'
+                if name.casefold() in names:
+                    raise ManagementError('Ambiguous named block declarations')
+                names.add(name.casefold())
+                result.append((name, clause, source))
+        return result
+
+    def named_block_location(self):
+        for name, clause, source in self.named_blocks():
+            if name.casefold() == self.request['name'].casefold():
+                return clause, source
+        return None, None
+
+    def named_block(self):
+        """Plan one ACL or the complete logging block through the common commit.
+
+        Includes and additional statements cannot escape the selected block.
+        Runtime-owned ACLs remain coordinated deployment assets. Logging files
+        stay under the directory provisioned and labelled by deploy.
+        """
+        name = self.request['name']
+        protected = {'any', 'none', 'localhost', 'localnets', 'local_loopback',
+            'bind_primary_back_ip', 'bind_secondary_back_ip', 'bind_primary_front_ip',
+            'bind_secondary_front_ip', 'bind_servers_back_ip', 'user_defined_clients',
+            'dns_query_clients', 'dns_recursive_clients'}
+        if self.resource == 'acl' and name.casefold() in protected:
+            raise ManagementError('Deployment-owned or built-in ACL cannot be changed by targeted management')
+        old, source = self.named_block_location()
+        if (self.action == 'create') == (old is not None):
+            raise ManagementError('Block already exists' if old else 'Block does not exist')
+        if old and source != '/etc/named.conf':
+            raise ManagementError('A block in an external/vendor include is not owned by this workflow')
+        replacement = ''
+        if self.action != 'delete':
+            value = self.request.get('value')
+            if not isinstance(value, str) or not value.strip():
+                raise ManagementError('Supply the nonempty BIND block body as value')
+            header = 'acl "' + name + '"' if self.resource == 'acl' else 'logging'
+            replacement = header + ' {\n' + value.strip() + '\n};'
+            parsed = Syntax(replacement)
+            selected = parsed.selected(self.resource, 'Exactly one complete selected block is permitted', block=True)
+            pending = list(selected.children())
+            while pending:
+                clause = pending.pop()
+                if clause.name == 'include':
+                    raise ManagementError('Includes cannot be introduced through a managed block')
+                if self.resource == 'logging' and clause.name == 'file':
+                    path = clause.tokens[1].value
+                    if not re.fullmatch('/var/log/named/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', path):
+                        raise ManagementError('Logging files must be direct children of /var/log/named')
+                    # Do not accept an existing link or special object as a log.
+                    for directory in ('/var', '/var/log', '/var/log/named'):
+                        target = self.root / directory.lstrip('/')
+                        if target.is_symlink() or not target.is_dir():
+                            raise ManagementError('Logging requires the existing deployed log directory')
+                    target = self.root / path.lstrip('/')
+                    if os.path.lexists(str(target)):
+                        info = target.lstat()
+                        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                            raise ManagementError('Unsafe existing logging file')
+                if clause.simple_block():
+                    pending.extend(clause.children())
+        syntax = self.config.configs['/etc/named.conf']
+        text = syntax.replace(old, replacement) if old else syntax.text + '\n' + replacement + '\n'
+        self.changes['/etc/named.conf'] = text.encode('utf-8')
 
     def option_location(self, name):
         """Resolve explicit options through includes before any existence decision."""
@@ -882,8 +997,7 @@ class Manager:
             if not isinstance(value, str) or not value.strip():
                 raise ManagementError('Option value must be a nonempty BIND value without its final semicolon')
             candidate = Syntax(name + ' ' + value + ';')
-            if len(candidate.clauses) != 1 or candidate.clauses[0].name != name:
-                raise ManagementError('One option only; additional statements are forbidden')
+            candidate.selected(name, 'One option only; additional statements are forbidden')
             replacement = name + ' ' + value.strip() + ';'
         if old:
             text = syntax.replace(old, replacement)
@@ -960,7 +1074,8 @@ class Manager:
                 raise ManagementError('dnssec_validate must be a YAML boolean')
             if private and self.dnssec_active(text):
                 syntax = Syntax(text)
-                target = next(c for c in syntax.clauses if c.name == 'zone' and canonical_name(c.header[1].value) == domain)
+                target = Syntax.one([c for c in syntax.clauses
+                                     if c.name == 'zone' and canonical_name(c.header[1].value) == domain], 'zone')
                 text = text[:target.start] + marker + '\n' + text[target.start:]
         self.changes['/etc/named.conf'] = text.encode('utf-8')
         self.delegations(new_zones)
@@ -971,8 +1086,7 @@ class Manager:
             raise ManagementError('Use BIND option names and string values')
         statement = name + ' ' + value.strip() + ';'
         parsed = Syntax(statement)
-        if len(parsed.clauses) != 1:
-            raise ManagementError('One BIND setting per mapping entry')
+        parsed.selected(name, 'One BIND setting per mapping entry')
         syntax = Syntax(text)
         block = syntax.clauses[0]
         old = Syntax.one(block.children(), name, False)
@@ -1071,7 +1185,9 @@ class Manager:
             # A secondary must reject the same masking/nesting as its primary.
             if any(domain != other and (domain.endswith('.' + other) or other.endswith('.' + domain)) for other, zone in zones.items() if zone['kind'] == 'forward'):
                 raise ManagementError('Nested forwarding zones are not supported')
-            if any(a != '.' and (a == domain or a.endswith('.' + domain)) for a in auth):
+            # This domain is forward-only; auth contains exclusively authority
+            # kinds, so equality cannot occur. Descendants still mask data.
+            if any(a != '.' and a.endswith('.' + domain) for a in auth):
                 raise ManagementError('A forward zone cannot mask an authoritative zone')
             ancestors = [a for a in auth if a == '.' or domain.endswith('.' + a)]
             if not ancestors:
@@ -1167,8 +1283,38 @@ class Manager:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 VerifiedIO.create(target, data)
             self.runner(['/usr/sbin/named-checkconf', '-z', '-t', str(stage), '/etc/named.conf'])
+            if self.resource == 'acl' or (self.resource == 'batch' and
+                    any(operation['resource'] == 'acl' for operation in self.operations)):
+                self.validate_acls(stage)
+
+    def validate_acls(self, stage):
+        """Make BIND resolve even unused ACLs in an isolated validation document.
+
+        named-checkconf accepts undefined references inside unused ACLs. Force
+        every final ACL through a synthetic allow-query, using the native BIND
+        semantics for nested/negated ACLs and keys instead of a second parser.
+        This document never becomes the published configuration.
+        """
+        declarations, names = [], []
+        for syntax in self.final_config.configs.values():
+            for clause in syntax.clauses:
+                if clause.name in ('acl', 'key'):
+                    declarations.append(syntax.text[clause.start:clause.end])
+                    if clause.name == 'acl':
+                        names.append(clause.header[1].text + ';')
+        if names:
+            document = '\n'.join(declarations) + '\noptions { directory "/var/named"; allow-query { ' + ' '.join(names) + ' }; };\n'
+            path = '/etc/.bind9-acl-validation.conf'
+            VerifiedIO.create(stage / path.lstrip('/'), document.encode('utf-8'))
+            self.runner(['/usr/sbin/named-checkconf', '-z', '-t', str(stage), path])
 
     def commit(self, revision):
+        # Approval is mandatory even if an extension invalidated planner state.
+        # Capture it before any backup/publication, then compare the complete
+        # live graph against that immutable value after runtime checks.
+        approved = getattr(self, 'candidate_revision', None)
+        if not isinstance(approved, str) or not re.fullmatch('[0-9a-f]{64}', approved):
+            raise ManagementError('Missing or invalid approved candidate revision')
         # Check bytes AND identities captured at observation, not fresh metadata
         # silently adopted after the candidate was approved.
         self.live_state = dict(self.config.contents)
@@ -1238,7 +1384,7 @@ class Manager:
             self.health()
             self.assert_state('A static asset changed during reload/health checks')
             current = Configuration(self.files)
-            if getattr(self, 'candidate_revision', None) and current.revision() != self.candidate_revision:
+            if current.revision() != approved:
                 raise ManagementError('The live static graph differs from the approved batch candidate')
             for name, expected in self.changes.items():
                 actual = self.files.read(name) if self.files.path(name).exists() else None
@@ -1472,7 +1618,8 @@ class Manager:
             untouched = status == 'prepared' and isinstance(entries, dict) and bool(entries)
             if untouched:
                 for name, item in entries.items():
-                    expected = item.get('before') if isinstance(item, dict) else False
+                    # Missing evidence is not an explicit pre-existing absence.
+                    expected = item.get('before', False) if isinstance(item, dict) else False
                     try:
                         target = self.files.path(name)
                         actual = hashlib.sha256(self.files.read(name)).hexdigest() if os.path.lexists(str(target)) else None
@@ -1638,9 +1785,10 @@ class Manager:
                     valid = DnsReply(output).matches(name, kind, serial)
                     if valid:
                         break
-                    if attempt == attempts - 1:
-                        raise ManagementError('Post-reload DNS health or SOA serial did not converge')
-                    time.sleep(2 if attempts == 10 else 1)
+                    if attempt < attempts - 1:
+                        time.sleep(2 if attempts == 10 else 1)
+                else:
+                    raise ManagementError('Post-reload DNS health or SOA serial did not converge')
 
     @staticmethod
     def journal(folder, manifest):
@@ -1750,7 +1898,7 @@ class BatchManager(Manager):
                 if planner.action == 'delete':
                     deleted.add(domain)
             else:
-                identity = ('option', operation['name'])
+                identity = (planner.resource, operation['name'].casefold() if planner.resource == 'acl' else operation['name'])
             if identity in identities:
                 raise ManagementError('A batch cannot target the same resource more than once')
             identities.add(identity)

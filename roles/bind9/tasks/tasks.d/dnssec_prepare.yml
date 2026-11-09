@@ -10,6 +10,9 @@
       ansible.builtin.stat:
         path: '{{ item }}'
         follow: false
+        get_checksum: false
+        get_mime: false
+        get_attributes: false
       loop:
         - /etc/systemd/system/named-private-dnssec.timer
         - /etc/systemd/system/named-private-dnssec.service

@@ -5,9 +5,12 @@ set -Eeuo pipefail
 export LC_ALL=C
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 umask 077
-STATE=/var/lib/Bind9-Ansible
+# Glob inventories count actual entries, including an empty directory as zero.
+shopt -s nullglob
+readonly STATE=/var/lib/Bind9-Ansible
 PENDING=$STATE/front-routes.pending
 WORK=''
+RETIRE_FROM='' RETIRE_TO='' RETIRE_ID=''
 MUTATING=false
 PREPARED=false
 CHANGED_RESULT=false
@@ -37,11 +40,17 @@ network() {
 }
 overlap() { (( $1 <= $4 && $3 <= $2 )); }
 secure_dir() {
+    # Callers supply the fixed state path or an allocation already validated
+    # inside that namespace. Recheck live ancestors and ownership here.
     local path=$1 parent=${1%/*}
-    [[ $path == /* && $path != / && $path != *'/../'* ]] || die 'Invalid private state path'
     [[ -d $parent && ! -L $parent ]] || die "Unsafe state ancestor: $parent"
-    [[ $(stat -c '%u' -- "$parent") == 0 ]] || die "Untrusted state ancestor: $parent"
-    local mode; mode=$(stat -c '%a' -- "$parent"); (( (8#$mode & 0022) == 0 )) || die "Writable state ancestor: $parent"
+    local owner mode metadata
+    owner=$(stat -c '%u' -- "$parent") || die 'State ancestor owner read failed'
+    [[ $owner == 0 ]] || die "Untrusted state ancestor: $parent"
+    mode=$(stat -c '%a' -- "$parent") || die 'State ancestor mode read failed'
+    if [[ ! $mode =~ ^[0-7]{3,4}$ ]] || (( (8#$mode & 0022) != 0 )); then
+        die "Writable state ancestor: $parent"
+    fi
     if [[ ! -e $path && ! -L $path ]]; then
         # Another process may initialize this shared state directory first.
         # Accept only its subsequently validated directory, never repair modes.
@@ -50,11 +59,40 @@ secure_dir() {
             [[ -d $path && ! -L $path ]] || die "Cannot create private directory $path: $creation_error"
         fi
     fi
-    [[ -d $path && ! -L $path && $(stat -c '%u:%a' -- "$path") == 0:700 ]] || die "Unsafe private directory: $path"
+    [[ -d $path && ! -L $path ]] || die "Unsafe private directory: $path"
+    metadata=$(stat -c '%u:%a' -- "$path") || die 'Private state metadata read failed'
+    [[ $metadata == 0:700 ]] || die "Unsafe private directory: $path"
 }
 safe_file() {
-    [[ -f $1 && ! -L $1 && $(stat -c '%u:%a:%h' -- "$1") == 0:600:1 ]] || die "Unsafe journal file: $1"
-    (( $(stat -c '%s' -- "$1") <= 1048576 )) || die "Oversized journal file: $1"
+    local metadata size
+    [[ -f $1 && ! -L $1 ]] || die "Unsafe journal file: $1"
+    metadata=$(stat -c '%u:%a:%h' -- "$1") || die 'Journal metadata read failed'
+    [[ $metadata == 0:600:1 ]] || die "Unsafe journal file: $1"
+    size=$(stat -c '%s' -- "$1") || die 'Journal size read failed'
+    if ! uint "$size" || (( size > 1048576 )); then die "Oversized journal file: $1"; fi
+}
+allocate_temporary() {
+    # Publish REPLY only after ownership is established. In particular, never
+    # arm EXIT cleanup with an untrusted path returned by a successful mktemp.
+    local prefix=$1 kind=$2 path suffix size
+    if [[ $kind == directory ]]; then path=$(mktemp -d "${prefix}XXXXXXXX") || return 1;
+    else path=$(mktemp "${prefix}XXXXXXXX") || return 1; fi
+    [[ $path == "$prefix"* ]] || return 1
+    suffix=${path#"$prefix"}
+    [[ $suffix =~ ^[A-Za-z0-9]{8}$ && ! -L $path ]] || return 1
+    if [[ $kind == directory ]]; then
+        [[ -d $path ]] || return 1
+        secure_dir "$path"
+        # A name seen during expansion invalidates a fresh allocation even if
+        # another actor removes it before a later filesystem existence check.
+        local -a entry=("$path"/* "$path"/.[!.]* "$path"/..?*)
+        (( ${#entry[@]} == 0 )) || return 1
+    else
+        safe_file "$path"
+        size=$(stat -c '%s' -- "$path") || return 1
+        [[ $size == 0 ]] || return 1
+    fi
+    REPLY=$path
 }
 journal_count() (
     # Count entries without findutils or filename-delimited text parsing.
@@ -64,33 +102,45 @@ journal_count() (
 )
 assert_lock() {
     safe_file "$LOCK"
-    [[ $(stat -Lc '%d:%i:%s' /proc/self/fd/9) == $(stat -c '%d:%i:%s' "$LOCK") && $(stat -c '%s' "$LOCK") == 0 ]] || die 'Transient operation lock changed; no further routing writes permitted'
+    local descriptor path size
+    descriptor=$(stat -Lc '%d:%i:%s' /proc/self/fd/9) || die 'Operation descriptor metadata read failed'
+    path=$(stat -c '%d:%i:%s' "$LOCK") || die 'Operation lock metadata read failed'
+    size=$(stat -c '%s' "$LOCK") || die 'Operation lock size read failed'
+    [[ $descriptor == "$path" && $size == 0 ]] || die 'Transient operation lock changed; no further routing writes permitted'
 }
 capture() {
-    local variable=$1; shift
+    # Return through REPLY; callers bind their own variables explicitly rather
+    # than allowing a helper to assign a dynamically named variable.
+    local capture_size capture_no_nul_count capture_full_count capture_value
     # The file-size limit makes excessive output fail, rather than silently truncate.
     if ! (ulimit -f 2048; timeout -k 5 30 "$@") >"$WORK/out" 2>"$WORK/err"; then
         printf 'FRONT command failed: %s\n' "$*" >&2
         head -c 2048 "$WORK/err" >&2
-        return 1
+        die 'Native observation failed; no incomplete result accepted'
     fi
-    (( $(stat -c '%s' "$WORK/out") <= 1048576 )) || die 'Observation exceeds 1 MiB'
-    [[ $(tr -d '\000' <"$WORK/out" | wc -c) == $(wc -c <"$WORK/out") ]] || die 'NUL in native observation'
-    printf -v "$variable" '%s' "$(cat "$WORK/out")"
+    capture_size=$(stat -c '%s' "$WORK/out") || die 'Observation size read failed'
+    if ! uint "$capture_size" || (( capture_size > 1048576 )); then die 'Observation exceeds 1 MiB'; fi
+    capture_no_nul_count=$(tr -d '\000' <"$WORK/out" | wc -c) || die 'Observation byte validation failed'
+    capture_full_count=$(wc -c <"$WORK/out") || die 'Observation byte count failed'
+    [[ $capture_no_nul_count == "$capture_full_count" ]] || die 'NUL in native observation'
+    capture_value=$(cat "$WORK/out") || die 'Observation content read failed'
+    REPLY=$capture_value
 }
 journal_text() {
     # Every current journal file is LF-terminated once by durable()/sha256sum.
     # Bash strips trailing LF/NUL in substitutions: validate bytes first, then
     # require the original size so hidden records cannot disappear on loading.
-    local target=$1 file=$2 data=''
+    local target=$1 file=$2 data='' journal_size
     safe_file "$file"
-    capture data cat -- "$file"
-    [[ $(stat -c '%s' -- "$file") == "$(( ${#data} + 1 ))" ]] || die "Malformed journal text framing: $file"
+    capture cat -- "$file"; data=$REPLY
+    journal_size=$(stat -c '%s' -- "$file") || die 'Journal framing size read failed'
+    [[ $journal_size == "$(( ${#data} + 1 ))" ]] || die "Malformed journal text framing: $file"
     printf -v "$target" '%s' "$data"
 }
 durable() {
     local dest=$1 data=$2 temporary
-    temporary=$(mktemp "$PENDING/.write.XXXXXXXX")
+    allocate_temporary "$PENDING/.write." file || die 'Unsafe journal temporary allocation'
+    temporary=$REPLY
     printf '%s\n' "$data" >"$temporary"
     chmod 0600 "$temporary"
     sync -- "$temporary"
@@ -127,7 +177,7 @@ canonical_profile() {
             (( ${#parts[@]} >= 1 )) || die 'Empty profile route'
             net=${parts[0]}; gw=0.0.0.0 metric=-1 attrs=''
             local offset=1
-            if [[ ${parts[$offset]:-} == *.* && ${parts[$offset]:-} != *=* ]]; then gw=${parts[$offset]}; ((offset+=1)); fi
+            if [[ ${parts[$offset]:-} != *=* && ${parts[$offset]:-} == *.* ]]; then gw=${parts[$offset]}; ((offset+=1)); fi
             if [[ ${parts[$offset]:-} =~ ^-?[0-9]+$ ]]; then metric=${parts[$offset]}; ((offset+=1)); fi
             for field in "${parts[@]:$offset}"; do
                 [[ $field == *=* ]] || die 'Unsupported profile route attribute'
@@ -177,11 +227,13 @@ canonical_kernel() {
         KERNEL+=("$net|$gw|$metric|$dev|$extra")
     done <<< "$text"
 }
-rows() { if (( $# )); then printf '%s\n' "$@" | sort; fi; }
+rows() { if (( $# )); then printf '%s\n' "$@" | sed '/^$/d' | sort; fi; }
 select_front_route_match() {
     # LPM is numeric, not a lexical sort of route strings. Lower metrics break
-    # equal-prefix ties; equally ranked alternatives are not a safe choice.
+    # equal-prefix ties. Native aliases can repeat one connected path with
+    # different local preferred sources; that still identifies one device.
     local row net gw mt dev attrs address best_prefix=-1 best_metric=4294967296 ambiguous=false
+    local chosen_gw chosen_device chosen_attrs
     MATCH_KEY='' MATCH_DEVICE=''
     ip_number "$FRONT"; address=$NUMBER
     for row in "${KERNEL[@]}"; do
@@ -192,7 +244,17 @@ select_front_route_match() {
         if (( PREFIX > best_prefix || (PREFIX == best_prefix && mt < best_metric) )); then
             best_prefix=$PREFIX best_metric=$mt MATCH_KEY=$row MATCH_DEVICE=$dev ambiguous=false
         elif (( PREFIX == best_prefix && mt == best_metric )); then
-            ambiguous=true
+            IFS='|' read -r _ chosen_gw _ chosen_device chosen_attrs <<< "$MATCH_KEY"
+            if [[ $row == "$MATCH_KEY" ]]; then
+                continue
+            elif [[ $dev == "$chosen_device" && $gw == 0.0.0.0 && $chosen_gw == 0.0.0.0 ]] &&
+                    connected_attributes "$attrs" && connected_attributes "$chosen_attrs"; then
+                # Stable selection also tolerates a different kernel row order
+                # between the bounded match and full main-table observations.
+                if [[ $row < $MATCH_KEY ]]; then MATCH_KEY=$row; fi
+            else
+                ambiguous=true
+            fi
         fi
     done
     [[ -n $MATCH_KEY && -n $MATCH_DEVICE ]] || die 'No usable non-loopback routing match for the FRONT address'
@@ -203,11 +265,11 @@ discover_front_table_gateway() {
     # IPv4 routing table supplies its gateway. Profile gateway properties are
     # intentionally not consulted: they may be empty or stale on never-default
     # interfaces. A route's protocol/attributes do not change its next-hop.
-    local row net gw metric dev attrs low high required=false
-    network "$FRONT_NETWORK"; low=$LOW high=$HIGH
+    local row net gw metric dev attrs required=false
     for net in "${CLIENTS[@]}"; do
         network "$net"
-        if (( LOW < low || HIGH > high )); then required=true; break; fi
+        connected_range "$LOW" "$HIGH"
+        if ! $DIRECTLY; then required=true; break; fi
     done
     # Directly connected clients need no inferred next-hop, even when unrelated
     # FRONT destinations legitimately use different routers.
@@ -219,45 +281,77 @@ discover_front_table_gateway() {
         GATEWAY=$gw
     done
 }
+connected_range() {
+    # A secondary /32 can share a device whose primary address supplies the
+    # connected subnet. Never borrow a network from another interface.
+    local low=$1 high=$2 subnet
+    DIRECTLY=false PARTIAL=false
+    for subnet in "${FRONT_CONNECTED[@]}"; do
+        network "$subnet"
+        if (( low >= LOW && high <= HIGH )); then DIRECTLY=true;
+        elif overlap "$low" "$high" "$LOW" "$HIGH"; then PARTIAL=true; fi
+    done
+}
+connected_attributes() {
+    # ip route show normally includes a preferred local source on the native
+    # kernel/link route. Retain every other opaque-attribute refusal.
+    local attrs=$1 source address
+    [[ $attrs != 'proto=kernel;scope=link;' ]] || return 0
+    [[ $attrs =~ ^proto=kernel\;scope=link\;src=([0-9.]+)\;$ ]] || return 1
+    source=${BASH_REMATCH[1]}
+    for address in "${FRONT_SOURCES[@]}"; do
+        [[ $source != "$address" ]] || return 0
+    done
+    return 1
+}
 observe() {
-    capture ADDRESS_TEXT ip -o -4 address show up
-    local _index dev family address rest hits=0 back_hits=0 adm_hits=0 front_network='' back_dev='' adm_dev='' protected_devices='|'
+    capture ip -o -4 address show up; ADDRESS_TEXT=$REPLY
+    local _index dev family address rest hits=0 back_hits=0 adm_hits=0 protected_devices='|'
     ADDRESSES=() PROTECTED=()
+    local -a address_rows=()
     while read -r _index dev family address rest; do
         [[ $family == inet ]] || continue
         dev=${dev%:}; dev=${dev%@*}
         [[ $dev =~ ^[a-zA-Z0-9_.:-]+$ ]] || die 'Unsupported interface name'
         network "$address"
         ADDRESSES+=("${address%/*}")
-        if [[ ${address%/*} == "$FRONT" ]]; then DEVICE=$dev; front_network=$CIDR; ((hits+=1)); fi
-        if [[ ${address%/*} == "$BACK" ]]; then back_dev=$dev; PROTECTED+=("$CIDR"); protected_devices+="$dev|"; ((back_hits+=1)); fi
-        if [[ ${address%/*} == "$ADM" ]]; then adm_dev=$dev; PROTECTED+=("$CIDR"); protected_devices+="$dev|"; ((adm_hits+=1)); fi
+        address_rows+=("$dev|$CIDR|${address%/*}")
+        if [[ ${address%/*} == "$FRONT" ]]; then DEVICE=$dev; ((hits+=1)); fi
+        if [[ ${address%/*} == "$BACK" ]]; then PROTECTED+=("$CIDR"); protected_devices+="$dev|"; ((back_hits+=1)); fi
+        if [[ ${address%/*} == "$ADM" ]]; then PROTECTED+=("$CIDR"); protected_devices+="$dev|"; ((adm_hits+=1)); fi
     done <<< "$ADDRESS_TEXT"
-    (( hits == 1 && back_hits == 1 && adm_hits == 1 )) && [[ -n $back_dev && -n $adm_dev && $protected_devices != *"|$DEVICE|"* ]] || die 'FRONT must be uniquely present/up and distinct from BACK/ADM interfaces'
-    FRONT_NETWORK=$front_network
+    # Each matching device already passed the nonempty strict name parser;
+    # unique address counts establish BACK/ADM presence without rechecking it.
+    (( hits == 1 && back_hits == 1 && adm_hits == 1 )) && [[ $protected_devices != *"|$DEVICE|"* ]] || die 'FRONT must be uniquely present/up and distinct from BACK/ADM interfaces'
+    FRONT_CONNECTED=() FRONT_SOURCES=()
+    local row subnet local_source
+    for row in "${address_rows[@]}"; do
+        IFS='|' read -r dev subnet local_source <<< "$row"
+        if [[ $dev == "$DEVICE" ]]; then FRONT_CONNECTED+=("$subnet"); FRONT_SOURCES+=("$local_source"); fi
+    done
     local address_device=$DEVICE selected_match selected_device
-    capture MATCH_TEXT ip -o -4 route show match "$FRONT"
+    capture ip -o -4 route show match "$FRONT"; MATCH_TEXT=$REPLY
     canonical_kernel "$MATCH_TEXT"
     select_front_route_match
     selected_match=$MATCH_KEY selected_device=$MATCH_DEVICE
     [[ $selected_device == "$address_device" ]] || die 'The best FRONT routing match does not use the interface owning its address'
     DEVICE=$selected_device
     local link=''
-    capture link ip -o link show dev "$DEVICE"
+    capture ip -o link show dev "$DEVICE"; link=$REPLY
     [[ $link != *' master '* ]] || die 'Enslaved FRONT interface is unsupported'
-    capture UUID nmcli -g GENERAL.CON-UUID device show "$DEVICE"
+    capture nmcli -g GENERAL.CON-UUID device show "$DEVICE"; UUID=$REPLY
     [[ $UUID =~ ^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$ ]] || die 'FRONT has no unique active profile UUID'
-    capture PROFILE_TEXT nmcli -g ipv4.routes connection show uuid "$UUID"
-    capture TABLE nmcli -g ipv4.route-table connection show uuid "$UUID"
+    capture nmcli -g ipv4.routes connection show uuid "$UUID"; PROFILE_TEXT=$REPLY
+    capture nmcli -g ipv4.route-table connection show uuid "$UUID"; TABLE=$REPLY
     [[ $TABLE == 0 || $TABLE == 254 ]] || die 'Only main-table FRONT profiles are supported'
-    capture RULES_TEXT ip -o -4 rule show
+    capture ip -o -4 rule show; RULES_TEXT=$REPLY
     [[ $RULES_TEXT =~ ^0:[[:space:]]+from[[:space:]]all[[:space:]]lookup[[:space:]]local$'\n'32766:[[:space:]]+from[[:space:]]all[[:space:]]lookup[[:space:]]main$'\n'32767:[[:space:]]+from[[:space:]]all[[:space:]]lookup[[:space:]]default$ ]] || die 'Custom IPv4 policy rules require operator-managed routing'
-    capture KERNEL_TEXT ip -o -4 route show table main
+    capture ip -o -4 route show table main; KERNEL_TEXT=$REPLY
     [[ -n $KERNEL_TEXT ]] || die 'Empty main routing table observation; no route plan accepted'
     canonical_profile "$PROFILE_TEXT"
     canonical_kernel "$KERNEL_TEXT"
     select_front_route_match
-    [[ $MATCH_KEY == "$selected_match" && $MATCH_DEVICE == "$selected_device" ]] || die 'FRONT routing match disagrees with the complete main table; no routes changed'
+    [[ $MATCH_DEVICE == "$selected_device" && $MATCH_KEY == "$selected_match" ]] || die 'FRONT routing match disagrees with the complete main table; no routes changed'
     GATEWAY=''
     discover_front_table_gateway
     if [[ -n $GATEWAY ]]; then
@@ -266,11 +360,17 @@ observe() {
         for address in "${ADDRESSES[@]}"; do
             [[ $GATEWAY != "$address" ]] || die 'FRONT gateway is a local server address'
         done
-        network "$FRONT_NETWORK"; local low=$LOW high=$HIGH
-        ip_number "$GATEWAY"
-        (( (PREFIX >= 31 && NUMBER >= low && NUMBER <= high) || (NUMBER > low && NUMBER < high) )) && [[ $GATEWAY != "$FRONT" ]] || die 'FRONT gateway is not a usable on-link address'
+        local usable=false gateway_number
+        ip_number "$GATEWAY"; gateway_number=$NUMBER
+        for subnet in "${FRONT_CONNECTED[@]}"; do
+            network "$subnet"
+            if (( (PREFIX >= 31 && gateway_number >= LOW && gateway_number <= HIGH) ||
+                  (gateway_number > LOW && gateway_number < HIGH) )); then usable=true; break; fi
+        done
+        $usable || die 'FRONT gateway is not a usable on-link address'
     fi
-    OBSERVED_PROFILE=$(rows "${PROFILE[@]}"); OBSERVED_KERNEL=$(rows "${KERNEL[@]}")
+    OBSERVED_PROFILE=$(rows "${PROFILE[@]}") || die 'Persistent route normalization failed'
+    OBSERVED_KERNEL=$(rows "${KERNEL[@]}") || die 'Kernel route normalization failed'
 }
 coverage() {
     # Any overlapping specific route must agree. Broader/default routes on other
@@ -286,36 +386,48 @@ coverage() {
         acceptable=false
         [[ -z $attrs ]] && acceptable=true
         if [[ $store == R && $attrs == 'proto=static;' ]]; then acceptable=true; fi
-        if [[ $store == R && $gw == 0.0.0.0 && $attrs == 'proto=kernel;scope=link;' ]]; then acceptable=true; fi
+        if [[ $store == R && $device == "$DEVICE" && $gw == 0.0.0.0 ]] && connected_attributes "$attrs"; then acceptable=true; fi
         if overlap "$lo" "$hi" "$tlo" "$thi"; then
-            if (( lo == tlo && hi == thi )); then ((EXACT_COUNT+=1)); fi
             if (( prefix >= tp )); then
                 if [[ $device != "$DEVICE" || $gw != "$GATEWAY" ]] || ! $acceptable; then
                     die "Conflicting $store route for $target; existing route preserved"
                 fi
+                # An exact canonical range has the same prefix, so the conflict
+                # checks above already establish its device, next-hop and attrs.
+                if (( lo == tlo && hi == thi )); then
+                    ((EXACT_COUNT+=1)); COVERED=true; COVER_METRIC=$mt
+                fi
             fi
-            if (( lo == tlo && hi == thi )) && [[ $device == "$DEVICE" && $gw == "$GATEWAY" ]] && $acceptable; then COVERED=true; COVER_METRIC=$mt; fi
         fi
     done
     (( EXACT_COUNT <= 1 )) || die "Duplicate $store routes for $target"
 }
 collapse_clients() {
-    # Preserve the previous CIDR-union contract without a Python filter. Merge
+    # Build candidate CIDRs without a Python filter. Merge
     # only adjacent aligned siblings; never widen the authorized destinations.
     local client row lo hi prefix last previous size sorted
     local -a input=() lows=() highs=() prefixes=()
+    local -A authorized_rows=()
     WANTED=()
     for client in "${CLIENTS[@]}"; do
         network "$client"
         [[ $client != */* || $client == "$CIDR" ]] || die "Noncanonical client subnet: $client"
         (( PREFIX > 0 )) || die 'A client default route is forbidden'
-        input+=("$LOW|$HIGH|$PREFIX")
+        row="$LOW|$HIGH|$PREFIX"
+        input+=("$row"); authorized_rows[$row]=0
     done
     # Process substitutions hide producer failures from the consuming loop.
     # Capture and check the complete bounded input before planning any write.
     sorted=$(if (( ${#input[@]} )); then printf '%s\n' "${input[@]}" | sort -t'|' -k1,1n -k3,3n; fi) || die 'Client normalization failed; no routes changed'
-    while IFS='|' read -r lo hi prefix; do
-        [[ -n $lo ]] || continue
+    while IFS= read -r row; do
+        [[ -n $row ]] || continue
+        # Sorting cannot grant permission to route a different subnet. Validate
+        # the complete numeric row before using it as a key or in arithmetic.
+        # Repeated and out-of-order authorized rows remain supported.
+        [[ $row =~ ^[0-9]+\|[0-9]+\|[0-9]+$ && ${authorized_rows[$row]+yes} ]] ||
+            die "Noncanonical client subnet: unauthorized normalization row $row"
+        authorized_rows[$row]=1
+        IFS='|' read -r lo hi prefix <<< "$row"
         last=$(( ${#lows[@]}-1 ))
         if (( last >= 0 && lo >= lows[last] && hi <= highs[last] )); then continue; fi
         lows+=("$lo"); highs+=("$hi"); prefixes+=("$prefix")
@@ -327,6 +439,9 @@ collapse_clients() {
             else break; fi
         done
     done <<< "$sorted"
+    for row in "${input[@]}"; do
+        [[ ${authorized_rows[$row]} == 1 ]] || die 'Client normalization omitted an authorized subnet; no routes changed'
+    done
     for ((last=0;last<${#lows[@]};last++)); do
         ip_string "${lows[$last]}"; WANTED+=("$REPLY/${prefixes[$last]}")
     done
@@ -343,15 +458,15 @@ build_plan() {
     for client in "${WANTED[@]}"; do
         network "$client"; target=$CIDR lo=$LOW hi=$HIGH prefix=$PREFIX
         (( prefix > 0 )) || die 'A client default route is forbidden'
-        [[ $client != */* || $client == "$target" ]] || die "Noncanonical client subnet: $client"
+        # collapse_clients accepts only authorized canonical rows and merges
+        # aligned siblings. Repeated rows can still produce duplicate targets.
         [[ ! ${destinations[$target]+yes} ]] || continue
         destinations[$target]=1
         for range in "${PROTECTED[@]}"; do
             network "$range"; overlap "$lo" "$hi" "$LOW" "$HIGH" && die "Client $target overlaps protected network $range"
         done
-        network "$FRONT_NETWORK"; directly=false
-        if (( lo >= LOW && hi <= HIGH )); then directly=true; fi
-        if ! $directly && overlap "$lo" "$hi" "$LOW" "$HIGH"; then die "Client $target partially overlaps the FRONT connected network"; fi
+        connected_range "$lo" "$hi"; directly=$DIRECTLY
+        if ! $directly && $PARTIAL; then die "Client $target partially overlaps a FRONT connected network"; fi
         if $directly; then
             local gateway_saved=$GATEWAY; GATEWAY=0.0.0.0
             coverage R "$target" "$lo" "$hi" "$prefix"
@@ -368,14 +483,24 @@ build_plan() {
         if [[ $route_metric == -1 ]]; then
             if $COVERED; then route_metric=$COVER_METRIC;
             else
-                capture route_metric nmcli -g ipv4.route-metric connection show uuid "$UUID"
+                capture nmcli -g ipv4.route-metric connection show uuid "$UUID"; route_metric=$REPLY
                 if [[ $route_metric == -1 ]]; then
-                    local row net gw mt dev attrs inherited=''
+                    local row net gw mt dev attrs candidate_subnet front_number inherited=''
+                    ip_number "$FRONT"; front_number=$NUMBER
                     for row in "${KERNEL[@]}"; do
                         IFS='|' read -r net gw mt dev attrs <<< "$row"
-                        if [[ $net == "$FRONT_NETWORK" && $gw == 0.0.0.0 && $dev == "$DEVICE" ]]; then
-                            [[ -z $inherited || $inherited == "$mt" ]] || die 'Ambiguous effective FRONT metric'
-                            inherited=$mt
+                        if [[ $gw == 0.0.0.0 && $dev == "$DEVICE" ]]; then
+                            # A secondary /32 has no separate connected main
+                            # route. Its profile can inherit the primary link
+                            # metric, but contradictory link metrics are refused.
+                            for candidate_subnet in "${FRONT_CONNECTED[@]}"; do
+                                if [[ $net == "$candidate_subnet" ]]; then
+                                    network "$candidate_subnet"
+                                    (( front_number >= LOW && front_number <= HIGH )) || continue
+                                    [[ -z $inherited || $inherited == "$mt" ]] || die 'Ambiguous effective FRONT metric'
+                                    inherited=$mt
+                                fi
+                            done
                         fi
                     done
                     route_metric=$inherited
@@ -383,7 +508,7 @@ build_plan() {
                 uint "$route_metric" || die 'No effective metric could be observed on the active FRONT profile/device'
             fi
         fi
-        if $COVERED && $profile_covered && [[ $COVER_METRIC != "$route_metric" ]]; then die "Persistent and runtime metrics disagree for $target; existing routes preserved"; fi
+        if $profile_covered && $COVERED && [[ $COVER_METRIC != "$route_metric" ]]; then die "Persistent and runtime metrics disagree for $target; existing routes preserved"; fi
         $profile_covered || OPS+=("P|$target|$GATEWAY|$METRIC")
         $COVERED || OPS+=("R|$target|$GATEWAY|$route_metric")
     done
@@ -401,7 +526,7 @@ normalize_ssh() {
 }
 check_path() {
     local probe=$1 via=$2 result
-    capture result ip -4 route get "$probe" from "$FRONT"
+    capture ip -4 route get "$probe" from "$FRONT"; result=$REPLY
     [[ " $result " == *" dev $DEVICE "* ]] || die "Wrong FRONT return device for $probe"
     if $via; then [[ " $result " == *" via $GATEWAY "* ]] || die "Wrong FRONT gateway for $probe";
     else [[ " $result " != *' via '* ]] || die "Unexpected gateway for directly connected client $probe"; fi
@@ -416,7 +541,9 @@ verify() {
     done
     observe
     [[ $UUID == "$BASE_UUID" && $DEVICE == "$BASE_DEVICE" && $ADDRESS_TEXT == "$BASE_ADDRESSES" && $RULES_TEXT == "$BASE_RULES" ]] || die 'FRONT profile, addresses or rules changed during operation'
-    [[ $(printf '%s\n' "$expected_p" | sed '/^$/d' | sort) == "$OBSERVED_PROFILE" && $(printf '%s\n' "$expected_r" | sed '/^$/d' | sort) == "$OBSERVED_KERNEL" ]] || die 'Routing stores differ from the additive plan; preserve the journal'
+    expected_p=$(rows "$expected_p") || die 'Expected persistent route normalization failed'
+    expected_r=$(rows "$expected_r") || die 'Expected kernel route normalization failed'
+    [[ $expected_p == "$OBSERVED_PROFILE" && $expected_r == "$OBSERVED_KERNEL" ]] || die 'Routing stores differ from the additive plan; preserve the journal'
     # A predecessor journal may have taken its gateway from a profile property
     # while its baseline table had no via route. After removing its last owned
     # route, exact restoration of BOTH stores proves rollback completion; the
@@ -428,20 +555,32 @@ verify() {
     for client in "${CLIENTS[@]}"; do
         network "$client"; lo=$LOW hi=$HIGH prefix=$PREFIX
         ip_string "$(( prefix < 31 ? lo+1 : lo ))"; local probe=$REPLY
-        network "$FRONT_NETWORK"
-        if (( lo >= LOW && hi <= HIGH )); then check_path "$probe" false; else check_path "$probe" true; fi
+        connected_range "$lo" "$hi"
+        if $DIRECTLY; then check_path "$probe" false; else check_path "$probe" true; fi
     done
 }
 prepare() {
+    local sorted_clients completed
+    # Count the glob directly, without a subshell/stdout parser. Every matching
+    # object counts, including a dangling symlink; completed evidence is kept.
+    local completed_entries=("$STATE"/.front-routes.retired.*)
+    completed=${#completed_entries[@]}
+    if (( completed >= 4096 )); then
+        die 'Archive completed FRONT journals before opening another transaction (limit 4096)'
+    fi
+    sorted_clients=$(rows "${CLIENTS[@]}") || die 'Client journal normalization failed'
     mkdir -m 0700 "$PENDING"
     TOKEN=$(cat /proc/sys/kernel/random/uuid)
+    # Establish the same identity required by load_journal before publishing
+    # metadata or mutating routes; a successful producer can still be invalid.
+    [[ $TOKEN =~ ^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$ ]] || die 'Invalid native transaction nonce; no route write attempted'
     durable meta "$TOKEN|$UUID|$DEVICE|$GATEWAY|$FRONT|$BACK|$ADM|$METRIC"
     durable operations "$(printf '%s\n' "${OPS[@]}")"
     durable profile "$OBSERVED_PROFILE"
     durable kernel "$OBSERVED_KERNEL"
     durable addresses "$ADDRESS_TEXT"
     durable rules "$RULES_TEXT"
-    durable clients "$(rows "${CLIENTS[@]}")"
+    durable clients "$sorted_clients"
     (cd "$PENDING"; sha256sum meta operations profile kernel addresses rules clients >checksums)
     sync -- "$PENDING/checksums" "$PENDING"
     durable progress '0 done'
@@ -470,9 +609,13 @@ load_journal() {
     TOKEN=$token
     ip_number "$FRONT"; ip_number "$BACK"; ip_number "$ADM"; ip_number "$BASE_GATEWAY"
     if ! uint "$METRIC" || (( METRIC == 0 )); then die 'Invalid journal metric'; fi
+    # A here-string gives mapfile one entry even for an empty string. Require
+    # actual evidence before counting the independently bounded lists.
+    [[ -n $operation_records ]] || die 'Invalid operation journal size'
+    [[ -n $client_records ]] || die 'Invalid journal client count'
     mapfile -t OPS <<< "$operation_records"; mapfile -t CLIENTS <<< "$client_records"
-    (( ${#OPS[@]} >= 1 && ${#OPS[@]} <= 1024 )) || die 'Invalid operation journal size'
-    (( ${#CLIENTS[@]} >= 1 && ${#CLIENTS[@]} <= 512 )) || die 'Invalid journal client count'
+    (( ${#OPS[@]} <= 1024 )) || die 'Invalid operation journal size'
+    (( ${#CLIENTS[@]} <= 512 )) || die 'Invalid journal client count'
     # Rebuild the same exact CIDR union as planning, including aggregated
     # siblings. An operation outside that union has no recorded ownership.
     collapse_clients
@@ -496,15 +639,73 @@ load_journal() {
     read -r PROGRESS PHASE <<< "$progress_record"
     if ! uint "$PROGRESS" || (( PROGRESS > ${#OPS[@]} )); then die 'Malformed journal progress'; fi
 }
+restore_retirement() {
+    # A rename can have taken effect even when its command fails or is
+    # interrupted. Restore the complete inode, never recreate individual files
+    # and never overwrite an object that appeared at the original pathname.
+    local current original
+    # Both callers require an armed retirement. An absent identity cannot
+    # silently report successful compensation; the identity checks below fail.
+    if [[ -d $RETIRE_FROM && ! -L $RETIRE_FROM ]]; then
+        original=$(stat -c '%d:%i' -- "$RETIRE_FROM") || return 1
+        [[ $original == "$RETIRE_ID" ]] || return 1
+        PENDING=$RETIRE_FROM
+        # The empty reservation was released before rename. Its inode number
+        # can already belong to a new foreign directory: never use that stale
+        # identity to delete anything at the destination during compensation.
+        if [[ -e $RETIRE_TO || -L $RETIRE_TO ]]; then
+            printf 'FRONT retirement destination retained for inspection: %s.\n' "$RETIRE_TO" >&2
+        fi
+    else
+        [[ ! -e $RETIRE_FROM && ! -L $RETIRE_FROM && -d $RETIRE_TO && ! -L $RETIRE_TO ]] || return 1
+        current=$(stat -c '%d:%i' -- "$RETIRE_TO") || return 1
+        [[ $current == "$RETIRE_ID" ]] || return 1
+        mv -T -n -- "$RETIRE_TO" "$RETIRE_FROM" || return 1
+        [[ -d $RETIRE_FROM && ! -L $RETIRE_FROM && ! -e $RETIRE_TO && ! -L $RETIRE_TO ]] || return 1
+        original=$(stat -c '%d:%i' -- "$RETIRE_FROM") || return 1
+        [[ $original == "$RETIRE_ID" ]] || return 1
+        PENDING=$RETIRE_FROM
+    fi
+    sync -- "$STATE" || return 1
+    RETIRE_FROM='' RETIRE_TO='' RETIRE_ID=''
+}
 remove_journal() {
-    # Never recursively delete a journal directory: unexpected evidence stays.
-    local file
+    # Unlinking nine files could destroy recovery metadata before a later
+    # failure. Retire the whole verified directory atomically, retaining every
+    # file as private evidence; completion never depends on deleting that data.
+    local file retirement original_id empty_id observed failure='Journal retirement rename failed'
     assert_lock
     for file in meta operations profile kernel addresses rules clients checksums progress; do safe_file "$PENDING/$file"; done
     [[ $(journal_count) == 9 ]] || die 'Unexpected journal entry prevents cleanup'
-    for file in meta operations profile kernel addresses rules clients checksums progress; do rm -- "$PENDING/$file"; done
-    rmdir -- "$PENDING"
-    sync -- "$STATE"
+    allocate_temporary "$STATE/.front-routes.retired.$TOKEN." directory || die 'Unsafe journal retirement allocation'
+    retirement=$REPLY
+    original_id=$(stat -c '%d:%i' -- "$PENDING") || die 'Journal retirement identity read failed'
+    empty_id=$(stat -c '%d:%i' -- "$retirement") || die 'Retirement directory identity read failed'
+    [[ $original_id =~ ^[0-9]+:[0-9]+$ && $empty_id =~ ^[0-9]+:[0-9]+$ && $original_id != "$empty_id" ]] || die 'Invalid journal retirement identities'
+    RETIRE_FROM=$PENDING RETIRE_TO=$retirement RETIRE_ID=$original_id
+    # Release only the owned empty reservation, then use no-clobber rename.
+    # An object appearing in that interval must never be overwritten.
+    if rmdir -- "$retirement" && mv -T -n -- "$PENDING" "$retirement"; then
+        failure='Journal retirement identity changed'
+        if [[ ! -e $RETIRE_FROM && ! -L $RETIRE_FROM && -d $retirement && ! -L $retirement ]]; then
+            failure='Journal retirement identity read failed'
+            if observed=$(stat -c '%d:%i' -- "$retirement"); then
+                failure='Journal retirement identity changed'
+                if [[ $observed == "$original_id" ]]; then
+                    PENDING=$retirement
+                    failure='Journal retirement sync failed'
+                    if sync -- "$STATE"; then
+                        RETIRE_FROM='' RETIRE_TO='' RETIRE_ID=''
+                        return 0
+                    fi
+                fi
+            fi
+        fi
+    fi
+    if ! restore_retirement; then
+        printf 'FRONT retirement compensation requires inspection: %s and %s; complete journal data was not unlinked.\n' "$RETIRE_FROM" "$RETIRE_TO" >&2
+    fi
+    die "$failure"
 }
 mutate() {
     local operation=$1 inverse=$2 store net gw mt
@@ -512,11 +713,13 @@ mutate() {
     assert_lock
     if [[ $store == P ]]; then
         local direction=+ipv4.routes; $inverse && direction=-ipv4.routes
-        local text="$net $gw"; [[ $mt == -1 ]] || text+=" $mt"
-        capture discard nmcli --wait 10 connection modify uuid "$BASE_UUID" "$direction" "$text"
+        # Planning and journal loading both require an explicit positive P
+        # metric; the former automatic (-1) formatter is no longer reachable.
+        local text="$net $gw $mt"
+        capture nmcli --wait 10 connection modify uuid "$BASE_UUID" "$direction" "$text"
     else
         local verb=add; $inverse && verb=del
-        capture discard ip -4 route "$verb" "$net" via "$gw" dev "$BASE_DEVICE" metric "$mt" table main
+        capture ip -4 route "$verb" "$net" via "$gw" dev "$BASE_DEVICE" metric "$mt" table main
     fi
 }
 rollback() {
@@ -537,10 +740,20 @@ rollback() {
         if [[ $store == P ]]; then expected_p+=$'\n'"$net|$gw|$mt|"; else expected_r+=$'\n'"$net|$gw|$mt|$BASE_DEVICE|"; fi
     done
     observe
-    [[ $UUID == "$BASE_UUID" && $DEVICE == "$BASE_DEVICE" && $GATEWAY == "$BASE_GATEWAY" && $ADDRESS_TEXT == "$BASE_ADDRESSES" && $RULES_TEXT == "$BASE_RULES" ]] || die 'Live FRONT context changed; rollback refused'
-    current_p=$(printf '%s\n' "$expected_p" | sed '/^$/d' | sort)
-    current_r=$(printf '%s\n' "$expected_r" | sed '/^$/d' | sort)
+    [[ $UUID == "$BASE_UUID" && $DEVICE == "$BASE_DEVICE" &&
+       ( $GATEWAY == "$BASE_GATEWAY" || -z $GATEWAY ) &&
+       $ADDRESS_TEXT == "$BASE_ADDRESSES" && $RULES_TEXT == "$BASE_RULES" ]] || die 'Live FRONT context changed; rollback refused'
+    current_p=$(rows "$expected_p") || die 'Rollback persistent route normalization failed'
+    current_r=$(rows "$expected_r") || die 'Rollback kernel route normalization failed'
     [[ $OBSERVED_PROFILE == "$current_p" && $OBSERVED_KERNEL == "$current_r" ]] || die 'Routes changed externally; no rollback deletion attempted'
+    if [[ -z $GATEWAY ]]; then
+        # A predecessor could acknowledge only its persistent add before the
+        # first runtime add. Exact stores above establish its unchanged kernel
+        # baseline. Without an observed gateway, authorize only inverse P writes.
+        for op in "${owned[@]}"; do
+            [[ $op == P'|'* ]] || die 'Unavailable FRONT gateway cannot authorize runtime rollback; journal preserved'
+        done
+    fi
     # An intent with unchanged stores proves that command did not add a route.
     # If a crash left an unacknowledged addition, the comparison above refuses
     # to guess its ownership and keeps the journal for operator inspection.
@@ -559,7 +772,12 @@ rollback() {
 # shellcheck disable=SC2329
 finish() {
     local rc=$1 recovery_rc=0
-    trap - EXIT ERR INT TERM
+    trap - EXIT ERR HUP INT TERM
+    if [[ -n $RETIRE_ID ]]; then
+        if ! restore_retirement; then
+            printf 'FRONT interrupted retirement requires inspection: %s and %s.\n' "$RETIRE_FROM" "$RETIRE_TO" >&2
+        fi
+    fi
     if (( rc == 2 )) && ! $CHANGED_RESULT; then
         printf 'FRONT internal command failed with rc 2; refusing a success result.\n' >&2
         rc=1
@@ -569,8 +787,16 @@ finish() {
         # Recovery checks must exit on their own failure without aborting cleanup
         # of the caller's temporary work directory.
         set +e
-        (set -Eeuo pipefail; rollback)
-        recovery_rc=$?
+        # Successful work cleanup may precede a refused journal commit. Create
+        # a new private observation workspace before guarded recovery reads it.
+        if [[ -z $WORK ]]; then
+            if allocate_temporary "$STATE/.route-work." directory; then WORK=$REPLY;
+            else recovery_rc=$?; fi
+        fi
+        if (( recovery_rc == 0 )); then
+            (set -Eeuo pipefail; rollback)
+            recovery_rc=$?
+        fi
         if (( recovery_rc != 0 )); then printf 'FRONT recovery required: %s\n' "$PENDING" >&2; fi
     elif (( rc != 0 && rc != 2 )) && $PREPARED; then
         # No native write was attempted. This invocation may remove its own
@@ -591,18 +817,25 @@ finish() {
 cleanup() {
     [[ -n $WORK ]] || return 0
     rm -f -- "$WORK/out" "$WORK/err" || return 1
-    rmdir -- "$WORK"
+    rmdir -- "$WORK" || return 1
+    WORK=''
 }
 
 # Cover prerequisite/lock acquisition failures as well as routing mutations.
 trap 'finish $?' EXIT
+# An SSH hangup must enter guarded recovery rather than abandon owned routes.
+trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 while (( $# )); do
     case $1 in
         --action) ACTION=${2:?}; shift 2;; --front-ip) FRONT=${2:?}; shift 2;;
         --back-ip) BACK=${2:?}; shift 2;; --adm-ip) ADM=${2:?}; shift 2;;
-        --peer-back-ip) PEERS+=("${2:?}"); shift 2;; --ssh-peer) SSH_PEER=${2-}; shift 2;;
+        --peer-back-ip) PEERS+=("${2:?}"); shift 2;;
+        --ssh-peer)
+            # An explicitly empty peer remains supported for local invocations.
+            (( $# >= 2 )) || die 'Missing value for --ssh-peer'
+            SSH_PEER=$2; shift 2;;
         --client) CLIENTS+=("${2:?}"); shift 2;; --metric) METRIC=${2:?}; shift 2;;
         --token) TOKEN=${2:?}; shift 2;; --defer-commit) DEFER=true; shift;;
         --help) printf 'Actions: plan, apply, verify, commit, rollback, recover. IPv4 routes only; rc 0 unchanged, 2 changed/planned, 1 refused.\n'; exit 0;;
@@ -611,6 +844,7 @@ while (( $# )); do
 done
 [[ $EUID == 0 ]] || die 'Root is required'
 [[ $ACTION =~ ^(plan|apply|verify|commit|rollback|recover)$ ]] || die 'Unsupported route action'
+readonly ACTION
 for required in ip nmcli flock timeout stat mktemp sync sha256sum sort tr wc sed cat head chmod mv rm rmdir mkdir; do
     command -v "$required" >/dev/null 2>&1 || die "Missing native prerequisite: $required; install the corresponding EL8 system package before retrying"
 done
@@ -619,20 +853,28 @@ secure_dir "$STATE"
 LOCK=$STATE/operations.flock
 if [[ ! -e $LOCK && ! -L $LOCK ]]; then (set -o noclobber; : >"$LOCK") 2>/dev/null || true; fi
 safe_file "$LOCK"
-[[ $(stat -c '%s' -- "$LOCK") == 0 ]] || die 'Operation lock file must remain empty'
+lock_size=$(stat -c '%s' -- "$LOCK") || die 'Operation lock size read failed'
+[[ $lock_size == 0 ]] || die 'Operation lock file must remain empty'
 exec 9<>"$LOCK"
-[[ $(stat -Lc '%d:%i' /proc/self/fd/9) == $(stat -c '%d:%i' "$LOCK") ]] || die 'Operation lock changed while opening'
+lock_descriptor=$(stat -Lc '%d:%i' /proc/self/fd/9) || die 'Operation descriptor identity read failed'
+lock_path=$(stat -c '%d:%i' "$LOCK") || die 'Operation lock identity read failed'
+[[ $lock_descriptor == "$lock_path" ]] || die 'Operation lock changed while opening'
 flock -n 9 || die 'Another route or management operation is active; retry after it ends'
-WORK=$(mktemp -d "$STATE/.route-work.XXXXXXXX")
+allocate_temporary "$STATE/.route-work." directory || die 'Unsafe observation temporary allocation'
+WORK=$REPLY
 if [[ $ACTION == recover || $ACTION == rollback || $ACTION == commit || $ACTION == verify ]]; then
     [[ -d $PENDING && ! -L $PENDING ]] || die 'No pending FRONT transaction to recover'
     [[ $ACTION == recover || -n $TOKEN ]] || die 'Transaction token is required'
     load_journal
-    case $ACTION in
-        recover|rollback) rollback; changed_result;;
-        verify) verify; exit 0;;
-        commit) (( PROGRESS == ${#OPS[@]} )) && [[ $PHASE == 'done' ]] || die 'Incomplete transaction cannot commit'; verify; remove_journal; printf 'FRONT transaction committed.\n'; exit 0;;
-    esac
+    if [[ $ACTION == recover || $ACTION == rollback ]]; then
+        rollback; changed_result
+    elif [[ $ACTION == verify ]]; then
+        verify; exit 0
+    else
+        # The immutable recovery action can only be commit at this point.
+        (( PROGRESS == ${#OPS[@]} )) && [[ $PHASE == 'done' ]] || die 'Incomplete transaction cannot commit'
+        verify; remove_journal; printf 'FRONT transaction committed.\n'; exit 0
+    fi
 fi
 [[ ! -e $PENDING && ! -L $PENDING ]] || die 'Pending FRONT journal: inspect it, then use routes-recover; it is not a stale process lock'
 ip_number "$FRONT"; ip_number "$BACK"; ip_number "$ADM"
@@ -650,7 +892,7 @@ BASE_PROFILE=$OBSERVED_PROFILE BASE_KERNEL=$OBSERVED_KERNEL BASE_UUID=$UUID BASE
 prepare
 # Re-observe before publication; a new profile or unrelated route is a conflict.
 observe
-[[ $OBSERVED_PROFILE == "$BASE_PROFILE" && $OBSERVED_KERNEL == "$BASE_KERNEL" && $UUID == "$BASE_UUID" && $DEVICE == "$BASE_DEVICE" && $GATEWAY == "$BASE_GATEWAY" && $ADDRESS_TEXT == "$BASE_ADDRESSES" && $RULES_TEXT == "$BASE_RULES" ]] || die 'Routing changed after planning; no native write attempted'
+[[ $DEVICE == "$BASE_DEVICE" && $OBSERVED_PROFILE == "$BASE_PROFILE" && $OBSERVED_KERNEL == "$BASE_KERNEL" && $UUID == "$BASE_UUID" && $GATEWAY == "$BASE_GATEWAY" && $ADDRESS_TEXT == "$BASE_ADDRESSES" && $RULES_TEXT == "$BASE_RULES" ]] || die 'Routing changed after planning; no native write attempted'
 MUTATING=true
 count=0
 for op in "${OPS[@]}"; do
@@ -660,6 +902,10 @@ for op in "${OPS[@]}"; do
     durable progress "$count done"
 done
 verify
-MUTATING=false
+# Keep the complete journal and guarded rollback armed until temporary cleanup
+# and publication finish. A cleanup failure must never leave successful writes
+# behind while returning a failed addition to Ansible.
+cleanup || die 'Temporary work cleanup failed before FRONT transaction commit'
 if $DEFER; then printf 'transaction: %s\n' "$TOKEN"; else remove_journal; fi
+MUTATING=false
 changed_result

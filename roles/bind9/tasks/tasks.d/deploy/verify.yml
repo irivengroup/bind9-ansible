@@ -12,11 +12,13 @@
   no_log: true
 
 - name: Ensure no wildcard zone transfers are enabled
-  # BIND prints ACLs on several lines and quotes built-ins such as "any".
+  # Keep brace levels and quoted names distinct: an entry after a nested ACL
+  # still belongs to its outer allow-transfer list. Native syntax validation
+  # above remains responsible for the complete BIND grammar.
   ansible.builtin.assert:
     that:
       - >-
-        bind_checked_configuration.stdout is not search('allow-transfer\s*[{]\s*(?:any|"any")\s*;')
+        bind_checked_configuration.stdout | transfer_acl_has_no_direct_wildcard
   no_log: true
 
 - name: Verify each generated authoritative zone independently

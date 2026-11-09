@@ -48,7 +48,7 @@ class DnssecRuntimeSandbox:
         block.append({'name':'Inject a post-configuration failure','ansible.builtin.fail':{'msg':'Controlled runtime rollback test'},'when':'test_rollback'})
         names={'Inspect managed renewal units before DNS restoration','Pause private DNSSEC renewal during restoration',
                'Stop named before restoring files and journals','Restore managed runtime files from before the failed deployment',
-               'Restart restored BIND configuration','Resume previously active private DNSSEC renewal'}
+               'Restore pre-deployment BIND service state','Resume previously active private DNSSEC renewal'}
         rescue=[t for t in deployment['rescue'] if t['name'] in names]
         rescue.append({'ansible.builtin.set_fact':{'test_runtime_restored':True}})
         snapshot=next(t for t in main if t.get('ansible.builtin.import_tasks')=='{{ role_path }}/tasks/tasks.d/runtime_snapshot.yml')

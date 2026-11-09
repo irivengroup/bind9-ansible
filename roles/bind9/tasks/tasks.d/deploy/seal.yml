@@ -10,33 +10,59 @@
          (bind_deployment_config_checked | default(false) | bool))
     fail_msg: 'Deployment health checks were not completed, or explicit hibernation syntax checks are missing; no deployment seal will be written.'
 
-- name: Collect checksums of successfully deployed configuration and primary zones
+- name: Inspect metadata before opening any file for the deployment seal
   ansible.builtin.stat:
     path: '{{ item }}'
     follow: false
-    checksum_algorithm: sha256
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
   loop: >-
     {{ ['/etc/named.conf'] if bind_deployment_seal_kind | default('deploy') == 'hibernate' else
        ['/etc/named.conf', '/var/named/empty-root.zone'] +
        ((bind_managed_zones | map(attribute='domain') | map('regex_replace', '^(.*)$', '/var/named/zones/\1.zone') | list)
         if bind_primary_group in group_names else []) }}
-  register: bind_deployment_seal_files
+  register: bind_deployment_seal_metadata
 
-- name: Require real files before recording deployment success
+- name: Require bounded private files before reading deployment contents
   ansible.builtin.assert:
     that:
-      - item.stat.exists and (item.stat.isreg | default(false))
-      - not (item.stat.islnk | default(false)) and item.stat.nlink == 1
+      - not (item.stat.islnk | default(false))
+      - item.stat.exists and (item.stat.isreg | default(false)) and item.stat.nlink == 1
+      - item.stat.uid == 0 and item.stat.mode is match('^0[0-7][0145][0145]$')
+      - item.stat.size > 0 and item.stat.size <= 16777216
+    fail_msg: 'Cannot record successful deployment: managed files must be singly linked, root-owned, not group/world writable, nonempty and at most 16 MiB.'
+  loop: '{{ bind_deployment_seal_metadata.results }}'
+
+- name: Collect SHA256 checksums only after the complete metadata guard
+  ansible.builtin.stat:
+    path: '{{ item.item }}'
+    follow: false
+    get_checksum: true
+    get_mime: false
+    get_attributes: false
+    checksum_algorithm: sha256
+  loop: '{{ bind_deployment_seal_metadata.results }}'
+  register: bind_deployment_seal_checked
+
+- name: Require unchanged guarded files before recording deployment success
+  # The deployment lease serializes role operations. Check identity as well:
+  # an independent privileged change must not silently qualify a different file.
+  ansible.builtin.assert:
+    that:
       - item.stat.checksum is defined
-    fail_msg: 'Cannot record successful deployment: a managed file is missing or unsafe.'
-  loop: '{{ bind_deployment_seal_files.results }}'
+      - >-
+        item.stat | dict2items | rejectattr('key', 'equalto', 'atime') | rejectattr('key', 'equalto', 'checksum') | list | items2dict ==
+        item.item.stat | dict2items | rejectattr('key', 'equalto', 'atime') | list | items2dict
+    fail_msg: 'A managed file changed while collecting deployment checksums; no deployment seal was created.'
+  loop: '{{ bind_deployment_seal_checked.results }}'
 
 - name: Build a checksum manifest without configuration contents or secrets
   ansible.builtin.set_fact:
     bind_deployment_seal_payload: >-
       {%- set ns = namespace(files={}) -%}
-      {%- for entry in bind_deployment_seal_files.results -%}
-      {%- set ns.files = ns.files | combine({entry.item: entry.stat.checksum}) -%}
+      {%- for entry in bind_deployment_seal_checked.results -%}
+      {%- set ns.files = ns.files | combine({entry.item.item: entry.stat.checksum}) -%}
       {%- endfor -%}
       {{ {'schema': 1, 'host': inventory_hostname, 'kind': bind_deployment_seal_kind | default('deploy'), 'files': ns.files} }}
 

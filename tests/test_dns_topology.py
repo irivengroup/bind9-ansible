@@ -104,6 +104,29 @@ class TestDnsTopology:
         expected = front == '192.0.2.1' and back == '10.0.0.1' and key == 'site-transfer'
         assert FilterModule.identity(front, back, key, algorithm, secret) is expected
 
+    def test_equivalent_front_and_back_spellings_are_not_distinct_addresses(self, monkeypatch, legacy_ipaddress):
+        """EL8's native parser accepts padded zero octets; identity must agree."""
+        monkeypatch.setattr(module, 'ipaddress', legacy_ipaddress)
+        assert FilterModule.identity('192.0.2.1', '192.000.2.1', 'site-transfer', 'hmac-sha256',
+                                     base64.b64encode(bytes(range(32))).decode('ascii')) is False
+
+    def test_forwarder_rejects_aliases_even_when_the_dependency_normalizes_them(self, monkeypatch, legacy_ipaddress):
+        """Exercise the required guard with the actual pinned legacy parser."""
+        padded = '192.000.2.53'
+        assert str(legacy_ipaddress.ip_address(padded)) == '192.0.2.53'
+        monkeypatch.setattr(module, 'ipaddress', legacy_ipaddress)
+        assert FilterModule.forwarder({'address': padded}) is False
+
+    def test_nonzero_base64_pad_bits_cannot_alias_a_service_identity_secret(self):
+        payload = bytes(range(32))
+        canonical = base64.b64encode(payload).decode('ascii')
+        alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+        alias = canonical[:-2] + alphabet[alphabet.index(canonical[-2]) + 1] + '='
+        assert alias != canonical and base64.b64decode(alias, validate=True) == payload
+        identity = ('192.0.2.1', '10.0.0.1', 'site-transfer', 'hmac-sha256')
+        assert FilterModule.identity(*(identity + (canonical,))) is True
+        assert FilterModule.identity(*(identity + (alias,))) is False
+
     @pytest.mark.parametrize('client,expected', [('192.0.2.0/24', True), ('192.0.2.3', True),
                                                 ('0.0.0.0/0', False), ('::/0', False),
                                                 ('224.0.0.0/4', False), ('bad', False),

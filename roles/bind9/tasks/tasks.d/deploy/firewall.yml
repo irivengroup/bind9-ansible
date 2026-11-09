@@ -81,7 +81,7 @@
   ansible.builtin.assert:
     that:
       - >-
-        (item.rc == 0 and item.stdout | trim is match('^[a-zA-Z0-9_-]+$') and item.stdout | trim != 'no zone') or
+        (item.rc == 0 and item.stdout | trim is match('^[a-zA-Z0-9_-]+$')) or
         (item.rc == 2 and (item.stdout | trim == 'no zone' or item.stderr | trim == 'no zone'))
     fail_msg: 'Invalid firewalld interface-zone output; DNS service changes were not started.'
   loop: '{{ bind_dns_firewall_interface_zones.results }}'

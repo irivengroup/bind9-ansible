@@ -124,6 +124,13 @@ class TestDeployedConfigurationConditions:
         ('zone "example.test" {\nallow-transfer {\nany;\n};\n};', False),
         ('allow-transfer { !{ !bind_secondary_back_ip; any; }; key "transfer"; };', True),
         ('allow-transfer { 192.0.2.2; };', True),
+        ('allow-transfer { 192.0.2.2; any; };', False),
+        ('allow-transfer { key "site-transfer";\n "any"; };', False),
+        ('allow-transfer { !192.0.2.2; any; };', False),
+        ('allow-transfer { 192.0.2.2; key "any"; };', True),
+        ('allow-transfer { !{ !bind_secondary_back_ip; any; }; any; };', False),
+        ('allow-transfer { !{ !{ 192.0.2.2; }; any; }; "any"; };', False),
+        ('allow-transfer { { 192.0.2.2; }; any; };', False),
     ])
     def test_direct_wildcard_transfer_is_rejected_in_canonical_output(self, configuration, safe):
         tasks = yaml.safe_load((ROOT / 'roles/bind9/tasks/tasks.d/deploy/verify.yml').read_text())

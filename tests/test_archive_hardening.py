@@ -15,7 +15,13 @@ pytestmark = pytest.mark.skipif(not shutil.which('bash'), reason='Requires Bash 
 
 
 class ArchiveVerifier:
-    """Invoke the real verifier function; no extraction or system mutation occurs."""
+    """Use the public catalog CLI in the canonical lab, isolated helpers elsewhere.
+
+    The same hostile archives and assertions exercise both paths. Only the
+    public CLI can supply source-bound program coverage; extracted functions
+    remain useful unit tests on controllers without disposable root isolation.
+    Neither path extracts an archive or changes a live BIND configuration.
+    """
 
     def __init__(self, folder):
         self.path = folder / 'named-config-20261016T120000Z-12345678.tar.gz'
@@ -35,6 +41,15 @@ class ArchiveVerifier:
         self.path.with_suffix('.gz.sha256').chmod(0o600)
 
     def run(self):
+        if os.environ.get('BIND9_CANONICAL_BASH_LAB') == '1':
+            # Explicit canonical selection must fail rather than silently fall
+            # back to an extracted function when isolation is unavailable.
+            if (os.name != 'posix' or os.geteuid() != 0 or not Path('/.dockerenv').is_file() or
+                    {path.name for path in Path('/sys/class/net').iterdir()} != {'lo'}):
+                raise RuntimeError('Canonical archive CLI requires a disconnected disposable Linux root')
+            return subprocess.run(['bash', str(SCRIPT), 'list', '--root', str(self.path.parent)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  universal_newlines=True, timeout=10)
         text = SCRIPT.read_text()
         function = 'verify() {\n' + text.split('verify() {\n', 1)[1].split('\n}\n', 1)[0] + '\n}\n'
         # Shared safety functions are loaded from their marked production block.
@@ -58,6 +73,7 @@ class TestArchiveRejection:
         ['var/named/data.zone', 'var/named/data.zone'],
         ['var/named/back\\slash.zone'],
         ['var/named/line\nbreak.zone'],
+        ['var//named/zone'],
     ])
     def test_ambiguous_names_are_rejected(self, tmp_path, names):
         verifier = ArchiveVerifier(tmp_path)

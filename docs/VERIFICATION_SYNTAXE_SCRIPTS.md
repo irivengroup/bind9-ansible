@@ -83,13 +83,20 @@ docker run --rm --network none --read-only \
 python -m pytest -q tests/test_configtool_axfr.py tests/test_archive_hardening.py tests/test_backup_retention.py tests/test_language_separation.py
 ```
 
-Dans un laboratoire jetable Linux root avec namespaces de montage autorisés :
+Après construction de l'image QA décrite dans la CI, dans un conteneur neuf sans réseau et avec les chemins BIND absents :
 
 ```bash
-sudo --preserve-env=PATH BIND_TEST_REQUIRE_MOUNT_NS=1 "$(command -v python)" -m pytest -q tests/test_configtool_workflows.py
+mkdir -m 0700 /tmp/bind9-archive-evidence
+docker run --rm --network none \
+  -e BIND9_NATIVE_STATE_LAB=1 \
+  --mount "type=bind,src=$PWD,dst=/src,readonly" \
+  --mount "type=bind,src=/tmp/bind9-archive-evidence,dst=/evidence" \
+  bind9-private-qa:current python -m pytest -q -p no:cacheprovider \
+  tests/test_configtool_workflows.py tests/test_native_archive_cli.py \
+  --junitxml=/evidence/archive-workflows.xml
 ```
 
-La CI conserve les autres workflows et seuils. Le [README](../README.md#validation) décrit la préparation des binaires/fichiers natifs et les commandes d’intégration DNS, routes et management. Ne pas lancer les suites qui manipulent les chemins système sous root sur un serveur de production.
+La CI complète exécute ces scénarios et conserve les cinq seuils. Ils partagent une seule fixture et ne nécessitent plus de lanceur Bash dans un espace de montage intermédiaire ; cette exécution directe permet l'attribution des observations au script public. Les étapes de compatibilité Ansible restent distinctes. Le [README](../README.md#validation) décrit la préparation des binaires/fichiers natifs et les commandes d'intégration DNS, routes et management. Ne pas lancer les suites qui manipulent les chemins système sous root sur un serveur de production.
 
 Pour les routes, utiliser la nouvelle copie du projet sur le contrôleur : `bind-front-routes.sh` est transmis par `ansible.builtin.script` à chaque opération, sans installation permanente de ce fichier dans `/usr/local/sbin`. Contrôler d’abord le plan du tag `routes` avec `--check`.
 

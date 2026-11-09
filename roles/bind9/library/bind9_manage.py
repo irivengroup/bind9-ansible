@@ -14,6 +14,8 @@ short_description: Execute one revision-checked static BIND maintenance operatio
 description:
   - Preserve unrelated configuration and manual changes using concrete spans.
   - Validate a complete isolated candidate before guarded publication and reload.
+  - Manage option, zone, record, acl and logging resources individually or in a batch.
+  - ACL and logging values contain the BIND block body; logging uses name logging.
 options:
   request:
     description: One CRUD request or an ordered batch; writes require revision checksums and batches require a plan checksum.

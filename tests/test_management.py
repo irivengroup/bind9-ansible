@@ -177,6 +177,10 @@ def test_forward_zone_crud_updates_only_required_cuts(lab):
     assert 'forward.test. IN NS bind-forwarder-1.forward.test.' in root
     assert 'bind-forwarder-1.forward.test. IN A 10.10.0.53' in root
     assert lab.manager('zone', 'read', 'forward.test').run()['forwarders'] == [{'address': '10.10.0.53', 'port': 53}]
+    updated = lab.write('zone', 'update', 'forward.test', forwarders=[{'address': '10.10.0.54'}])
+    assert updated['serials'] == {'.': '9'}
+    root = (lab.root / 'var/named/empty-root.zone').read_text()
+    assert ' IN A 10.10.0.54' in root and ' IN A 10.10.0.53' not in root
     lab.write('zone', 'update', 'forward.test', forwarders=[{'address': '2001:db8::53', 'port': 5353}])
     assert lab.manager('zone', 'read', 'forward.test').run()['forwarders'][0]['port'] == 5353
     root = (lab.root / 'var/named/empty-root.zone').read_text()
@@ -192,13 +196,24 @@ def test_forwarder_loops_and_invalid_endpoints_refused(lab, address, port):
         lab.write('zone', 'create', 'forward.test', kind='forward', forwarders=[dict(address=address, port=port)])
 
 
-def test_forward_delegation_manual_conflict_is_preserved(lab):
+@pytest.mark.parametrize('action,state', [('update', 'changed'), ('delete', 'changed'), ('delete', 'missing')])
+def test_forward_delegation_manual_conflict_is_preserved(lab, action, state):
     lab.write('zone', 'create', 'forward.test', kind='forward', forwarders=[{'address': '10.10.0.53'}])
     path = lab.root / 'var/named/empty-root.zone'
-    path.write_text(path.read_text().replace('10.10.0.53', '10.10.0.54'))
-    with pytest.raises(M.ManagementError, match='manually|conflicts'):
-        lab.write('zone', 'update', 'forward.test', forwarders=[{'address': '10.10.0.55'}])
-    assert '10.10.0.54' in path.read_text()
+    if state == 'changed':
+        path.write_text(path.read_text().replace('10.10.0.53', '10.10.0.54'))
+    else:
+        path.write_text(M.ZoneDocument(path.read_text(), '.').change(
+            'delete', 'bind-forwarder-1.forward.test.', 'A', None))
+    operator_data = path.read_bytes()
+    config = (lab.root / 'etc/named.conf').read_bytes()
+    lab.calls.clear()
+    with pytest.raises(M.ManagementError, match='manually|conflicts|missing'):
+        fields = {'forwarders': [{'address': '10.10.0.55'}]} if action == 'update' else {}
+        lab.write('zone', action, 'forward.test', **fields)
+    assert path.read_bytes() == operator_data
+    assert (lab.root / 'etc/named.conf').read_bytes() == config
+    assert not lab.calls
 
 
 @pytest.mark.parametrize('name', ['.', 'localhost', 'sub.localhost', '127.in-addr.arpa', 'arpa', '*.test', '_service.test'])
@@ -224,6 +239,20 @@ def test_explicit_purge_deletes_only_target_zone_data(lab):
     assert not (lab.root / 'var/named/zones/example.test.zone').exists()
     assert (lab.root / 'var/named/empty-root.zone').exists()
     assert 'var/named/zones/example.test.zone' in ''.join(result['paths'])
+
+
+def test_removing_an_authority_rehomes_its_forwarding_cut_to_the_remaining_parent(lab):
+    lab.write('zone', 'create', 'corp.example.test', kind='forward',
+              forwarders=[{'address': '198.51.100.53'}])
+    retained = (lab.root / 'var/named/zones/example.test.zone').read_bytes()
+    result = lab.write('zone', 'delete', 'example.test')
+    assert result['changed'] and result['serials'] == {'.': '8'}
+    assert not lab.manager('zone', 'read', 'example.test').run()['found']
+    assert lab.manager('zone', 'read', 'corp.example.test').run()['found']
+    assert (lab.root / 'var/named/zones/example.test.zone').read_bytes() == retained
+    root = (lab.root / 'var/named/empty-root.zone').read_text()
+    assert 'corp.example.test. IN NS bind-forwarder-1.corp.example.test.' in root
+    assert 'bind-forwarder-1.corp.example.test. IN A 198.51.100.53' in root
 
 
 def test_check_mode_validates_candidate_without_runtime_or_backup(lab):

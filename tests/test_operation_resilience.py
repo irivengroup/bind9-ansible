@@ -255,6 +255,22 @@ def test_legacy_journals_are_reconciled_only_when_no_publication_occurred(tmp_pa
     assert (tmp_path / 'etc/named.conf').read_bytes() == before
 
 
+@pytest.mark.parametrize('entry', [None, {}, {'after': 'f' * 64}, {'before': 0},
+    {'before': True}, {'before': ''}, {'before': 'g' * 64}])
+def test_incomplete_legacy_prestate_cannot_authorize_another_write(tmp_path, entry):
+    """An absent file proves no publication only with an explicit prior state."""
+    lab = Lab(tmp_path)
+    evidence = InterruptedTransaction(lab)
+    evidence.pointer.unlink()
+    evidence.manifest.write_text(json.dumps({'schema': 1, 'status': 'prepared',
+        'files': {'/var/named/zones/not-yet-created.zone': entry}}))
+    before = evidence.manifest.read_bytes()
+    with pytest.raises(M.ManagementError, match='Unresolved legacy'):
+        lab.manager().recovery_guard(writing=True)
+    assert evidence.manifest.read_bytes() == before
+    assert not lab.calls
+
+
 @pytest.mark.parametrize('raw', [b'null', b'[]', b'"string"', b'\xff', b'{"schema":1,"schema":2}'])
 def test_private_json_state_must_be_complete_utf8_mapping(tmp_path, raw):
     path = tmp_path / 'state.json'
@@ -308,10 +324,9 @@ def test_route_helper_and_management_share_one_live_process_lock(tmp_path):
     from test_native_front_routes import NativeRouteLab
     folder = tmp_path / 'native'
     folder.mkdir(mode=0o700)
-    route = NativeRouteLab(folder)
     manager = M.Manager({'resource': 'option', 'action': 'read', 'name': 'minimal-responses'}, {}, root=tmp_path)
     state = manager.private_directory('/var/lib/Bind9-Ansible')
-    route.script.write_text(route.script.read_text().replace('STATE=' + str(route.state), 'STATE=' + str(state)))
+    route = NativeRouteLab(folder, state=state)
     with manager.operation():
         result = route.run('plan')
         assert result.returncode == 1 and 'Another route or management operation' in result.stdout

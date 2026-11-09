@@ -1,7 +1,9 @@
 """A failed private write must never become the persistent authentication key."""
+import errno
 import importlib.util
 import os
 from pathlib import Path
+import tempfile
 
 import pytest
 
@@ -102,3 +104,66 @@ def test_foreign_or_shared_objects_are_refused_in_direct_calls(tmp_path, store_m
     with pytest.raises(ValueError, match='Unsafe TSIG'):
         store_module.provision(key)
     assert not list(parent.glob('.bind-tsig-*.tmp'))
+
+
+def test_metadata_read_failure_closes_the_private_descriptor(tmp_path, store_module, monkeypatch):
+    """An I/O error after a real open must not leak the owned file descriptor."""
+    tmp_path.chmod(0o700)
+    key = tmp_path / 'site.key'
+    original = b'unchanged synthetic fixture\n'
+    key.write_bytes(original)
+    key.chmod(0o600)
+    identity = key.stat()
+    parent = os.open(str(tmp_path), os.O_RDONLY | os.O_DIRECTORY)
+    real_fstat = os.fstat
+    opened = []
+
+    def fail_metadata(descriptor):
+        opened.append(descriptor)
+        raise OSError(errno.EIO, 'metadata read failed')
+
+    try:
+        with monkeypatch.context() as isolated:
+            isolated.setattr(store_module.os, 'fstat', fail_metadata)
+            with pytest.raises(OSError, match='metadata read failed'):
+                store_module.TsigSecretStore.checked_open(parent, key.name, os.O_RDONLY)
+        assert len(opened) == 1
+        try:
+            real_fstat(opened[0])
+        except OSError as error:
+            assert error.errno == errno.EBADF
+        else:
+            pytest.fail('TSIG metadata failure leaked the private file descriptor')
+        assert key.read_bytes() == original
+    finally:
+        # Reproducing the old leak must not leak into later tests. Close only
+        # the descriptor still identifying this test-owned file, never a reuse.
+        for descriptor in opened:
+            try:
+                current = real_fstat(descriptor)
+            except OSError as error:
+                if error.errno != errno.EBADF:
+                    raise
+            else:
+                assert (current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino)
+                os.close(descriptor)
+        os.close(parent)
+
+
+@pytest.mark.skipif(not hasattr(os, 'seteuid') or os.geteuid() != 0,
+                    reason='Requires an isolated root process to exercise a real foreign identity')
+def test_root_owned_terminal_parent_is_refused_for_an_unprivileged_generator(store_module):
+    """Trusted root ancestors do not authorize a root-owned terminal store."""
+    with tempfile.TemporaryDirectory(prefix='bind9-tsig-foreign-parent-') as directory:
+        parent = Path(directory)
+        parent.chmod(0o755)
+        store = store_module.TsigSecretStore(parent / 'site.key')
+        original_euid = os.geteuid()
+        try:
+            os.seteuid(65534)
+            with pytest.raises(ValueError, match='TSIG parent must be owned by the current user'):
+                store.provision()
+        finally:
+            os.seteuid(original_euid)
+        assert list(parent.iterdir()) == []
+        assert parent.stat().st_uid == original_euid

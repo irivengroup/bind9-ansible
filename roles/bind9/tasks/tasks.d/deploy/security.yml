@@ -1,17 +1,11 @@
 ---
 - name: Ensure administrative commands directory is available in login PATH
   ansible.builtin.copy:
+    src: bind9-sbin-path.sh
     dest: /etc/profile.d/bind9-sbin-path.sh
     owner: root
     group: root
     mode: '0644'
-    content: |
-      # Bind9-Ansible: append only when /usr/local/sbin is absent from PATH.
-      case ":${PATH:-}:" in
-        *:/usr/local/sbin:*) ;;
-        *) PATH="${PATH:+${PATH}:}/usr/local/sbin"; export PATH ;;
-      esac
-
 - name: Read persistent SELinux file context rules for BIND logging
   ansible.builtin.command:
     argv: [semanage, fcontext, -l]
@@ -60,7 +54,15 @@
   ansible.builtin.assert:
     that:
       - bind_named_log_labels.stdout_lines | length == 4
-      - bind_named_log_labels.stdout_lines | select('search', ':named_log_t:') | list | length == 4
+      # A matching type elsewhere in a line cannot establish the file's type.
+      - >-
+        bind_named_log_labels.stdout_lines |
+        select('match', '^[^ \t:]+:[^ \t:]+:named_log_t:[^ \t]+[ \t]+/var/log/named(/(default|security|xfer)[.]log)?$') |
+        list | length == 4
+      # Require each requested path once; repeated or unrelated rows are unsafe.
+      - >-
+        (bind_named_log_labels.stdout_lines | map('regex_replace', '^[^ \t]+[ \t]+', '') | sort | list) ==
+        ['/var/log/named', '/var/log/named/default.log', '/var/log/named/security.log', '/var/log/named/xfer.log']
     fail_msg: 'BIND log directory and files must have the persistent SELinux type named_log_t.'
   when: ansible_selinux is defined and ansible_selinux.status == 'enabled'
 
@@ -72,5 +74,8 @@
 - name: Reject unlabelled canonical configuration containing TSIG
   ansible.builtin.assert:
     that:
-      - "'unlabeled_t' not in bind_selinux_context.stdout"
+      - bind_selinux_context.stdout_lines | length == 1
+      - >-
+        bind_selinux_context.stdout_lines[0] is
+        match('^[^ \t:]+:[^ \t:]+:named_conf_t:[^ \t]+[ \t]+/etc/named[.]conf$')
   when: ansible_selinux is defined and ansible_selinux.status == 'enabled'

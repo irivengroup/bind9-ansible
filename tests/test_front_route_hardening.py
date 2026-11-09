@@ -51,6 +51,6 @@ class TestStrictFrontRoutes:
         assert result.returncode == 1, result.stdout
         assert lab.data == before and journal.is_dir()
 
-    @pytest.mark.parametrize('peer', ['2001:db8::ffff:1', '2001:db8::ffff:203.0.113.8', '::ffff:0:203.0.113.8'])
+    @pytest.mark.parametrize('peer', ['2001:db8::ffff:1', '2001:db8::ffff:203.0.113.8', '::ffff:0:203.0.113.8', '::ffff:0:0:abcd'])
     def test_native_ipv6_ssh_is_not_mistaken_for_ipv4_mapped_ssh(self, peer):
         assert plan(ssh=peer)['runtime_additions'] == ['203.0.113.0/24 198.51.100.1 100']

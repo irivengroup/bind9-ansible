@@ -53,7 +53,8 @@ class BackupContainerIntegration(TestConfigtoolWorkflows):
                     failures.append({'name': name, 'cause': str(error)})
                 else:
                     completed.append(name)
-        assert len(completed) + len(failures) == 9
+        # Keep every historical body and include the new rollback regressions.
+        assert len(completed) + len(failures) == 16
         print(json.dumps({'existing_workflow_assertions_executed': completed,
                           'failures': failures,
                           'isolation': 'disposable standard container root; no nested mounts',

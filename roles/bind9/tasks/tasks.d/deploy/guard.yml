@@ -39,6 +39,9 @@
   ansible.builtin.stat:
     path: '{{ item }}'
     follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
   loop:
     - /var/lib/Bind9-Ansible
     - /var/lib/Bind9-Ansible/.deployment.lock
@@ -82,6 +85,9 @@
   ansible.builtin.stat:
     path: /var/lib/Bind9-Ansible/.operation.lock
     follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
   register: bind_deployment_owned_lease
   when: not ansible_check_mode and (bind_deployment_lease_required | bool)
 
@@ -91,6 +97,9 @@
   ansible.builtin.stat:
     path: /var/lib/Bind9-Ansible/.deployment.lock
     follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
   register: bind_deployment_seal_after_acquire
   when: not ansible_check_mode
 

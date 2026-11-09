@@ -36,9 +36,8 @@
   delegate_to: "{{ inventory_hostname }}"
   register: bind_primary_soa
   changed_when: false
-  # Keep AA token matching free of Jinja's backspace escape (see health.yml).
+  # Before its serial is known, require the same complete, case-insensitive SOA
+  # grammar as replication health. None skips only the serial equality check.
   failed_when: >-
     bind_primary_soa.rc != 0 or
-    not (bind_primary_soa.stdout | dns_response_complete) or
-    (bind_primary_soa.stdout is not search('(?m)^;; flags: (?:[a-z]+ )*aa(?: |;)')) or
-    (bind_primary_soa.stdout is not search('(?m)^' ~ (item.domain | regex_escape) ~ '\.?\s+\d+\s+IN\s+SOA\s+'))
+    not (bind_primary_soa.stdout | soa_matches(item.domain, none))

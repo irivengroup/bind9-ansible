@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic ip/nmcli contract double for isolated Ansible workflow tests.
+"""Deterministic network and transaction-entropy inputs for isolated tests.
 
 This is a test fixture, never installed by the role. Mutations deliberately emit
 empty stdout to reproduce the former changed_when/from_json failure condition.
@@ -21,8 +21,33 @@ class NativeNetworkDouble:
     def save(self):
         self.path.write_text(json.dumps(self.state))
 
+    def transaction_entropy(self, args):
+        """Supply reproducible, advancing UUID input only at the kernel boundary."""
+        if args != ['/proc/sys/kernel/random/uuid']:
+            raise ValueError('Unexpected transaction entropy arguments')
+        sequence = self.state.get('transaction_sequence', 0)
+        if type(sequence) is not int or not 0 <= sequence < (1 << 48) - 1:
+            raise ValueError('Invalid or exhausted test transaction sequence')
+        sequence += 1
+        self.state['transaction_sequence'] = sequence
+        self.save()
+        return '00000000-0000-4000-8000-{:012x}'.format(sequence)
+
     def ip(self, args):
         if args == ['-o', '-4', 'address', 'show', 'up']:
+            # Test a genuine context change between planning and publication,
+            # without rewriting the role or intercepting its internal guards.
+            drift = self.state.get('front_observation_update')
+            if drift is not None:
+                if (set(drift) != {'read', 'values'} or type(drift['read']) is not int or
+                        not 1 <= drift['read'] <= 10 or not isinstance(drift['values'], dict) or
+                        not set(drift['values']) <= {'uuid', 'profile_text', 'runtime', 'addresses', 'rules_text'}):
+                    raise ValueError('Invalid isolated observation update')
+                reads = self.state.get('front_observation_reads', 0) + 1
+                self.state['front_observation_reads'] = reads
+                if reads == drift['read']:
+                    self.state.update(drift['values'])
+                self.save()
             if 'addresses_text' in self.state:
                 return self.state['addresses_text']
             return '\n'.join(str(index + 1) + ': ' + row['ifname'] + ' inet ' + address['local'] +
@@ -30,8 +55,17 @@ class NativeNetworkDouble:
                              for index, row in enumerate(self.state['addresses'])
                              if row.get('operstate') in ('UP', 'UNKNOWN')
                              for address in row['addr_info'] if address.get('family') == 'inet')
-        if args[:5] == ['-o', 'link', 'show', 'dev', 'front0']:
-            return '1: front0: <BROADCAST,UP> mtu 1500' + (' master bridge0' if 'master' in self.state['addresses'][0] else '')
+        if args[:4] == ['-o', 'link', 'show', 'dev'] and len(args) == 5:
+            matches = [row for row in self.state['addresses'] if row['ifname'] == args[4]]
+            # Address observations may contain several aliases on one device.
+            # They must agree on the link metadata instead of being counted as
+            # separate links merely because each address occupies its own row.
+            metadata = {json.dumps(['master' in row, row.get('master')], sort_keys=True)
+                        for row in matches}
+            if not matches or len(metadata) != 1:
+                raise ValueError('The requested native link must have consistent observed metadata')
+            row = matches[0]
+            return '1: ' + row['ifname'] + ': <BROADCAST,UP> mtu 1500' + (' master bridge0' if 'master' in row else '')
         if args == ['-o', '-4', 'rule', 'show']:
             if 'rules_text' in self.state:
                 return self.state['rules_text']
@@ -82,6 +116,12 @@ class NativeNetworkDouble:
             result = dict(matches[0])
             if self.state.get('bad_lookup'):
                 result['dev'] = 'back0'
+            if 'lookup_gateway' in self.state:
+                gateway = self.state['lookup_gateway']
+                if gateway is None:
+                    result.pop('gateway', None)
+                else:
+                    result['gateway'] = str(ipaddress.IPv4Address(gateway))
             return [result]
         raise ValueError('Unexpected ip contract: ' + repr(args))
 
@@ -129,6 +169,11 @@ class NativeNetworkDouble:
             self.save()
             print('Injected native NetworkManager failure', file=sys.stderr)
             sys.exit(5)
+        if persistent and action == '-ipv4.routes' and self.state.get('fail_persistent_remove_once'):
+            self.state['fail_persistent_remove_once'] = False
+            self.save()
+            print('Injected persistent rollback failure', file=sys.stderr)
+            sys.exit(7)
         network, gateway, metric = text.split()
         if persistent:
             route = {'network': network, 'gateway': gateway, 'metric': int(metric)}
@@ -145,7 +190,10 @@ class NativeNetworkDouble:
 
     def run(self):
         command = Path(sys.argv[0]).name
-        value = self.ip(sys.argv[1:]) if command == 'ip' else self.nmcli(sys.argv[1:])
+        if command == 'cat':
+            value = self.transaction_entropy(sys.argv[1:])
+        else:
+            value = self.ip(sys.argv[1:]) if command == 'ip' else self.nmcli(sys.argv[1:])
         if isinstance(value, str):
             if value:
                 print(value)
@@ -154,4 +202,8 @@ class NativeNetworkDouble:
 
 
 if __name__ == '__main__':
+    # Every other cat call must retain the native utility's exact arguments,
+    # output and status, including deliberate journal/read-failure scenarios.
+    if Path(sys.argv[0]).name == 'cat' and sys.argv[1:] != ['/proc/sys/kernel/random/uuid']:
+        os.execv('/usr/bin/cat', ['/usr/bin/cat'] + sys.argv[1:])
     NativeNetworkDouble().run()

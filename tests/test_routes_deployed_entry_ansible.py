@@ -10,27 +10,34 @@ from test_front_routes_ansible import AnsibleRouteSandbox, BASE, NEW, pytestmark
 pytestmark = inherited_pytestmark
 
 
-@pytest.mark.parametrize('native', [False, True])
-def test_routes_on_a_deployed_host_ignore_a_previous_lease_without_changing_dns(tmp_path, native):
-    """The temporary default bypasses only the shared lease, even with a seal."""
-    sandbox = AnsibleRouteSandbox(tmp_path)
-    sandbox.env['ANSIBLE_JINJA2_NATIVE'] = str(native).lower()
+def public_entry_sandbox(folder):
+    """Share inventory and private lease paths; retain production import/tag flow."""
+    sandbox = AnsibleRouteSandbox(folder)
     sandbox.inventory.write_text(
         '[dns_primary]\nlocalhost ansible_connection=local ansible_host=192.0.2.2 '
         'bind_front_ip=198.51.100.2 bind_back_ip=10.0.0.2\n'
         '[dns_secondary]\nsecondary bind_front_ip=198.51.100.3 bind_back_ip=10.0.0.3\n'
         '[site1]\nlocalhost\nsecondary\n'
         '[site1:vars]\nbind_environment=test\nbind_site_name=site1\n')
-    role = tmp_path / 'roles/bind9'
-    live = tmp_path / 'dns/named.conf'
-    live.parent.mkdir()
-    live.write_bytes(b'// Existing operator configuration must remain byte-identical.\n')
+    role = folder / 'roles/bind9'
     # Keep production role imports, tags and acquisition/release unchanged.
     # Rebase privileged paths only, as in the existing deployment transport lab.
     for relative in ('tasks/main.yml', 'tasks/tasks.d/deploy/guard.yml',
                      'tasks/tasks.d/deploy/lease_release.yml'):
         path = role / relative
         path.write_text(path.read_text().replace('/var/lib/Bind9-Ansible', str(sandbox.state_root)))
+    return sandbox
+
+
+@pytest.mark.parametrize('native', [False, True])
+def test_routes_on_a_deployed_host_ignore_a_previous_lease_without_changing_dns(tmp_path, native):
+    """The temporary default bypasses only the shared lease, even with a seal."""
+    sandbox = public_entry_sandbox(tmp_path)
+    sandbox.env['ANSIBLE_JINJA2_NATIVE'] = str(native).lower()
+    role = tmp_path / 'roles/bind9'
+    live = tmp_path / 'dns/named.conf'
+    live.parent.mkdir()
+    live.write_bytes(b'// Existing operator configuration must remain byte-identical.\n')
     for path in (role / 'tasks').rglob('*.yml'):
         path.write_text(path.read_text().replace('/etc/named.conf', str(live)))
     sandbox.state_root.mkdir(mode=0o700)
@@ -69,3 +76,27 @@ def test_routes_on_a_deployed_host_ignore_a_previous_lease_without_changing_dns(
     forbidden = ('Install canonical named.conf', 'Install authoritative zone files',
                  'Install BIND and SELinux tooling', 'Start or reload BIND')
     assert not any(name in applied.stdout or name in repeated.stdout for name in forbidden)
+
+
+def test_reserved_never_tag_cannot_roll_back_an_interrupted_front_transaction(tmp_path):
+    """The public entry must retain the journal until routes-recover is explicit."""
+    sandbox = public_entry_sandbox(tmp_path)
+    applied = sandbox.run(extra_vars={'bind_front_routes_defer_commit': True})
+    assert applied.returncode == 0, applied.stdout
+    journal = sandbox.state_root / 'front-routes.pending'
+    identity = journal.stat().st_ino
+    before = {path.name: path.read_bytes() for path in journal.iterdir()}
+    network = sandbox.read()
+    assert network['runtime'] == BASE + [NEW] and len(network['persistent']) == 1
+
+    ignored = sandbox.run(tasks_from='main.yml', tags='never')
+    assert ignored.returncode == 0, ignored.stdout
+    assert journal.is_dir(), 'The reserved never selector must not authorize network rollback'
+    assert journal.stat().st_ino == identity
+    assert {path.name: path.read_bytes() for path in journal.iterdir()} == before
+    assert sandbox.read() == network
+
+    recovered = sandbox.run(tasks_from='main.yml', tags='routes-recover')
+    assert recovered.returncode == 0, recovered.stdout
+    assert not journal.exists()
+    assert sandbox.read()['runtime'] == BASE and sandbox.read()['persistent'] == []

@@ -9,6 +9,10 @@
   ansible.builtin.stat:
     path: '{{ item }}'
     follow: false
+    # The following guard bounds and authenticates the inode before slurp.
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
   loop:
     - /etc/systemd/system/named.service.d/bind9-runtime.conf
     - /etc/systemd/system/named.service.d/bind9-dnssec.conf
@@ -21,8 +25,8 @@
 - name: Refuse unsafe managed runtime paths before making changes
   ansible.builtin.assert:
     that:
-      - not item.stat.exists or (item.stat.isreg | default(false))
       - not (item.stat.islnk | default(false))
+      - not item.stat.exists or (item.stat.isreg | default(false))
       - not item.stat.exists or item.stat.uid == 0
       - not item.stat.exists or (item.stat.nlink | default(0) | int) == 1
       - not item.stat.exists or item.stat.mode is match('^0[0-7][0145][0145]$')
@@ -45,6 +49,8 @@
     argv: [systemctl, is-active, named-private-dnssec.timer]
   register: bind_dnssec_timer_active
   changed_when: false
+  # These read-only observations are required to validate a simulation too.
+  check_mode: false
   failed_when: bind_dnssec_timer_active.rc not in [0, 3, 4]
   when: bind_runtime_files_before.results[-1].stat.exists
 
@@ -53,6 +59,7 @@
     argv: [systemctl, is-enabled, named-private-dnssec.timer]
   register: bind_dnssec_timer_enabled_before
   changed_when: false
+  check_mode: false
   failed_when: bind_dnssec_timer_enabled_before.rc not in [0, 1, 3, 4]
   when: bind_runtime_files_before.results[-1].stat.exists
 
@@ -62,6 +69,36 @@
       - bind_dnssec_timer_enabled_before.stdout | trim in ['enabled', 'disabled']
     fail_msg: 'The managed DNSSEC timer has an unexpected enablement state.'
   when: bind_runtime_files_before.results[-1].stat.exists
+
+- name: Record named activity before deployment
+  ansible.builtin.command:
+    argv: [systemctl, is-active, named]
+  register: bind_named_active_before
+  changed_when: false
+  # These observations must run even during a simulation; no unit is changed.
+  check_mode: false
+  failed_when: bind_named_active_before.rc not in [0, 3]
+
+- name: Record named boot enablement before deployment
+  ansible.builtin.command:
+    argv: [systemctl, is-enabled, named]
+  register: bind_named_enabled_before
+  changed_when: false
+  check_mode: false
+  failed_when: bind_named_enabled_before.rc not in [0, 1]
+
+- name: Require a recognizable named service state before changes
+  ansible.builtin.assert:
+    that:
+      - (bind_named_active_before.stdout | trim) == ('active' if bind_named_active_before.rc == 0 else 'inactive')
+      - (bind_named_enabled_before.stdout | trim) == ('enabled' if bind_named_enabled_before.rc == 0 else 'disabled')
+    fail_msg: 'named must have an observable active/inactive and enabled/disabled state; inspect failed, masked or unexpected units before deployment.'
+
+- name: Preserve named service state in the runtime snapshot
+  ansible.builtin.set_fact:
+    bind_named_service_before:
+      active: '{{ bind_named_active_before.rc == 0 }}'
+      enabled: '{{ bind_named_enabled_before.rc == 0 }}'
 
 - name: Mark the runtime snapshot ready for rollback
   ansible.builtin.set_fact:

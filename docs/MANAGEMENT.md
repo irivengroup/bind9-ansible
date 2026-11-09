@@ -14,9 +14,11 @@ Le déploiement reste déclaratif et reconstruit les fichiers gérés à partir 
 - Configuration statique, sans vues, classe IN, répertoire `/var/named`. Fichiers ordinaires root, sans lien ni écriture groupe/autres ; parents protégés. Maximum 16 Mio par fichier et 128 fichiers de configuration inclus ; les zones plus volumineuses exigent un flux adapté. L’unique lien crypto-policy natif RHEL est lu avec contrôle de son emplacement et de sa cible.
 - Le graphe des includes, l’ancre explicite `bindkeys-file` et les fichiers de toutes les zones primaires sont inclus dans la révision SHA-256. Les journaux de zones dynamiques, `update-policy`, `allow-update` actif, `inline-signing`, `DLZ` et les stockages externes entraînent un refus. Les clauses non ciblées restent conservées ; un format non pris en charge provoque un refus, sans conversion silencieuse.
 
-Le module ne gère ni ACL, ni logging, ni clés, ni configuration réseau, ni variables clientes. Les options liées aux chemins, aux contrôles d’accès, aux écoutes, aux sources de transfert et au runtime DNSSEC appartiennent au déploiement et sont protégées : `directory`, `pid-file`, `session-keyfile`, `dnssec-validation`, `bindkeys-file`, `managed-keys-directory`, `allow-transfer`, `allow-update`, `allow-query`, `allow-query-on`, `allow-recursion`, `allow-recursion-on`, `allow-query-cache`, `allow-query-cache-on`, `listen-on`, `listen-on-v6`, `transfer-source`, `notify-source`. Les changer nécessite une modification cohérente des sources puis un redéploiement autorisé après retrait opérateur du sceau, avec recette.
+Le module gère les ACL ajoutées par l’opérateur et le bloc logging complet, en plus des options, zones et records. Il ne gère ni clés, ni configuration réseau, ni variables clientes. Les ACL natives et celles calculées par le déploiement restent protégées : `any`, `none`, `localhost`, `localnets`, `local_loopback`, `bind_primary_back_ip`, `bind_secondary_back_ip`, `bind_primary_front_ip`, `bind_secondary_front_ip`, `bind_servers_back_ip`, `user_defined_clients`, `dns_query_clients`, `dns_recursive_clients`. Les options liées aux chemins, aux contrôles d’accès, aux écoutes, aux sources de transfert et au runtime DNSSEC appartiennent au déploiement et sont protégées : `directory`, `pid-file`, `session-keyfile`, `dnssec-validation`, `bindkeys-file`, `managed-keys-directory`, `allow-transfer`, `allow-update`, `allow-query`, `allow-query-on`, `allow-recursion`, `allow-recursion-on`, `allow-query-cache`, `allow-query-cache-on`, `listen-on`, `listen-on-v6`, `transfer-source`, `notify-source`. Les changer nécessite une modification cohérente des sources puis un redéploiement autorisé après retrait opérateur du sceau, avec recette.
 
 ## Lecture, checksum et écriture
+
+Une ancienne transaction préparée n’est clôturée automatiquement que si chaque état antérieur est explicite et correspond encore au disque. Un champ `before` manquant ne vaut pas `null` : le journal reste bloquant et doit être examiné, même si le fichier ciblé est absent.
 
 Lecture, listing, simulation et écriture prennent toujours l’exclusion de processus commune `operations.flock`. Un processus actif concurrent provoque un refus contrôlé ; sa fin libère automatiquement l’exclusion. Le dossier privé et le fichier vide peuvent rester présents. Un journal incomplet bloque les nouvelles écritures, mais la lecture reste possible. `bind_operation_lock_enabled: true` ajoute seulement la coopération avec l’ancien répertoire `.operation.lock`. Aucun fichier DNS n’est publié par lecture ou simulation.
 
@@ -59,11 +61,11 @@ La requête doit être un dictionnaire à clés chaînes, avec un nom explicite.
 
 | Champ | Type / usage |
 |---|---|
-| `resource` | Requête unitaire : `option`, `zone` ou `record` ; enveloppe de lot : `batch` |
-| `action` | `create`, `read`, `update` ou `delete` |
-| `name` | Nom de l’option, suffixe de zone ou propriétaire du RRset ; absent pour `list` |
+| `resource` | Requête unitaire : `option`, `acl`, `logging`, `zone` ou `record` ; enveloppe de lot : `batch` |
+| `action` | `create`, `read`, `list`, `update` ou `delete` |
+| `name` | Nom de l’option ou ACL, `logging` pour le bloc logging unique, suffixe de zone ou propriétaire du RRset ; absent pour `list` |
 | `expected_checksum` | Chaîne SHA-256 de 64 caractères hexadécimaux minuscules, obligatoire pour toute écriture ; surcharge possible par `bind_manage_checksums[inventory_hostname]` |
-| `value` | Option : syntaxe BIND sous forme de chaîne, sans point-virgule final |
+| `value` | Option : syntaxe BIND sous forme de chaîne, sans point-virgule final. ACL/logging : corps complet du bloc, avec les points-virgules BIND internes |
 | `kind` | Création de zone : `forward` ou `authoritative` |
 | `forwarders` | Zone forward : liste non vide de `{address: chaîne IP, port: entier optionnel}` ; port 53 par défaut |
 | `dnssec_validate` | Booléen d’une zone forward ; `false` demande une exception privée limitée lorsque DNSSEC global est actif. Création : `true` par défaut ; mise à jour : politique existante conservée |
@@ -85,6 +87,39 @@ bind_manage:
 ```
 
 Le checksum est fourni séparément comme dans la procédure précédente. Le listing peut le contrôler pour conserver la même révision entre pages ; un lot exige aussi `expected_plan_checksum` ou `bind_manage_plan_checksums[inventory_hostname]`. Remplacer `action` par `read` sans `value`, par `create` pour une clause absente, ou par `delete` sans `value`. La suppression rétablit le défaut BIND : vérifier l’effet de ce défaut pour votre version avant l’opération.
+
+### ACL et logging
+
+Les mêmes lectures, checksums par hôte, simulations `--check`, sauvegardes et rollback s’appliquent aux deux ressources. Un nom d’ACL doit respecter `[A-Za-z][A-Za-z0-9_-]{0,62}`. Le bloc logging est unique et utilise toujours `name: logging`.
+
+```yaml
+bind_manage:
+  resource: acl
+  action: create
+  name: office
+  value: '192.0.2.0/24; 198.51.100.25;'
+```
+
+```yaml
+bind_manage:
+  resource: logging
+  action: update
+  name: logging
+  value: |
+    channel managed {
+      file "/var/log/named/managed.log" versions 3 size 10m;
+      severity info;
+      print-time yes;
+    };
+    category default { managed; };
+    category security { managed; };
+```
+
+Utiliser `create` si aucun bloc n’existe, `update` pour remplacer son corps complet, `read` ou `delete` sans `value`. La suppression du bloc logging rétablit les journaux par défaut de BIND ; elle ne supprime aucun fichier de logs. Les canaux et catégories se modifient ensemble dans `value`, sans ressource secondaire concurrente. Les destinations `file` doivent être des fichiers directs sous `/var/log/named`, répertoire créé par le déploiement ; liens et objets spéciaux existants sont refusés. `syslog`, `stderr` et `null` suivent la syntaxe BIND native.
+
+Les inclusions introduites dans ces corps sont interdites. Un bloc provenant d’un include externe est lisible/listable mais ne peut pas être modifié par ce flux. Toute ACL du candidat final est également évaluée par BIND dans un document isolé : les références inconnues ou cycliques sont refusées même si l’ACL n’est pas encore utilisée. Pour remplacer ensemble des ACL et leurs références, utiliser un lot : seule sa configuration finale est validée.
+
+Le listing utilise `resource: acl` ou `resource: logging`, `action: list`, sans `name`, avec les mêmes champs de pagination que les options. Les corps figurent dans `items` uniquement dans le résultat privé ; l’affichage public exige `bind_manage_show_values: true`.
 
 ### Zone forward
 

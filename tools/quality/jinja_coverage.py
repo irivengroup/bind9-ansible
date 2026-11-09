@@ -9,19 +9,96 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from types import MethodType
+import weakref
 
 import jinja2
 from jinja2 import nodes
 from jinja2.compiler import CodeGenerator
+from jinja2.nativetypes import NativeCodeGenerator
 
 from bind9_coverage import InstrumentationError, PythonCollector
 
+
+class JinjaObservationError(InstrumentationError, jinja2.TemplateSyntaxError):
+    """Make an observer refusal visible to Ansible's compilation boundary.
+
+    Templar returns its input on generic compiler exceptions. A syntax-family
+    refusal propagates instead; the unsupported receipt also blocks admission.
+    """
+
+    def __init__(self, message):
+        jinja2.TemplateSyntaxError.__init__(self, message, 0)
+
+
+class InactiveProbe:
+    """Keep retained compiled templates usable after their collector closes.
+
+    This stateless sentinel releases the closed collector. Operand/value probes
+    become identities; no new truth conversion or measurement occurs. Only our
+    own sentinel may be replaced by a subsequent collector on the environment.
+    """
+
+    def __call__(self, method, key, value=None):
+        if method in ('operand', 'value', 'unwrap', 'conditional_value', 'native_result'):
+            return value
+        if method in ('entry', 'branch'):
+            return None
+        raise InstrumentationError('Unknown inactive observation method')
+
+
+class CompilerOwnership:
+    """Switch between inspected sibling observers without borrowing ownership.
+
+    Ansible reuses and copies environments across YAML fields and file renders.
+    Only exact registered generators with their own bound owner probe may cross
+    that boundary. A known closed owner stays inert. Weak registrations retain
+    provenance until the last copied compiler disappears, without retaining its
+    owner. An inherited class name or MRO proves nothing.
+    """
+
+    OWNERS = weakref.WeakKeyDictionary()
+
+    @classmethod
+    def register(cls, owner, generators):
+        for compiler, family in generators.items():
+            if compiler in cls.OWNERS or family not in (CodeGenerator, NativeCodeGenerator):
+                raise InstrumentationError('Invalid or duplicate native compiler ownership')
+            cls.OWNERS[compiler] = (weakref.ref(owner), owner.ATTRIBUTE, family)
+
+    @staticmethod
+    def bound(probe, owner):
+        return (type(probe) is MethodType and probe.__self__ is owner and
+                probe.__func__ is type(owner).probe)
+
+    @classmethod
+    def activate(cls, owner, environment, generators):
+        compiler = environment.code_generator_class
+        if compiler in (CodeGenerator, NativeCodeGenerator):
+            probe = getattr(environment, owner.ATTRIBUTE, None)
+            if (hasattr(environment, owner.ATTRIBUTE) and not isinstance(probe, InactiveProbe) and
+                    not (environment in owner.environments and cls.bound(probe, owner))):
+                raise InstrumentationError('Unsupported or occupied Jinja compiler')
+            family = compiler
+        else:
+            registration = cls.OWNERS.get(compiler)
+            sibling = registration[0]() if registration else None
+            if (sibling is None or
+                    not cls.bound(getattr(environment, registration[1], None), sibling)):
+                raise InstrumentationError('Unsupported or occupied Jinja compiler')
+            family = registration[2]
+        if environment in owner.environments and owner.environments[environment] is not family:
+            raise InstrumentationError('Native compiler family changed during observation')
+        owner.environments[environment] = family
+        environment.code_generator_class = generators[family]
+        setattr(environment, owner.ATTRIBUTE, owner.probe)
 
 class TemplateInventory:
     """Map authored operations and predicates to stable source locations."""
 
     FORBIDDEN = (nodes.Macro, nodes.CallBlock, nodes.Block, nodes.Extends,
                  nodes.Include, nodes.Import, nodes.FromImport)
+    SUPPORT_ELIF = False
     SUPPORTED = {'Template', 'Output', 'TemplateData', 'Assign', 'If', 'CondExpr',
                  'For', 'Name', 'Const', 'Getattr', 'Getitem', 'Compare', 'Operand',
                  'Filter', 'List', 'And', 'Or', 'Not', 'Call', 'Keyword', 'Test'}
@@ -65,9 +142,11 @@ class TemplateInventory:
                 raise InstrumentationError('Recursive Jinja loops are unsupported')
             self.loop_bodies[id(node.body)] = self.decisions[id(node)]
         if isinstance(node, nodes.If):
-            if node.elif_:
+            if node.elif_ and not self.SUPPORT_ELIF:
                 raise InstrumentationError('Jinja elif requires a separately verified observer')
             self.walk(node.test, True)
+            for child in node.elif_:
+                self.walk(child)
             for child in node.body + node.else_:
                 self.walk(child)
             return
@@ -109,12 +188,23 @@ class JinjaCollector:
     """Observe canonical template bytes through native Jinja compilation."""
 
     ATTRIBUTE = '_bind9_template_probe'
+    # These are the six literal template sources consumed by the shipped role.
+    # Native Ansible trims block newlines, changing four authored inventories.
+    # Keep both complete inventories; never substitute the smaller native one.
+    ANSIBLE_SOURCES = frozenset('roles/bind9/templates/' + name for name in (
+        'authoritative.zone.j2', 'empty-root.zone.j2', 'named-healthcheck.service.j2',
+        'named-runtime-override.j2', 'named.conf.j2', 'reverse.zone.j2'))
+    ANSIBLE_PROFILE = dict(block_start_string='{%', block_end_string='%}',
+        variable_start_string='{{', variable_end_string='}}', comment_start_string='{#', comment_end_string='#}',
+        line_statement_prefix=None, line_comment_prefix=None, trim_blocks=True, lstrip_blocks=False,
+        newline_sequence='\n', keep_trailing_newline=False)
 
     def __init__(self, root):
         if jinja2.__version__ != '3.1.6':
             raise InstrumentationError('Jinja observer requires the inspected 3.1.6 compiler')
         self.root = Path(root).resolve()
         self.files, self.units, self.by_digest = {}, {}, {}
+        self.plain_units, self.native_units, self.profile_units = {}, {}, {}
         self.statements, self.lines, self.branches = set(), set(), set()
         self.conditions, self.unsupported = {}, set()
         self.environments = {}
@@ -129,10 +219,36 @@ class JinjaCollector:
             digest = hashlib.sha256(raw).hexdigest()
             if digest in self.by_digest:
                 raise InstrumentationError('Ambiguous identical Jinja sources')
-            self.files[name], self.units[name] = digest, inventory.units
+            self.files[name], self.units[name] = digest, inventory.units.copy()
+            self.plain_units[name] = inventory.units
+            if name in self.ANSIBLE_SOURCES:
+                native_tree = self.original_parse(jinja2.Environment(**self.ANSIBLE_PROFILE), source, name, str(path))
+                native = TemplateInventory(name + '|ansible', native_tree)
+                if native.units != inventory.units:
+                    self.native_units[name] = native.units
+                    prefixed = {'ansible|' + key: value for key, value in native.units.items()}
+                    self.units[name].update(prefixed)
+                    self.profile_units[name] = {'plain': inventory.units, 'ansible': prefixed}
             self.by_digest[digest] = name
 
+    @classmethod
+    def known_ansible_profile(cls, environment):
+        """Admit only the inspected Ansible classes and exact lexer settings."""
+        if type(environment).__module__ != 'ansible.template':
+            return False
+        from ansible import release
+        if release.__version__ != '2.16.19':
+            return False
+        from ansible.template import AnsibleEnvironment, AnsibleNativeEnvironment
+        return (type(environment) in (AnsibleEnvironment, AnsibleNativeEnvironment) and
+                all(getattr(environment, key) == value for key, value in cls.ANSIBLE_PROFILE.items()))
+
     def probe(self, method, key, value=None):
+        if not self.installed:
+            # Ansible copies environment dictionaries, including our bound
+            # probe. A clone not parsed before close is outside the registry;
+            # retained compiled generators must never mutate a closed receipt.
+            return InactiveProbe()(method, key, value)
         if method == 'entry':
             self.statements.add(key)
             name, unit = key.split('|', 1)
@@ -149,7 +265,8 @@ class JinjaCollector:
             raise InstrumentationError('Unknown Jinja observation method')
 
     def record(self, key, value):
-        self.conditions.setdefault(key, set()).add(value)
+        if self.installed:
+            self.conditions.setdefault(key, set()).add(value)
 
     def truth(self, key, value):
         return PythonCollector.truth(self, key, value)
@@ -175,6 +292,9 @@ class JinjaCollector:
                     return super().visit(node, frame)
                 identity = id(node)
                 atom, arm = inv.atoms.get(identity), inv.arms.get(identity)
+                conditional = getattr(inv, 'conditional_values', {}).get(identity)
+                if conditional is not None:
+                    self.write('environment.' + cls.ATTRIBUTE + '("conditional_value", ' + repr(conditional) + ', ')
                 if arm:
                     self.write('(' + self.probe('branch', arm[0], repr(arm[1])) + ', ')
                 if identity in inv.unwraps:
@@ -188,6 +308,8 @@ class JinjaCollector:
                     self.write(')')
                 if arm:
                     self.write(')[1]')
+                if conditional is not None:
+                    self.write(')')
                 return result
 
             def visit_Assign(self, node, frame):
@@ -198,22 +320,26 @@ class JinjaCollector:
             def visit_If(self, node, frame):
                 if self.inventory is None:
                     return super().visit_If(node, frame)
-                # The supported grammar has no elif/scoped blocks. Keep the
-                # native truth context and soft frame, adding only branch entries.
+                # Enter each elif only after the preceding test was false.
+                # Inventory policies still refuse this grammar unless their
+                # native runtime profile has separate equivalence tests.
                 inv, branch, soft = self.inventory, self.inventory.decisions[id(node)], frame.soft()
-                self.writeline(self.probe('entry', inv.entries[id(node)]), node)
-                self.writeline('if ', node)
-                self.visit(node.test, soft)
-                self.write(':')
-                self.indent()
-                self.writeline(self.probe('branch', branch, 'True'), node)
-                self.blockvisit(node.body, soft)
-                self.outdent()
-                self.writeline('else:')
-                self.indent()
-                self.writeline(self.probe('branch', branch, 'False'), node)
+                for current in [node] + node.elif_:
+                    branch = inv.decisions[id(current)]
+                    self.writeline(self.probe('entry', inv.entries[id(current)]), current)
+                    self.writeline('if ', current)
+                    self.visit(current.test, soft)
+                    self.write(':')
+                    self.indent()
+                    self.writeline(self.probe('branch', branch, 'True'), current)
+                    self.blockvisit(current.body, soft)
+                    self.outdent()
+                    self.writeline('else:')
+                    self.indent()
+                    self.writeline(self.probe('branch', branch, 'False'), current)
                 self.blockvisit(node.else_, soft)
-                self.outdent()
+                for current in [node] + node.elif_:
+                    self.outdent()
 
             def visit_For(self, node, frame):
                 if self.inventory is None:
@@ -276,28 +402,39 @@ class JinjaCollector:
         if self.installed or getattr(jinja2.Environment._parse, '_bind9_observer', False):
             raise InstrumentationError('A Jinja collector is already installed')
         collector, generator = self, self.generator()
+        # Ansible uses NativeCodeGenerator even for textual template files.
+        # MRO keeps native constant/output/finalizer methods beneath our probes.
+        native_generator = type('ObservingNativeJinjaGenerator', (generator, NativeCodeGenerator), {})
+        generators = {CodeGenerator: generator, NativeCodeGenerator: native_generator}
+        CompilerOwnership.register(self, {value: key for key, value in generators.items()})
+        def refuse(message):
+            collector.unsupported.add(message)
+            raise JinjaObservationError(message)
         def parse(environment, source, name, filename):
-            tree = collector.original_parse(environment, source, name, filename)
             digest = hashlib.sha256(source.encode('utf-8')).hexdigest()
             canonical = collector.by_digest.get(digest)
             if canonical is None:
                 if filename and str(Path(filename).resolve()) in {str(collector.root / key) for key in collector.files}:
-                    raise InstrumentationError('Canonical Jinja source changed')
-                return tree
+                    refuse('Canonical Jinja source changed')
+                return collector.original_parse(environment, source, name, filename)
             if environment.is_async or environment.sandboxed or environment.extensions:
-                raise InstrumentationError('Unsupported Jinja runtime mode')
-            if environment not in collector.environments:
-                if environment.code_generator_class is not CodeGenerator or hasattr(environment, cls_attribute):
-                    raise InstrumentationError('Unsupported or occupied Jinja compiler')
-                collector.environments[environment] = environment.code_generator_class
-                environment.code_generator_class = generator
-                setattr(environment, cls_attribute, collector.probe)
-            inventory = TemplateInventory(canonical, tree)
-            if inventory.units != collector.units[canonical]:
-                raise InstrumentationError('Jinja parser profile changes the executable inventory')
+                refuse('Unsupported Jinja runtime mode')
+            try:
+                CompilerOwnership.activate(collector, environment, generators)
+            except InstrumentationError as error:
+                refuse(str(error))
+            try:
+                tree = collector.original_parse(environment, source, name, filename)
+                inventory = TemplateInventory(canonical, tree)
+            except (InstrumentationError, jinja2.TemplateSyntaxError):
+                refuse('Canonical Jinja source cannot use this parser profile')
+            if inventory.units != collector.plain_units[canonical]:
+                if (not collector.known_ansible_profile(environment) or
+                        inventory.units != collector.native_units.get(canonical)):
+                    refuse('Jinja parser profile changes the executable inventory')
+                inventory = TemplateInventory(canonical + '|ansible', tree)
             tree._bind9_inventory = inventory
             return tree
-        cls_attribute = self.ATTRIBUTE
         parse._bind9_observer = self
         jinja2.Environment._parse = parse
         self.installed = True
@@ -308,6 +445,8 @@ class JinjaCollector:
         jinja2.Environment._parse = self.original_parse
         for environment, generator in self.environments.items():
             environment.code_generator_class = generator
+            setattr(environment, self.ATTRIBUTE, InactiveProbe())
+        self.environments.clear()
         self.installed = False
 
     def payload(self):
@@ -315,6 +454,52 @@ class JinjaCollector:
                 'units': self.units, 'statements': sorted(self.statements), 'lines': sorted(self.lines),
                 'branches': sorted(self.branches), 'conditions': {key: sorted(values) for key, values in self.conditions.items()},
                 'unsupported': sorted(self.unsupported)}
+
+    def checked_payload(self, data, allow_unsupported=False):
+        """Validate worker and parent facts against this same full inventory."""
+        if (not isinstance(data, dict) or type(data.get('schema')) is not int or data['schema'] != 1 or
+                data.get('engine') != 'jinja2-3.1.6-native-codegen' or data.get('files') != self.files or
+                data.get('units') != self.units):
+            raise InstrumentationError('Stale or incomplete Jinja source/unit inventory')
+        if (data.get('functions') != [] or not isinstance(data.get('unsupported'), list) or
+                any(not isinstance(value, str) for value in data['unsupported']) or
+                (data['unsupported'] and not allow_unsupported)):
+            raise InstrumentationError('Unsupported Jinja observation; authored functions are not supported by this grammar')
+        known = {name + '|' + key: unit['kind'] for name, units in self.units.items() for key, unit in units.items()}
+        lines = {name + '|line:' + str(line) for name, units in self.units.items()
+                 for unit in units.values() if unit['kind'] == 'statement' for line in unit['lines']}
+        for field, expected in (('statements', 'statement'), ('lines', None)):
+            values = data.get(field)
+            if not isinstance(values, list) or any(not isinstance(key, str) or
+                    (key not in lines if field == 'lines' else known.get(key) != expected) for key in values):
+                raise InstrumentationError('Unknown Jinja ' + ('executable line' if field == 'lines' else 'statement'))
+        conditions = data.get('conditions')
+        if (not isinstance(conditions, dict) or any(known.get(key) != 'condition' or not isinstance(values, list) or
+                any(type(value) is not bool for value in values) for key, values in conditions.items())):
+            raise InstrumentationError('Unknown Jinja condition inventory or nonboolean outcomes')
+        branches = data.get('branches')
+        if (not isinstance(branches, list) or any(not isinstance(pair, list) or len(pair) != 2 or
+                not isinstance(pair[0], str) or known.get(pair[0]) != 'branch' or type(pair[1]) is not bool for pair in branches)):
+            raise InstrumentationError('Unknown Jinja predicate/branch or nonboolean observation')
+        return data
+
+    def combine_payloads(self, payloads):
+        """Union only validated facts; caller retains bounded worker identities."""
+        if not payloads or len(payloads) > 4096:
+            raise InstrumentationError('Invalid Jinja process receipt count')
+        sets = {key: set() for key in ('statements', 'lines', 'branches', 'unsupported')}
+        conditions = {}
+        for payload in payloads:
+            self.checked_payload(payload, allow_unsupported=True)
+            for key in sets:
+                sets[key].update(tuple(value) if key == 'branches' else value for value in payload[key])
+            for key, values in payload['conditions'].items():
+                conditions.setdefault(key, set()).update(values)
+        combined = self.payload()
+        combined.update({key: [list(value) if isinstance(value, tuple) else value for value in sorted(values)]
+                         for key, values in sets.items()})
+        combined['conditions'] = {key: sorted(values) for key, values in conditions.items()}
+        return combined
 
     def save(self, output):
         """Persist source IDs and outcomes privately, without rendered values."""

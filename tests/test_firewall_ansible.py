@@ -104,8 +104,7 @@ class FirewallRunner:
         environment = dict(os.environ, PATH=str(binaries) + os.pathsep + os.environ['PATH'],
                            BIND_FIREWALL_TEST_STATE=str(path), ANSIBLE_CONFIG=str(ROOT / 'ansible.cfg'),
                            ANSIBLE_JINJA2_NATIVE=str(native).lower())
-        result = subprocess.run(['ansible-playbook', '-i', 'localhost,', str(playbook)], env=environment,
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, timeout=120)
+        result = self.execute(playbook, environment)
         after = json.loads(path.read_text())
         mutations = [args for args in after['calls'] if '--add-service=dns' in args]
         assert after['zones'] == state['zones'] and after['addresses'] == state['addresses']
@@ -121,6 +120,11 @@ class FirewallRunner:
             if scenario != 'shared_default':
                 assert after['services']['runtime']['internal'] == ['ssh', 'dns']
                 assert after['services']['permanent']['dmz'] == ['ssh', 'dns']
+
+    def execute(self, playbook, environment):
+        """Keep the original CLI transport; native coverage reuses every oracle."""
+        return subprocess.run(['ansible-playbook', '-i', 'localhost,', str(playbook)], env=environment,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, timeout=120)
 
 
 @pytest.mark.parametrize('scenario,native', [('split', False), ('split', True), ('shared_default', False),

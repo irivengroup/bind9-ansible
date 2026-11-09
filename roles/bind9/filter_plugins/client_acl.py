@@ -1,5 +1,6 @@
 """Validate IPv4 client/service addresses and typed IPv4/IPv6 DNS record data."""
 import ipaddress
+import re
 
 
 def valid_client_address(value):
@@ -17,7 +18,8 @@ def valid_client_address(value):
 
 class FilterModule:
     def filters(self):
-        return {"valid_client_address": valid_client_address, "valid_ip_address": valid_ip_address, "valid_dns_record": valid_dns_record}
+        return {"valid_client_address": valid_client_address, "valid_ip_address": valid_ip_address,
+                "valid_dns_record": valid_dns_record, "valid_dns_ttl": valid_dns_ttl}
 
 
 def valid_ip_address(value):
@@ -46,3 +48,20 @@ def valid_dns_record(record):
         except ValueError:
             return False
     return True
+
+
+def valid_dns_ttl(value):
+    """Accept bounded DNS TTLs without permitting zone-file interpolation.
+
+    Preserve decimal seconds and BIND's case-insensitive W/D/H/M/S syntax.
+    RFC 2181 section 8 limits the resulting TTL to 2**31-1 seconds; booleans,
+    control characters and implicit numeric coercions are never DNS durations.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return False
+    text = str(value)
+    if len(text) > 128 or not re.fullmatch(r'(?:[0-9]+|(?:[0-9]+[WDHMSwdhms])+)', text):
+        return False
+    scale = {'': 1, 'w': 604800, 'd': 86400, 'h': 3600, 'm': 60, 's': 1}
+    return sum(int(amount) * scale[unit.lower()] for amount, unit in
+               re.findall(r'([0-9]+)([WDHMSwdhms]?)', text)) <= 2147483647

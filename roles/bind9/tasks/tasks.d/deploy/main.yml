@@ -37,6 +37,8 @@
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_return_routes.yml'
   vars:
     bind_front_requested_action: recover
+  # Selecting Ansible's reserved `never` tag must not imply route recovery.
+  when: "'routes-recover' in ansible_run_tags"
   tags: [never, routes-recover]
 
 - name: Install dependencies before DNS checks require dig on a fresh secondary
@@ -175,6 +177,7 @@
     - name: Retain operation ownership until DNS and route recovery complete
       ansible.builtin.set_fact:
         bind_deployment_retain_lease: true
+        bind_runtime_restore_incomplete: false
       # Partial configure/zones/service runs must also retain an unresolved lease.
       tags: [always]
 
@@ -204,6 +207,9 @@
       ansible.builtin.stat:
         path: '{{ item }}'
         follow: false
+        get_checksum: false
+        get_mime: false
+        get_attributes: false
       loop:
         - /etc/systemd/system/named-private-dnssec.timer
         - /etc/systemd/system/named-private-dnssec.service
@@ -227,7 +233,15 @@
       tags: [deploy]
 
     - name: Restore managed runtime files from before the failed deployment
-      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/runtime_restore.yml'
+      block:
+        - name: Restore the protected pre-deployment runtime snapshot
+          ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/runtime_restore.yml'
+      rescue:
+        # Runtime and DNS data are independent snapshots. Preserve an unsafe
+        # runtime replacement, but still attempt the existing BIND data restore.
+        - name: Record incomplete runtime recovery and retain stopped services
+          ansible.builtin.set_fact:
+            bind_runtime_restore_incomplete: true
       when: bind_runtime_snapshot_ready | default(false) | bool
       tags: [deploy]
 
@@ -244,12 +258,16 @@
       tags: [deploy]
       changed_when: true
 
-    - name: Restart restored BIND configuration
+    - name: Restore pre-deployment BIND service state
       ansible.builtin.systemd:
         name: named
-        state: restarted
+        # First-install failure must leave an originally stopped daemon stopped.
+        state: '{{ "restarted" if bind_named_service_before.active else "stopped" }}'
+        enabled: '{{ bind_named_service_before.enabled }}'
         daemon_reload: true
-      when: bind_rollback is succeeded
+      when:
+        - bind_rollback is succeeded
+        - not (bind_runtime_restore_incomplete | default(false) | bool)
       tags: [deploy]
 
     - name: Resume previously active private DNSSEC renewal
@@ -258,12 +276,13 @@
         state: started
       when:
         - bind_rollback is succeeded
+        - not (bind_runtime_restore_incomplete | default(false) | bool)
         - (bind_dnssec_timer_active.rc | default(3)) == 0
       tags: [deploy]
 
     - name: Allow lease release only after completed DNS and FRONT rollback
       ansible.builtin.set_fact:
-        bind_deployment_retain_lease: '{{ bind_front_route_transaction_pending | default(false) | bool }}'
+        bind_deployment_retain_lease: '{{ (bind_front_route_transaction_pending | default(false) | bool) or (bind_runtime_restore_incomplete | default(false) | bool) }}'
       tags: [deploy]
 
     - name: Stop deployment after rollback
@@ -271,7 +290,9 @@
       # Successful rescue bookkeeping must never turn its original error green.
       ansible.builtin.fail:
         msg: >-
-          {{ 'named deployment failed; managed files restored. Inspect service and logs.'
+          {{ ('named deployment failed; runtime recovery incomplete. DNS backup restoration was attempted; services remain stopped and operation ownership is retained. Inspect the preserved runtime paths and snapshot before manual recovery.'
+          if (bind_runtime_restore_incomplete | default(false) | bool) else
+          'named deployment failed; managed files restored. Inspect service and logs.')
           if ('all' in ansible_run_tags or 'deploy' in ansible_run_tags) else
           'named partial deployment failed; automatic DNS restoration was not selected. Inspect the live configuration and backups before retrying.' }}
           {{ ('FRONT rollback incomplete: ' ~

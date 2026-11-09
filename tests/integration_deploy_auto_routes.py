@@ -12,6 +12,8 @@ import json
 import os
 from pathlib import Path
 import shutil
+import re
+import stat
 import signal
 import socket
 import subprocess
@@ -234,6 +236,38 @@ class CombinedDeployment:
                           'check': check, 'recap': result.stdout.split('PLAY RECAP')[-1].strip()})
         return result.stdout
 
+    @staticmethod
+    def completed_route_snapshot(directory, identity, operations, clients):
+        """Verify the complete private journal before admitting its nine new files.
+
+        DNS assets remain under the original exact snapshot comparison. Only a
+        committed journal with the expected transaction identity, additions and
+        checksums may extend that snapshot; repeat runs must preserve its inodes.
+        """
+        names = ('meta', 'operations', 'profile', 'kernel', 'addresses', 'rules',
+                 'clients', 'checksums', 'progress')
+        info = directory.lstat()
+        assert stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o700 and info.st_uid == 0
+        match = re.fullmatch(r'\.front-routes\.retired\.([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\.[A-Za-z0-9]{8}', directory.name)
+        assert match and set(p.name for p in directory.iterdir()) == set(names)
+        data, snapshot = {}, {}
+        for name in names:
+            path = directory / name
+            metadata = path.lstat()
+            assert (stat.S_ISREG(metadata.st_mode) and stat.S_IMODE(metadata.st_mode) == 0o600 and
+                    metadata.st_uid == 0 and metadata.st_nlink == 1 and metadata.st_size <= 1048576)
+            data[name] = path.read_bytes()
+            assert len(data[name]) == metadata.st_size
+            snapshot[str(path)] = (hashlib.sha256(data[name]).hexdigest(), metadata.st_ino,
+                metadata.st_mtime_ns, metadata.st_mode, metadata.st_uid, metadata.st_gid)
+        assert data['meta'] == ('|'.join((match.group(1),) + tuple(identity)) + '\n').encode('ascii')
+        assert data['operations'] == ''.join(row + '\n' for row in operations).encode('ascii')
+        assert data['clients'] == ''.join(row + '\n' for row in sorted(clients)).encode('ascii')
+        assert data['progress'] == ('%d done\n' % len(operations)).encode('ascii')
+        checksums = ''.join(hashlib.sha256(data[name]).hexdigest() + '  ' + name + '\n' for name in names[:7])
+        assert data['checksums'] == checksums.encode('ascii')
+        return snapshot
+
     def dns_snapshot(self):
         """Freeze static DNS assets and service identity, excluding daemon caches/logs."""
         paths = set(Path('/etc').glob('named*')) | set(Path('/etc').glob('rndc*'))
@@ -285,12 +319,27 @@ class CombinedDeployment:
         assert all(row.get('dev') == 'front0' and row.get('gateway') == '198.51.100.1' for row in added), added
         persistent = self.command(['nmcli', '-g', 'ipv4.routes', 'connection', 'show', 'front']).stdout
         assert '203.0.113.0/24' in persistent and '172.21.7.23/32' in persistent, persistent
-        assert self.dns_snapshot() == protected, 'Route application altered deployed DNS assets'
+        current = self.dns_snapshot()
+        additions = set(current) - set(protected)
+        directories = {Path(name).parent for name in additions}
+        assert len(directories) == 1, 'One complete committed route journal is required'
+        directory = directories.pop()
+        assert directory.parent == Path('/var/lib/Bind9-Ansible')
+        profile_uuid = self.command(['nmcli', '-g', 'connection.uuid', 'connection', 'show', 'front']).stdout.strip()
+        metric = str(self.variables.get('bind_front_route_metric', 100))
+        identity = (profile_uuid, 'front0', '198.51.100.1', self.front, self.back, self.adm, metric)
+        operations = [store + '|' + destination + '|198.51.100.1|' + metric
+            for destination in ('172.21.7.23/32', '203.0.113.0/24') for store in ('P', 'R')]
+        journal = self.completed_route_snapshot(directory, identity, operations, self.variables['bind_cloud_clients'])
+        assert set(journal) == additions, 'Unexpected files cannot be admitted as journal evidence'
+        expected = dict(protected)
+        expected.update(journal)
+        assert current == expected, 'Route application altered deployed DNS assets'
         repeated = self.deploy('routes-repeat', tags='routes')
         self.probes()
         assert 'changed=0' in repeated, repeated[-3000:]
         assert self.routes() == after and self.profile('front') == new_profile
-        assert self.dns_snapshot() == protected, 'Repeated routing altered deployed DNS assets'
+        assert self.dns_snapshot() == expected, 'Repeated routing altered deployed DNS assets'
         assert self.command(['rndc', '-s', '127.0.0.1', '-k', '/etc/rndc.key', 'nta', '-dump']).stdout == nta
         forbidden = ('Install canonical named.conf', 'Install authoritative zone files',
                      'Install BIND and SELinux tooling', 'Start or reload BIND')
@@ -299,7 +348,7 @@ class CombinedDeployment:
             'runs': self.runs, 'routes_added': added, 'persistent_front_routes': persistent.strip(),
             'dns_files_inodes_mtimes_owners_permissions_unchanged': True,
             'service_pid_and_operations_unchanged': True, 'dnssec_auto_and_manual_nta_unchanged': True,
-            'completion_seal_and_previous_lease_preserved': True,
+            'completion_seal_and_previous_lease_preserved': True, 'completed_journal_verified': True,
             'check_writes_nothing': True, 'repeat_changed_zero': True,
             'cloud_udp_tcp_roundtrip': True, 'front_secondary_ip_gateway_not_system_default': True,
             'back_adm_existing_routes_pending_dns_preserved': True,
@@ -332,6 +381,21 @@ class CombinedDeployment:
         if owned.isdigit() and int(owned) > 1 and owned == current:
             self.command(['/usr/sbin/rndc', '-s', '127.0.0.1', '-k', '/etc/rndc.key', 'stop'])
 
+    def first_deployment_failure(self):
+        """A failed first installation must restore files and keep named stopped."""
+        before = Path('/etc/named.conf').read_bytes()
+        routes, profile = self.routes(), self.profile('front')
+        output = self.deploy('fresh-failure', {'bind_lab_fail_health': True}, success=False)
+        assert 'managed files restored' in output
+        assert Path('/etc/named.conf').read_bytes() == before
+        units = json.loads((self.work / 'units.json').read_text())
+        assert units['units']['named'] == {'active': False, 'enabled': False}
+        assert not self.native_named.exists() and not self.owned_named.exists()
+        assert routes == self.routes() and profile == self.profile('front')
+        assert not Path('/var/lib/Bind9-Ansible/front-routes.pending').exists()
+        print(json.dumps(dict(first_install_failure_rollback=True, named_stopped_disabled=True,
+            original_config_restored=True, original_routes_restored=True)), flush=True)
+
     def execute(self, scenario='combined'):
         try:
             self.prepare()
@@ -340,6 +404,9 @@ class CombinedDeployment:
             self.network()
             self.upstream()
             self.inventory()
+            if scenario == 'fresh-rollback':
+                self.first_deployment_failure()
+                return
             if scenario == 'routes':
                 self.routes_only()
                 return
@@ -388,6 +455,6 @@ class CombinedDeployment:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--role', choices=['primary', 'secondary'], default='primary')
-    parser.add_argument('--scenario', choices=['combined', 'routes'], default='combined')
+    parser.add_argument('--scenario', choices=['combined', 'routes', 'fresh-rollback'], default='combined')
     arguments = parser.parse_args()
     CombinedDeployment(arguments.role).execute(arguments.scenario)

@@ -3,6 +3,8 @@
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
+    # A link introduced after preflight must not redirect ownership or mode.
+    follow: false
     owner: "{{ item.owner }}"
     group: named
     mode: "{{ item.mode }}"

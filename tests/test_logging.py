@@ -58,9 +58,11 @@ class TestLoggingContract:
         names = [task['name'] for task in tasks]
         assert names.index('Restore SELinux contexts') < names.index('Inspect SELinux labels on the BIND log directory and files')
         task = next(t for t in tasks if t['name'] == 'Require named_log_t on all managed log paths')
-        labels = ['system_u:object_r:named_log_t:s0 path'] * 4
+        labels = ['system_u:object_r:named_log_t:s0 ' + path for path in (
+            '/var/log/named', '/var/log/named/default.log',
+            '/var/log/named/security.log', '/var/log/named/xfer.log')]
         if wrong:
-            labels[2] = 'system_u:object_r:var_log_t:s0 path'
+            labels[2] = labels[2].replace(':named_log_t:', ':var_log_t:')
         scope = {'bind_named_log_labels': {'stdout_lines': labels}}
         assert TaskExpressions(scope).condition(task['ansible.builtin.assert']['that'], scope) is not wrong
 

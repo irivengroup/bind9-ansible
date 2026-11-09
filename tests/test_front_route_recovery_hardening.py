@@ -24,10 +24,12 @@ class TestCurrentJournalHardening:
     @staticmethod
     def require_safe_refusal(lab, journal):
         before = copy.deepcopy(lab.data)
+        contents = {path.name: path.read_bytes() for path in journal.iterdir()}
         result = lab.run('recover')
         assert result.returncode == 1, result.stdout
         assert lab.data == before, 'Invalid evidence must not authorize a native write'
         assert journal.is_dir(), 'Invalid evidence must remain available for inspection'
+        assert {path.name: path.read_bytes() for path in journal.iterdir()} == contents
 
     @pytest.mark.parametrize('suffix', [b'\n', b'0 done\n', b'\x00', b'unterminated'])
     def test_progress_must_be_exactly_one_complete_record(self, tmp_path, suffix):
@@ -60,13 +62,39 @@ class TestCurrentJournalHardening:
         lab.rewrite_journal('meta', '|'.join(fields) + '\n')
         self.require_safe_refusal(lab, journal)
 
+    @pytest.mark.parametrize('shape', ['missing-field', 'empty-field', 'extra-field'])
+    def test_metadata_requires_exactly_eight_nonempty_fields(self, tmp_path, shape):
+        """Valid checksums cannot authorize an ambiguous metadata structure."""
+        lab, journal = self.prepare(tmp_path)
+        fields = (journal / 'meta').read_text().strip().split('|')
+        if shape == 'missing-field':
+            fields.pop()
+        elif shape == 'empty-field':
+            fields[1] = ''
+        else:
+            fields.append('extra-field')
+        lab.rewrite_journal('meta', '|'.join(fields) + '\n')
+        before = copy.deepcopy(lab.data)
+        contents = {path.name: path.read_bytes() for path in journal.iterdir()}
+        result = lab.run('recover')
+        assert result.returncode == 1 and 'Malformed route journal metadata' in result.stdout, result.stdout
+        assert lab.data == before
+        assert {path.name: path.read_bytes() for path in journal.iterdir()} == contents
+
     @pytest.mark.parametrize('clients', [
-        '', 'not-an-address\n', '203.0.113.1/24\n', '0.0.0.0/0\n',
+        '', '\n', 'not-an-address\n', '203.0.113.1/24\n', '0.0.0.0/0\n',
         '198.51.100.25\n', '203.0.113.0/24\x00\n', '203.0.113.0/24\n' * 513],
-        ids=['empty', 'invalid', 'noncanonical', 'default', 'unrelated', 'nul', 'oversized'])
+        ids=['empty', 'empty-record', 'invalid', 'noncanonical', 'default', 'unrelated', 'nul', 'oversized'])
     def test_owned_routes_require_a_bounded_valid_matching_client_union(self, tmp_path, clients):
         lab, journal = self.prepare(tmp_path)
         lab.rewrite_journal('clients', clients)
+        self.require_safe_refusal(lab, journal)
+
+    @pytest.mark.parametrize('content', ['', '\n'], ids=['unframed', 'empty-record'])
+    def test_empty_operation_evidence_never_authorizes_recovery(self, tmp_path, content):
+        """A valid checksum cannot turn an absent operation into route ownership."""
+        lab, journal = self.prepare(tmp_path)
+        lab.rewrite_journal('operations', content)
         self.require_safe_refusal(lab, journal)
 
     def test_duplicate_uncompleted_operations_cannot_authorize_cleanup(self, tmp_path):

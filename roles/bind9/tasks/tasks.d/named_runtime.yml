@@ -9,14 +9,18 @@
   ansible.builtin.stat:
     path: /etc/rndc.key
     follow: false
+    # The role needs inode metadata, never a digest or MIME scan of this key.
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
   register: bind_rndc_key_file
 
 - name: Require the native regular administrative RNDC key
   ansible.builtin.assert:
     that:
       - bind_rndc_key_file.stat.exists
-      - bind_rndc_key_file.stat.isreg | default(false)
       - not (bind_rndc_key_file.stat.islnk | default(false))
+      - bind_rndc_key_file.stat.isreg | default(false)
     fail_msg: 'The native named-setup-rndc service must provide /etc/rndc.key.'
 
 - name: Prepare the named runtime override directory

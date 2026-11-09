@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
@@ -34,26 +35,34 @@ NEW = {'dst': '203.0.113.0/24', 'gateway': '198.51.100.1', 'dev': 'front0', 'met
 class NativeRouteLab:
     """Run the exact Bash engine with isolated ip/nmcli boundaries."""
 
-    def __init__(self, folder):
+    def __init__(self, folder, state=None):
         self.folder = folder
-        self.state = folder / 'route-state'
+        # A shared operation test supplies the same inode tree as management.
+        # Canonical execution moves that tree without rewriting production Bash.
+        self.state = folder / 'route-state' if state is None else state
         self.data_file = folder / 'network.json'
         self.data = dict(uuid=UUID, gateway='198.51.100.1', addresses=json.loads(ADDRESSES),
                          rules=json.loads(RULES), runtime=copy.deepcopy(BASE), persistent=[], operations=[])
         binaries = folder / 'bin'
         binaries.mkdir()
         (binaries / 'python3').symlink_to(sys.executable)
-        for name in ('ip', 'nmcli'):
+        for name in ('ip', 'nmcli', 'cat'):
             target = binaries / name
             shutil.copyfile(str(ROOT / 'tests/fixtures/native_network_cli.py'), str(target))
             target.chmod(0o755)
         self.env = dict(os.environ, BIND_NETWORK_DOUBLE_STATE=str(self.data_file))
+        self.canonical = None
         self.script = folder / 'routes.sh'
         source = (ROOT / 'roles/bind9/files/bind-front-routes.sh').read_text()
-        source = source.replace('STATE=/var/lib/Bind9-Ansible', 'STATE=' + str(self.state))
-        source = source.replace('export PATH=/usr/sbin:/usr/bin:/sbin:/bin',
-                                'export PATH=' + str(binaries) + ':/usr/sbin:/usr/bin:/sbin:/bin')
-        self.script.write_text(source)
+        if os.environ.get('BIND9_CANONICAL_BASH_LAB') == '1':
+            from canonical_shell_lab import CanonicalFrontEnvironment
+            self.canonical = CanonicalFrontEnvironment(ROOT)
+            self.script.write_bytes((ROOT / 'roles/bind9/files/bind-front-routes.sh').read_bytes())
+        else:
+            source = source.replace('STATE=/var/lib/Bind9-Ansible', 'STATE=' + str(self.state))
+            source = source.replace('export PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+                                    'export PATH=' + str(binaries) + ':/usr/sbin:/usr/bin:/sbin:/bin')
+            self.script.write_text(source)
 
     def run(self, action='apply', clients=None, more=None):
         self.data_file.write_text(json.dumps(self.data))
@@ -62,8 +71,11 @@ class NativeRouteLab:
         for client in ['203.0.113.0/24'] if clients is None else clients:
             args.extend(['--client', client])
         args.extend(more or [])
-        result = subprocess.run(args, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                universal_newlines=True, timeout=60)
+        with ExitStack() as scope:
+            environment = (scope.enter_context(self.canonical.rebased(self.state, self.folder / 'bin', self.env))
+                           if self.canonical is not None else self.env)
+            result = subprocess.run(args, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    universal_newlines=True, timeout=60)
         self.data = json.loads(self.data_file.read_text())
         return result
 
@@ -118,6 +130,49 @@ def plan(**kwargs):
 
 
 class TestNativeRouteExpressions:
+    def test_public_cli_refuses_a_real_unprivileged_process_before_observation(self):
+        from canonical_shell_lab import UnprivilegedProcess
+        result = UnprivilegedProcess.run(['/bin/bash', str(ROOT / 'roles/bind9/files/bind-front-routes.sh'),
+                                 '--action', 'plan'],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, timeout=10)
+        assert result.returncode == 1 and 'Root is required' in result.stdout
+
+    @pytest.mark.parametrize('client', ['203.0.113.0/25', '203.0.113.128/25'])
+    def test_a_broader_existing_route_is_preserved_when_adding_the_exact_client_destination(self, tmp_path, client):
+        lab = NativeRouteLab(tmp_path)
+        broad = dict(NEW)
+        lab.data['runtime'].append(broad)
+        lab.data['persistent'].append({'network': broad['dst'], 'gateway': broad['gateway'], 'metric': broad['metric']})
+        result = lab.run(clients=[client])
+        assert result.returncode == 2, result.stdout
+        assert lab.data['runtime'] == BASE + [broad, dict(NEW, dst=client)]
+        assert [route['network'] for route in lab.data['persistent']] == [broad['dst'], client]
+        before = copy.deepcopy(lab.data)
+        assert lab.run(clients=[client]).returncode == 0
+        assert lab.data == before
+
+    @pytest.mark.parametrize('clients,expected', [
+        (['0.0.0.0/1', '128.0.0.0/1'], None),
+        (['203.0.112.0/24', '203.0.113.0/25'], ['203.0.112.0/24', '203.0.113.0/25']),
+        (['203.0.113.0/24', '203.0.114.0/24'], ['203.0.113.0/24', '203.0.114.0/24']),
+    ], ids=['default-union', 'unequal-prefixes', 'unaligned-siblings'])
+    def test_client_union_preserves_exact_authorized_destinations(self, tmp_path, clients, expected):
+        """Aggregation cannot widen a range or bypass the default-route refusal."""
+        lab = NativeRouteLab(tmp_path)
+        result = lab.run(clients=clients)
+        if expected is None:
+            assert result.returncode == 1 and 'A client default route is forbidden' in result.stdout
+            assert lab.data['runtime'] == BASE and lab.data['persistent'] == []
+            assert lab.data['operations'] == []
+        else:
+            assert result.returncode == 2, result.stdout
+            assert [row['network'] for row in lab.data['persistent']] == expected
+            assert lab.data['runtime'] == BASE + [dict(NEW, dst=net) for net in expected]
+            before = copy.deepcopy(lab.data)
+            assert lab.run(clients=clients).returncode == 0
+            assert lab.data == before
+        assert not (lab.state / 'front-routes.pending').exists()
+
     @pytest.mark.parametrize('clients', [['203.0.112.0/24','203.0.113.0/24'], ['203.0.112.0/23','203.0.113.0/24']])
     def test_existing_cidr_aggregation_contract_is_preserved(self, clients):
         result = plan(clients=clients, persistent='203.0.112.0/23 198.51.100.1 100',
@@ -140,13 +195,18 @@ class TestNativeRouteExpressions:
             addresses[0]['addr_info'][1]['secondary'] = True
         assert plan(addresses=addresses)['device'] == 'front0'
 
-    @pytest.mark.parametrize('change', ['down','missing-front','duplicate-front','missing-back','shared-back'])
+    @pytest.mark.parametrize('change', ['down','missing-front','duplicate-front','missing-back','shared-back',
+                                      'missing-adm','duplicate-back','duplicate-adm','shared-adm'])
     def test_unsafe_front_discovery_is_rejected(self, change):
         addresses = json.loads(ADDRESSES)
         if change == 'down': addresses[0]['operstate'] = 'DOWN'
         elif change == 'missing-front': addresses[0]['addr_info'] = []
         elif change == 'duplicate-front': addresses.append(copy.deepcopy(addresses[0]))
         elif change == 'missing-back': addresses[1]['addr_info'] = []
+        elif change == 'missing-adm': addresses[2]['addr_info'] = []
+        elif change == 'duplicate-back': addresses.append(copy.deepcopy(addresses[1]))
+        elif change == 'duplicate-adm': addresses.append(copy.deepcopy(addresses[2]))
+        elif change == 'shared-adm': addresses[0]['addr_info'].extend(addresses[2]['addr_info'])
         else: addresses[0]['addr_info'].extend(addresses[1]['addr_info'])
         with pytest.raises(ValueError):
             plan(addresses=addresses)
@@ -159,6 +219,20 @@ class TestNativeRouteExpressions:
         result = lab.run('verify', more=['--token', token])
         assert result.returncode == 0, result.stdout
         assert lab.data == before
+
+    def test_transaction_entropy_is_reproducible_and_advances_per_new_journal(self, tmp_path):
+        # Paired execution must receive the same entropy input, rather than
+        # ignoring token arguments when comparing native/observed invocations.
+        lab = NativeRouteLab(tmp_path)
+        assert lab.run(more=['--defer-commit']).returncode == 2
+        first = (lab.state / 'front-routes.pending/meta').read_text().split('|', 1)[0]
+        assert first == '00000000-0000-4000-8000-000000000001'
+        assert lab.run('rollback', more=['--token', first]).returncode == 2
+        assert lab.run(more=['--defer-commit']).returncode == 2
+        second = (lab.state / 'front-routes.pending/meta').read_text().split('|', 1)[0]
+        assert second == '00000000-0000-4000-8000-000000000002'
+        assert second != first
+        assert lab.run('verify', more=['--token', second]).returncode == 0
 
     @pytest.mark.parametrize('routes', [[NEW], BASE, BASE+[dict(NEW,dst='8.8.8.8/32')]])
     def test_route_loss_or_unrelated_changes_are_explicit_failures(self, tmp_path, routes):
@@ -246,9 +320,28 @@ class TestNativeRouteExpressions:
             assert value['runtime_additions']==['203.0.113.0/24 198.51.100.1 230']
 
     @pytest.mark.parametrize('row',[dict(NEW,gateway='10.0.0.1',dev='back0'),dict(NEW,dst='203.0.113.25/32',dev='back0'),
-        dict(NEW,nexthops=[{'dev':'front0'}]),dict(NEW,type='blackhole'),NEW])
+        dict(NEW,nexthops=[{'dev':'front0'}]),dict(NEW,type='blackhole'),NEW,
+        dict(NEW,dst='203.0.113.0/25',dev='back0')])
     def test_conflicting_or_unowned_runtime_routes_refused(self,row):
         with pytest.raises(ValueError): plan(runtime=json.dumps(BASE+[row]))
+
+    @pytest.mark.parametrize('route', [dict(NEW, dst='203.0.113.0/25'),
+        dict(NEW, dst='203.0.113.128/25'),
+        dict(NEW, dst='203.0.112.0/23'), dict(NEW, dst='203.0.112.0/23', dev='back0')])
+    def test_compatible_overlap_preserves_routes_and_adds_only_the_exact_destination(self, tmp_path, route):
+        """Narrow compatible routes and broader paths survive an additive update."""
+        lab = NativeRouteLab(tmp_path)
+        lab.data['runtime'].append(copy.deepcopy(route))
+        before = copy.deepcopy(lab.data['runtime'])
+        applied = lab.run()
+        assert applied.returncode == 2, applied.stdout
+        assert lab.data['runtime'] == before + [NEW]
+        assert lab.data['persistent'] == [dict(network=NEW['dst'], gateway=NEW['gateway'], metric=100)]
+        unchanged = copy.deepcopy(lab.data)
+        repeated = lab.run()
+        assert repeated.returncode == 0, repeated.stdout
+        assert lab.data == unchanged
+        assert not (lab.state / 'front-routes.pending').exists()
 
     @pytest.mark.parametrize('field,value', [
         ('meta', 'invalid device'), ('operations', 'not-a-route'), ('operations', '42'),
@@ -289,6 +382,40 @@ class TestNativeRouteExpressions:
 
 
 class TestNativeProcessTransactions:
+    def test_same_inode_lock_with_new_content_stops_before_any_network_write(self, tmp_path):
+        """A stable lock inode cannot authorize writes after its content changes."""
+        lab = NativeRouteLab(tmp_path)
+        marker = tmp_path / 'lock-appended'
+        wrapper = tmp_path / 'bin/stat'
+        wrapper.write_text('#!/bin/bash\n'
+            'if [[ $1 == -Lc && $2 == %d:%i:%s && ! -e $BIND_LOCK_APPENDED &&\n'
+            '      -f $BIND_LOCK_PROGRESS ]] && [[ $(/usr/bin/cat -- "$BIND_LOCK_PROGRESS") == "0 intent" ]]; then\n'
+            '  /usr/bin/cat -- "$BIND_LOCK_PROGRESS" > "$BIND_LOCK_APPENDED"\n'
+            '  printf x >> "$BIND_LOCK_PATH"\nfi\n'
+            'exec /usr/bin/stat "$@"\n', encoding='ascii')
+        wrapper.chmod(0o755)
+        lab.env.update(BIND_LOCK_APPENDED=str(marker), BIND_LOCK_PATH=str(lab.state / 'operations.flock'),
+                       BIND_LOCK_PROGRESS=str(lab.state / 'front-routes.pending/progress'))
+        result = lab.run()
+        assert marker.exists(), 'The real lock-content race must reach the descriptor observation'
+        assert marker.read_bytes() == b'0 intent\n'
+        assert result.returncode == 1 and 'Transient operation lock changed' in result.stdout, result.stdout
+        assert (lab.state / 'operations.flock').read_bytes() == b'x'
+        assert lab.data['runtime'] == BASE and lab.data['persistent'] == [] and lab.data['operations'] == []
+        pending = lab.state / 'front-routes.pending'
+        assert {path.name for path in pending.iterdir()} == {
+            'meta', 'operations', 'profile', 'kernel', 'addresses', 'rules', 'clients', 'checksums', 'progress'}
+        assert (pending / 'progress').read_text() == '0 done\n'
+        # The guard stops the first mutation and preserves the complete journal
+        # while the lock is invalid. Repair only the owned lock, then require
+        # recovery to consume that journal without introducing route commands.
+        (lab.state / 'operations.flock').write_bytes(b'')
+        recovered = lab.run('recover')
+        assert recovered.returncode == 2 and 'FRONT rollback completed' in recovered.stdout, recovered.stdout
+        assert not pending.exists()
+        assert lab.data['runtime'] == BASE and lab.data['persistent'] == [] and lab.data['operations'] == []
+        assert not list(lab.state.glob('.route-work.*'))
+
     """Exercise the replacement engine, not only its planned arithmetic."""
 
     @pytest.mark.parametrize('action', ['legacy-rollback', 'legacy-cleanup'])
@@ -316,9 +443,10 @@ class TestNativeProcessTransactions:
         result = lab.run()
         assert result.returncode == 1, result.stdout
         assert 'temporary work cleanup failed' in result.stdout
-        # The transaction already committed: report cleanup failure accurately,
-        # preserve its diagnostic work directory, and leave valid routes intact.
-        assert lab.data['runtime'] == BASE + [NEW] and len(lab.data['persistent']) == 1
+        # Cleanup precedes commit. Even a permanent workspace rmdir failure
+        # must roll back owned additions and retain the diagnostic directory.
+        assert 'FRONT rollback completed; preexisting routes preserved.' in result.stdout
+        assert lab.data['runtime'] == BASE and lab.data['persistent'] == []
         assert not (lab.state / 'front-routes.pending').exists()
         assert len(list(lab.state.glob('.route-work.*'))) == 1
 
@@ -646,3 +774,18 @@ os.execv(os.environ['BIND_REAL_SORT'], [os.environ['BIND_REAL_SORT']] + sys.argv
         result = lab.run('recover', more=['--ssh-peer', peer])
         assert result.returncode == 1 and 'current SSH peer' in result.stdout
         assert lab.data == before and (lab.state / 'front-routes.pending').exists()
+
+    @pytest.mark.parametrize('peer', ['192.0.2.99', '::ffff:223.0.113.8'])
+    def test_recovery_removes_owned_routes_when_ssh_peer_is_outside_their_range(self, tmp_path, peer):
+        """Protect the live peer without blocking unrelated, exactly owned recovery."""
+        lab = NativeRouteLab(tmp_path)
+        result = lab.run(more=['--defer-commit'])
+        assert result.returncode == 2, result.stdout
+        assert len(lab.data['operations']) == 2
+        result = lab.run('recover', more=['--ssh-peer', peer])
+        assert result.returncode == 2 and 'FRONT rollback completed' in result.stdout, result.stdout
+        assert lab.data['runtime'] == BASE and lab.data['persistent'] == []
+        assert [row['action'] for row in lab.data['operations']] == [
+            '+ipv4.routes', '+ipv4.routes', '-ipv4.routes', '-ipv4.routes']
+        assert not (lab.state / 'front-routes.pending').exists()
+        assert not list(lab.state.glob('.route-work.*'))

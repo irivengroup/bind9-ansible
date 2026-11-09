@@ -8,18 +8,38 @@
       - not (bind_front_route_transaction_pending | default(false) | bool)
     fail_msg: 'Deployment recovery is incomplete; the operation lease is retained. Inspect DNS, FRONT journals and backups before explicit operator recovery.'
 
+- name: Observe FRONT recovery evidence independently of in-memory ownership facts
+  # The native script can fail before Ansible records its pending transaction.
+  # Any surviving object at the journal path requires inspection, including links.
+  ansible.builtin.stat:
+    path: /var/lib/Bind9-Ansible/front-routes.pending
+    follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  register: bind_front_release_journal
+
+- name: Preserve the operation lease while FRONT recovery evidence exists
+  ansible.builtin.assert:
+    that:
+      - not bind_front_release_journal.stat.exists
+    fail_msg: 'FRONT recovery evidence remains on disk; the operation lease is retained even if no pending transaction fact was recorded. Inspect the journal and use explicit routes-recover before releasing ownership.'
+
 - name: Observe the operation lease before release without following links
   ansible.builtin.stat:
     path: /var/lib/Bind9-Ansible/.operation.lock
     follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
   register: bind_deployment_release_lease
 
 - name: Require the exact private directory acquired by this invocation
   ansible.builtin.assert:
     that:
       - bind_deployment_owned_lease is defined and bind_deployment_owned_lease.stat is defined
-      - bind_deployment_release_lease.stat.exists and (bind_deployment_release_lease.stat.isdir | default(false))
       - not (bind_deployment_release_lease.stat.islnk | default(false))
+      - bind_deployment_release_lease.stat.exists and (bind_deployment_release_lease.stat.isdir | default(false))
       - bind_deployment_release_lease.stat.uid == 0 and bind_deployment_release_lease.stat.mode == '0700'
       - bind_deployment_release_lease.stat.dev == bind_deployment_owned_lease.stat.dev
       - bind_deployment_release_lease.stat.inode == bind_deployment_owned_lease.stat.inode

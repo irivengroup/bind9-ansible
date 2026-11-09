@@ -4,7 +4,7 @@
     that:
       - ansible_distribution == 'RedHat' and (ansible_distribution_major_version | int) >= 8
       - bind_manage is defined and bind_manage is mapping
-      - bind_manage.resource | default('') in ['option', 'zone', 'record', 'batch']
+      - bind_manage.resource | default('') in ['option', 'zone', 'record', 'acl', 'logging', 'batch']
       - >-
         (bind_manage.resource | default('') == 'batch' and bind_manage.action | default('') in ['read', 'apply']) or
         (bind_manage.resource | default('') != 'batch' and bind_manage.action | default('') in ['create', 'read', 'list', 'update', 'delete'])

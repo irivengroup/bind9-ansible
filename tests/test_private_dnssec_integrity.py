@@ -115,12 +115,19 @@ def test_lock_and_policy_must_be_root_owned_regular_files(tmp_path, dnssec, kind
     assert not (tmp_path / 'owned.json').exists()
 
 
-def test_contended_lock_exits_within_the_configured_deadline(tmp_path):
+def test_contended_lock_exits_within_the_configured_deadline(tmp_path, dnssec):
     config, state = tmp_path / 'named.conf', tmp_path / 'owned.json'
     config.write_text('options {};\n', encoding='utf-8')
     with (tmp_path / 'dnssec.lock').open('w') as stream:
         os.fchmod(stream.fileno(), 0o600)
         fcntl.flock(stream, fcntl.LOCK_EX)
+        # The component must refuse before writing its journal or invoking
+        # RNDC; retain the separate public CLI deadline assertion below.
+        helper = dnssec.PrivateDnssec(config, state, lock_timeout=0,
+            runner=lambda *args, **kwargs: pytest.fail('RNDC ran without the DNSSEC lock'))
+        with pytest.raises(ValueError, match='DNSSEC lock timed out'):
+            helper.reconcile()
+        assert not state.exists()
         result = subprocess.run([sys.executable, str(SCRIPT), '--config', str(config),
                                  '--state', str(state), '--lock-timeout', '0.05'],
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,

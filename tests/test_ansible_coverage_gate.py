@@ -30,7 +30,8 @@ def partial_receipt(receipt):
     # every predicate outcome, but deliberately no task/data-field execution.
     entries = gate.yaml.predicates.values()
     units = {entry['label'] + '|' + key: unit for entry in entries for key, unit in entry['inventory'].units.items()}
-    observed = {'schema': 1, 'engine': 'ansible-core-2.16.14-native-conditional',
+    observed = {'schema': 1, 'engine': 'ansible-core-2.16.19-native-conditional',
+        'controller_profile': Q.AnsibleCollector.controller_profile(),
         'files': gate.yaml.files, 'components': gate.yaml.components, 'complete': False, 'unsupported': [],
         'statements': [key for key, unit in units.items() if unit['kind'] == 'statement'],
         'lines': [entry['label'] + '|line:' + str(line) for entry in gate.yaml.predicates.values()
@@ -60,7 +61,8 @@ def test_complete_predicates_still_leave_complete_yaml_metrics_unmeasured(partia
 
 
 @pytest.mark.parametrize('mutation', ['source', 'units', 'complete', 'engine', 'schema', 'observer',
-    'unknown_empty', 'statement', 'line', 'branch', 'condition_type', 'unsupported'])
+    'unknown_empty', 'statement', 'line', 'branch', 'condition_type', 'unsupported', 'disabled-inspection',
+    'inspection-int', 'compatibility-int'])
 def test_forged_or_unknown_predicate_observation_is_refused_atomically(partial_receipt, mutation):
     gate, evidence, value, original = partial_receipt
     observed = copy.deepcopy(original)
@@ -76,6 +78,13 @@ def test_forged_or_unknown_predicate_observation_is_refused_atomically(partial_r
         observed['schema'] = True
     elif mutation == 'observer':
         value['ansible_observer_sha256'] = '0' * 64
+    elif mutation == 'disabled-inspection':
+        observed['controller_profile']['backported_inspections'] = False
+    elif mutation == 'inspection-int':
+        observed['controller_profile']['backported_inspections'] = 1
+    elif mutation == 'compatibility-int':
+        observed['controller_profile']['allow_broken_conditionals'] = int(
+            observed['controller_profile']['allow_broken_conditionals'])
     elif mutation == 'unknown_empty':
         observed['conditions']['unknown|condition'] = []
     elif mutation == 'statement':

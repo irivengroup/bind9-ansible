@@ -172,3 +172,101 @@ def test_operation_lock_replacement_during_the_initial_stat_is_refused(lab, monk
         with manager.operation():
             pytest.fail('Replaced lock was accepted')
     assert swaps and path.exists()
+
+
+def test_resolved_vendor_ancestor_replacement_is_checked_before_open(lab, monkeypatch):
+    parent = lab.root / 'etc/crypto-policies/back-ends'
+    parent.mkdir(parents=True)
+    target = lab.root / 'usr/share/crypto-policies/DEFAULT/bind.txt'
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b'operator policy bytes\n')
+    link = parent / 'bind.config'
+    link.symlink_to(target)
+    held = target.parent.with_name('operator-held-policy')
+    resolve = Path.resolve
+    swapped = []
+
+    def replace_after_resolution(path, *args, **kwargs):
+        result = resolve(path, *args, **kwargs)
+        if path == link and not swapped:
+            target.parent.rename(held)
+            target.parent.write_bytes(b'foreign regular ancestor\n')
+            swapped.append(True)
+        return result
+
+    monkeypatch.setattr(Path, 'resolve', replace_after_resolution)
+    with pytest.raises(M.ManagementError, match='vendor crypto-policy ancestor'):
+        M.SafeFiles(lab.root).read('/etc/crypto-policies/back-ends/bind.config')
+    assert swapped and (held / 'bind.txt').read_bytes() == b'operator policy bytes\n'
+    assert target.parent.read_bytes() == b'foreign regular ancestor\n'
+
+
+def test_pending_marker_cleanup_accepts_a_temporary_name_already_removed_after_link(lab, monkeypatch):
+    manager = lab.manager()
+    folder = manager.private_directory('/var/backups/Bind9-Ansible/management') / 'owned-transaction'
+    folder.mkdir(mode=0o700)
+    pointer = manager.pending_path()
+    native_link = M.os.link
+    removed = []
+
+    def link_then_remove_temporary(source, destination, **kwargs):
+        native_link(source, destination, **kwargs)
+        if str(destination) == str(pointer):
+            os.unlink(source)
+            removed.append(source)
+
+    monkeypatch.setattr(M.os, 'link', link_then_remove_temporary)
+    manager.mark_pending(folder)
+    assert removed and not Path(removed[0]).exists()
+    assert M.VerifiedIO.read_json(pointer, 65536)['transaction'] == '/' + folder.relative_to(lab.root).as_posix()
+    assert pointer.stat().st_nlink == 1
+
+
+def test_relabel_second_observation_catches_an_edit_after_the_first_metadata_check(lab, monkeypatch):
+    manager = lab.manager()
+    name = '/etc/named.conf'
+    original = manager.files.read(name)
+    manager.live_state = {name: original}
+    manager.live_stamps = {name: manager.files.observations[name]}
+    native_read = manager.files.read
+    operator = original.replace(b'minimal-responses yes;', b'minimal-responses no;')
+    reads = []
+
+    def edit_after_read(path):
+        data = native_read(path)
+        if path == name and not reads:
+            (lab.root / 'etc/named.conf').write_bytes(operator)
+        reads.append(path)
+        return data
+
+    monkeypatch.setattr(manager.files, 'read', edit_after_read)
+    with pytest.raises(M.ManagementError, match='during SELinux relabeling'):
+        manager.labels([name])
+    assert reads == [name, name]
+    assert (lab.root / 'etc/named.conf').read_bytes() == operator
+    assert manager.live_state[name] == original
+
+
+def test_rollback_publication_identity_survives_a_corrupted_observation_cache(lab):
+    """A refreshed metadata cache cannot transfer ownership of a foreign inode."""
+    manager = lab.manager(action='update', value='no')
+    manager.request['expected_checksum'] = M.Configuration(manager.files).revision()
+    path = lab.root / 'etc/named.conf'
+    foreign = []
+
+    def replace_and_invalidate_reload(argv):
+        if argv[-1] == 'reload' and not foreign:
+            replace_path(path)
+            manager.files.read('/etc/named.conf')
+            # Use actual foreign metadata, never forged inode/stat values.
+            manager.live_stamps['/etc/named.conf'] = manager.files.observations['/etc/named.conf']
+            foreign.append(path.stat().st_ino)
+            assert manager.publications['/etc/named.conf'][1] != foreign[0]
+            raise M.ManagementError('Injected native reload failure')
+
+    lab.fail = replace_and_invalidate_reload
+    with manager.lease(), pytest.raises(M.ManagementError, match='recovery-required'):
+        manager.run()
+    assert foreign and path.stat().st_ino == foreign[0]
+    assert b'minimal-responses no;' in path.read_bytes()
+    assert manager.pending_path().exists() and manager.retain_lease

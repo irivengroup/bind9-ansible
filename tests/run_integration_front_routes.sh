@@ -6,7 +6,8 @@ set -euo pipefail
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 nmcli_bin=$(command -v nmcli)
 manager_bin=$(command -v NetworkManager)
-python_bin=$(command -v "${PYTHON:-python3}")
+# EL8's python3 may traverse /etc/alternatives, which this namespace hides.
+python_bin=$(readlink -f -- "$(command -v "${PYTHON:-python3}")")
 ansible_bin=$(command -v ansible-playbook)
 lab_dir=$(mktemp -d /tmp/bind9-nm-lab.XXXXXXXX)
 status=0
@@ -15,15 +16,19 @@ unshare --mount --net --pid --fork --mount-proc bash -s -- \
 set -euo pipefail
 script_dir=$1 lab_dir=$2 nmcli_bin=$3 manager_bin=$4 python_bin=$5 ansible_bin=$6
 mount --make-rprivate /
-mount -t tmpfs tmpfs /etc
-mount -t tmpfs tmpfs /run
-mount -t tmpfs tmpfs /var/lib
+mount -t tmpfs -o mode=0755 tmpfs /etc
+mount -t tmpfs -o mode=0755 tmpfs /run
+mount -t tmpfs -o mode=0755 tmpfs /var/lib
 mount -t sysfs sysfs /sys
-mkdir -p /etc/NetworkManager/system-connections /etc/netplan /run/bind-test \
+mkdir -p /etc/NetworkManager/system-connections /etc/netplan /run/bind-test/bin \
     /run/NetworkManager/system-connections /var/lib/NetworkManager
 printf 'root:x:0:0:root:/root:/bin/bash\n' > /etc/passwd
 printf 'root:x:0:\n' > /etc/group
-export PATH="$(dirname -- "$nmcli_bin"):$(dirname -- "$python_bin"):$(dirname -- "$ansible_bin"):$PATH"
+# Keep the original Ansible script bytes, but bypass its now-hidden interpreter
+# symlink using the same resolved Python that runs the integration controller.
+printf '#!/bin/bash\nexec %q %q "$@"\n' "$python_bin" "$ansible_bin" > /run/bind-test/bin/ansible-playbook
+chmod 0700 /run/bind-test/bin/ansible-playbook
+export PATH="/run/bind-test/bin:$(dirname -- "$nmcli_bin"):$(dirname -- "$python_bin"):$(dirname -- "$ansible_bin"):$PATH"
 export DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/bind-test/bus
 export BIND_NM_NETNS=1
 cat > /run/bind-test/bus.conf <<'EOF'

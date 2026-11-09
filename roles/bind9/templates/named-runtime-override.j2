@@ -1,5 +1,7 @@
 # Bind9-Ansible: preserve native dual-stack startup and local RNDC administration.
 # DNS IPv6 listening is disabled by named.conf, never by a process-wide -4 flag.
 [Service]
+# BIND recreates rotated logs; preserve the role's private 0640 file policy.
+UMask=0027
 ExecReload=
 ExecReload=/usr/sbin/rndc -s 127.0.0.1 -k /etc/rndc.key reload

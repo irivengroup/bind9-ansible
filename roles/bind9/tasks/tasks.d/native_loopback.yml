@@ -4,6 +4,9 @@
   ansible.builtin.stat:
     path: '{{ item }}'
     follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
   loop:
     - /etc/named.rfc1912.zones
     - /var/named/named.localhost
@@ -15,8 +18,8 @@
   ansible.builtin.assert:
     that:
       - item.stat.exists
-      - item.stat.isreg | default(false)
       - not (item.stat.islnk | default(false))
+      - item.stat.isreg | default(false)
     fail_msg: 'Native BIND file missing or unsafe: {{ item.item }}. Repair the RHEL bind package; the role does not replace vendor files.'
   loop: '{{ bind_native_loopback_files.results }}'
   loop_control:
@@ -27,6 +30,9 @@
     path: '{{ item }}'
     # crypto-policies can install a symlink to the selected vendor policy.
     follow: true
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
   loop:
     - /etc/crypto-policies/back-ends/bind.config
   register: bind_native_security_files
@@ -45,6 +51,9 @@
   ansible.builtin.stat:
     path: /etc/named.root.key
     follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
   register: bind_native_trust_anchor
   when: bind_dnssec_active == 'auto' or (bind_dnssec_active | bool)
 
@@ -52,7 +61,7 @@
   ansible.builtin.assert:
     that:
       - bind_native_trust_anchor.stat.exists
-      - bind_native_trust_anchor.stat.isreg | default(false)
       - not (bind_native_trust_anchor.stat.islnk | default(false))
+      - bind_native_trust_anchor.stat.isreg | default(false)
     fail_msg: 'Enabled DNSSEC requires the native /etc/named.root.key file.'
   when: bind_dnssec_active == 'auto' or (bind_dnssec_active | bool)

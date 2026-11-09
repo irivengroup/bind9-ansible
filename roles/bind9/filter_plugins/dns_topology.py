@@ -94,11 +94,13 @@ class FilterModule:
                 'dns_forwarder_safe': self.forwarder}
 
     @staticmethod
-    def forwarder(server):
+    def forwarder(server, local_addresses=None):
         """Require a literal unicast endpoint and a strictly typed decimal port.
 
-        Mapped IPv4 and scoped IPv6 are refused so textual aliases cannot bypass
-        the role's explicit local-endpoint checks or require interface guessing.
+        Mapped IPv4 and scoped IPv6 are refused. With local_addresses supplied,
+        compare address identities and the entire loopback range at port 53;
+        textual IPv6 aliases must not bypass the role's local endpoint guard.
+        Other ports remain available for explicitly configured local upstreams.
         """
         if not isinstance(server, dict):
             return False
@@ -116,8 +118,17 @@ class FilterModule:
                 return False
             if address.version == 4 and str(address) != value:
                 return False
-            return not (address.is_unspecified or address.is_multicast or address.is_link_local or
-                        str(address) == '255.255.255.255')
+            if address.is_unspecified or address.is_multicast or address.is_link_local or str(address) == '255.255.255.255':
+                return False
+            if local_addresses is not None:
+                if not isinstance(local_addresses, (list, tuple)):
+                    return False
+                if any(not isinstance(value, str) or '%' in value for value in local_addresses):
+                    return False
+                protected = {ipaddress.ip_address(value) for value in local_addresses}
+                if int(port) == 53 and (address.is_loopback or address in protected):
+                    return False
+            return True
         except (ValueError, TypeError, KeyError):
             return False
 
@@ -149,11 +160,16 @@ class FilterModule:
             return False
         try:
             addresses = [ipaddress.IPv4Address(front), ipaddress.IPv4Address(back)]
-            if front == back or any(x.is_loopback or x.is_unspecified or x.is_multicast or x.is_link_local or
+            # Legacy stdlib accepts aliases such as zero-padded IPv4 octets.
+            if addresses[0] == addresses[1] or any(x.is_loopback or x.is_unspecified or x.is_multicast or x.is_link_local or
                                     str(x) == '255.255.255.255' for x in addresses):
                 return False
             decoded = base64.b64decode(secret, validate=True)
         except (ValueError, binascii.Error):
             return False
         return bool(re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9_.-]{0,127}', key)
-                    and algorithm == 'hmac-sha256' and len(decoded) >= 32)
+                    and algorithm == 'hmac-sha256' and len(decoded) >= 32
+                    # Strict decoding alone accepts nonzero unused pad bits.
+                    # Match the canonical representation required by the TSIG
+                    # material store without narrowing the >=256-bit contract.
+                    and base64.b64encode(decoded).decode('ascii') == secret)

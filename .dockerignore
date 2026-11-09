@@ -1,0 +1,11 @@
+# The QA build needs only its reviewed recipe, lock and native observer inputs.
+# Repository credentials, inventories, keys, caches and evidence are not context.
+**
+!tools/
+!tools/quality/
+!tools/quality/Dockerfile.qa
+!tools/quality/requirements-qa.lock
+!tools/quality/native_bash/
+!tools/quality/native_bash/build.py
+!tools/quality/native_bash/gnu-bash-5.2.37-observer.patch
+!tools/quality/native_bash/COPYING

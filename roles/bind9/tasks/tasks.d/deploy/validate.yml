@@ -74,19 +74,17 @@
   loop_control:
     label: "{{ item.domain | default('undefined') }}"
 
+# dns_forwarder_safe also rejects mistyped and out-of-range ports.
 - name: Validate each forwarding destination
   ansible.builtin.assert:
     that:
       - item.1.address is defined
       - item.1.address | length > 0
-      - item.1 | dns_forwarder_safe
       - >-
-        (item.1.port | default(53) | int) != 53 or item.1.address not in
-        [bind_front_ip, bind_back_ip, '127.0.0.1', '::1',
+        item.1 | dns_forwarder_safe(
+        [bind_front_ip, bind_back_ip,
         hostvars[bind_primary_host].bind_front_ip, hostvars[bind_primary_host].bind_back_ip,
-        hostvars[bind_secondary_host].bind_front_ip, hostvars[bind_secondary_host].bind_back_ip]
-      - item.1.port | default(53) | int >= 1
-      - item.1.port | default(53) | int <= 65535
+        hostvars[bind_secondary_host].bind_front_ip, hostvars[bind_secondary_host].bind_back_ip])
     fail_msg: 'Invalid forwarding server address or port.'
   loop: "{{ bind_forward_zones | subelements('forwarders') }}"
   loop_control:
@@ -118,14 +116,15 @@
 - name: Validate authoritative zone definitions
   ansible.builtin.assert:
     that:
+      # Reject wildcard/type errors before the more expensive DNS-name pattern.
+      - item.domain is string and '*' not in item.domain
       - item.domain is match('(?i)^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$')
       - item.serial is defined
       - item.serial | string is match('^[0-9]{1,10}$')
       - item.serial | int > 0
       - item.serial | int <= 4294967295
-      - item.ttl | default(300) | int >= 0
+      - item.ttl | default(300) | valid_dns_ttl
       - item.records | default([]) is sequence
-      - "'*' not in item.domain"
     fail_msg: 'Invalid authoritative zone definition.'
   loop: "{{ bind_managed_zones }}"
   loop_control:
@@ -137,6 +136,7 @@
       - bind_managed_zones | dns_topology_valid(bind_forward_zones)
     fail_msg: 'Invalid DNS topology: native zone collision, hidden authoritative data or ambiguous forwarding.'
 
+# valid_dns_record rejects control characters for every supported record type.
 - name: Validate authoritative resource records
   ansible.builtin.assert:
     that:
@@ -145,18 +145,10 @@
       - item.1.value is defined
       - item.1.value | string | length > 0
       - item.1 | valid_dns_record
-      - "'\n' not in item.1.value | string"
     fail_msg: 'Invalid DNS resource record.'
   loop: "{{ (bind_managed_zones) | subelements('records', skip_missing=True) }}"
   loop_control:
     label: "{{ item.0.domain }} / {{ item.1.name }}"
-
-- name: Validate reverse network input and generated zone collisions
-  ansible.builtin.assert:
-    that:
-      - (bind_managed_zones | map(attribute='domain') | list | unique | length) == (bind_managed_zones | length)
-      - (bind_managed_zones | map(attribute='domain') | list | intersect(bind_forward_zones | map(attribute='domain') | list) | length) == 0
-    fail_msg: 'Automatically generated reverse zone conflicts with an existing zone.'
 
 - name: Reject explicit reverse masks in authoritative records
   ansible.builtin.assert:

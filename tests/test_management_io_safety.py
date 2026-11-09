@@ -1,6 +1,7 @@
 """Inject short/corrupt I/O before any configuration is allowed to go live."""
 import os
 import errno
+import json
 from pathlib import Path
 import sys
 import subprocess
@@ -148,18 +149,24 @@ def test_command_deadline_terminates_its_process(lab, monkeypatch, kind):
         M.Manager.command([sys.executable, '-c', source])
 
 
-def test_command_timeout_stops_descendants_too(tmp_path, monkeypatch):
-    monkeypatch.setattr(M.NativeCommand, 'TIMEOUT', 0.4)
-    marker = tmp_path / 'descendant.pid'
-    source = ('import subprocess,sys,time; from pathlib import Path; '
-              'p=subprocess.Popen([sys.executable,"-c","import time; time.sleep(30)"]); '
-              'Path(sys.argv[1]).write_text(str(p.pid)); time.sleep(30)')
-    with pytest.raises(M.ManagementError, match='timed out'):
-        M.Manager.command([sys.executable, '-c', source, str(marker)])
-    assert marker.is_file()
-    process = Path('/proc') / marker.read_text() / 'stat'
-    if process.exists():
-        assert process.read_text().split()[2] == 'Z'  # Terminated, awaiting namespace reaper.
+def test_command_timeout_stops_descendants_too():
+    # Reap the real orphan in a separate subreaper; /proc can transiently say R
+    # after SIGKILL. The kernel wait status proves termination by that signal.
+    probe = Path(__file__).parent / 'fixtures/process_group_probe.py'
+    result = subprocess.run([sys.executable, str(probe), M.__file__],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            universal_newlines=True, timeout=12, check=False)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {'descendant_signal': 9, 'reaped': True}
+
+
+def test_descendant_exit_probe_rejects_parent_only_termination():
+    probe = Path(__file__).parent / 'fixtures/process_group_probe.py'
+    result = subprocess.run([sys.executable, str(probe), M.__file__, '--parent-only'],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            universal_newlines=True, timeout=12, check=False)
+    assert result.returncode == 23, result.stderr
+    assert json.loads(result.stdout) == {'descendant_still_alive': True}
 
 
 @pytest.mark.parametrize('payload', [float('nan'), object()])

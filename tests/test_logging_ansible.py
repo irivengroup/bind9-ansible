@@ -45,7 +45,11 @@ elif tool == 'ls':
     if args[0] == '-Zd':
         label = state['type'] if state['restored'] and state['failure'] != 'labels' else 'var_log_t'
     for name in args[1:]:
-        print('system_u:object_r:' + label + ':s0 ' + name)
+        # Files live in the private root; labels describe their canonical
+        # counterparts. Refuse paths outside that explicit alias map.
+        canonical = state['paths'].get(name)
+        assert canonical is not None and pathlib.Path(name).exists(), name
+        print('system_u:object_r:' + label + ':s0 ' + canonical)
 else:
     sys.exit('unexpected command: ' + tool)
 path.write_text(json.dumps(state))
@@ -70,6 +74,9 @@ class LoggingTaskRunner:
             '/var/named', '/var/log/named', '/var/log/named/default.log',
             '/var/log/named/security.log', '/var/log/named/xfer.log',
             '/etc/named.conf', '/etc/profile.d/bind9-sbin-path.sh']}
+        state = json.loads(self.state.read_text())
+        state['paths'] = {private: canonical for canonical, private in self.paths.items()}
+        self.state.write_text(json.dumps(state))
         for name in ('/var/named', '/var/log/named'):
             Path(self.paths[name]).mkdir(parents=True)
         Path(self.paths['/etc/named.conf']).parent.mkdir(parents=True)
@@ -107,6 +114,10 @@ class LoggingTaskRunner:
             task['register'] = 'logging_file_result' if task.get('name', '').startswith('Prepare private') else 'logging_dir_result'
         security = self.rebase(yaml.safe_load((tasks_path / 'deploy/security.yml').read_text()))
         security[0]['ansible.builtin.copy'].update(owner=self.user, group=self.group)
+        # This private playbook keeps the same role asset bytes while rebasing
+        # destinations; its own directory does not have the role's search path.
+        security[0]['ansible.builtin.copy']['src'] = str(ROOT / 'roles/bind9/files' /
+            security[0]['ansible.builtin.copy']['src'])
         for task in security:
             if task['name'].startswith('Persist the SELinux log context'):
                 task['register'] = 'logging_policy_result'
@@ -144,3 +155,14 @@ class LoggingTaskRunner:
 @pytest.mark.parametrize('initial', ['missing', 'wrong', 'correct', 'disabled', 'bad_labels', 'mutation_failure'])
 def test_real_logging_tasks_preserve_data_and_policy_idempotence(tmp_path, initial, native):
     LoggingTaskRunner(tmp_path, initial, native).run()
+
+
+@pytest.mark.parametrize('fault', ['unknown', 'missing'])
+def test_logging_label_boundary_refuses_unmapped_or_absent_private_paths(tmp_path, fault):
+    runner = LoggingTaskRunner(tmp_path, 'correct', False)
+    name = str(tmp_path / 'foreign') if fault == 'unknown' else runner.paths['/var/log/named/security.log']
+    if fault == 'unknown':
+        Path(name).write_text('unmanaged\n')
+    result = subprocess.run([str(tmp_path / 'bin/ls'), '-Z', name], env=runner.environment,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=5)
+    assert result.returncode != 0 and result.stdout == ''

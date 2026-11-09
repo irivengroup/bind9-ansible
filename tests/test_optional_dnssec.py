@@ -117,7 +117,7 @@ class TestOptionalDnssec:
         snapshot=next(t for t in main if t.get('ansible.builtin.import_tasks')=='{{ role_path }}/tasks/tasks.d/runtime_snapshot.yml')
         assert main.index(snapshot)<main.index(deployment)
         names=[task['name'] for task in deployment['rescue']]
-        assert names.index('Stop named before restoring files and journals') < names.index('Restore managed runtime files from before the failed deployment') < names.index('Restart restored BIND configuration')
+        assert names.index('Stop named before restoring files and journals') < names.index('Restore managed runtime files from before the failed deployment') < names.index('Restore pre-deployment BIND service state')
         assert 'Record whether the private DNSSEC timer was active' not in names
         snapshot=(self.ROLE/'tasks/tasks.d/runtime_snapshot.yml').read_text()
         assert 'systemctl, is-active' in snapshot and 'systemctl, is-enabled' in snapshot

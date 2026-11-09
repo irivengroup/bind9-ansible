@@ -1,5 +1,6 @@
 """Regress lifecycle and durability failures identified by the global review."""
 import importlib.util
+import hashlib
 import os
 from pathlib import Path
 import stat
@@ -17,6 +18,34 @@ spec.loader.exec_module(module)
 
 def policy(domain):
     return '// Bind9-Ansible DNSSEC-PRIVATE ' + domain + '\nzone "' + domain + '" IN {\n type forward;\n};\n'
+
+
+def completed_route_fixture(folder):
+    """Build independent synthetic evidence for the integration verifier contract."""
+    directory = folder / '.front-routes.retired.12345678-1234-4234-8234-123456789abc.AbCd1234'
+    directory.mkdir(mode=0o700)
+    identity = ('23456789-1234-4234-8234-123456789abc', 'front0', '198.51.100.1',
+                '198.51.100.2', '10.0.0.2', '192.0.2.2', '100')
+    operations = ['P|203.0.113.0/24|198.51.100.1|100', 'R|203.0.113.0/24|198.51.100.1|100']
+    data = {name: b'baseline\n' for name in ('profile', 'kernel', 'addresses', 'rules')}
+    data.update(meta=('12345678-1234-4234-8234-123456789abc|' + '|'.join(identity) + '\n').encode(),
+                operations=('\n'.join(operations) + '\n').encode(), clients=b'203.0.113.0/24\n',
+                progress=b'2 done\n')
+    for name, value in data.items():
+        path = directory / name
+        path.write_bytes(value)
+        path.chmod(0o600)
+    refresh_completed_checksums(directory)
+    return directory, identity, operations, ['203.0.113.0/24']
+
+
+def refresh_completed_checksums(directory):
+    """Keep integrity valid when exercising a separate semantic refusal."""
+    names = ('meta', 'operations', 'profile', 'kernel', 'addresses', 'rules', 'clients')
+    path = directory / 'checksums'
+    path.write_text(''.join(hashlib.sha256((directory / name).read_bytes()).hexdigest() +
+                            '  ' + name + '\n' for name in names))
+    path.chmod(0o600)
 
 
 class TestGlobalReview:
@@ -51,6 +80,62 @@ class TestGlobalReview:
         monkeypatch.setattr(lab, 'command', lambda argv, **kwargs: calls.append(argv))
         lab.stop_owned_named()
         assert bool(calls) is stops
+
+    @pytest.mark.skipif(os.name != 'posix' or os.geteuid() != 0, reason='Requires native root metadata')
+    def test_completed_journal_verifier_admits_only_the_complete_immutable_evidence(self, tmp_path):
+        from integration_deploy_auto_routes import CombinedDeployment
+        directory, identity, operations, clients = completed_route_fixture(tmp_path)
+        before = {str(p): (hashlib.sha256(p.read_bytes()).hexdigest(), p.stat().st_ino,
+            p.stat().st_mtime_ns, p.stat().st_mode, p.stat().st_uid, p.stat().st_gid) for p in directory.iterdir()}
+        assert len(before) == 9
+        assert CombinedDeployment.completed_route_snapshot(directory, identity, operations, clients) == before
+
+    @pytest.mark.skipif(os.name != 'posix' or os.geteuid() != 0, reason='Requires native root metadata')
+    @pytest.mark.parametrize('damage', ['missing', 'extra', 'checksum', 'unfinished', 'meta',
+        'operations', 'clients', 'directory-mode', 'file-mode', 'file-symlink', 'file-hardlink',
+        'owner', 'directory-symlink'])
+    def test_completed_journal_verifier_rejects_unsafe_or_unrelated_additions(self, tmp_path, damage):
+        from integration_deploy_auto_routes import CombinedDeployment
+        directory, identity, operations, clients = completed_route_fixture(tmp_path)
+        operator = tmp_path / 'operator-evidence'
+        operator.write_bytes(b'operator bytes\n')
+        operator.chmod(0o600)
+        if damage == 'missing':
+            (directory / 'meta').unlink()
+        elif damage == 'extra':
+            (directory / 'operator-file').write_bytes(b'foreign bytes\n')
+        elif damage == 'checksum':
+            (directory / 'kernel').write_bytes(b'changed baseline\n')
+        elif damage == 'unfinished':
+            (directory / 'progress').write_bytes(b'1 intent\n')
+        elif damage in ('meta', 'operations', 'clients'):
+            (directory / damage).write_bytes(b'foreign semantic record\n')
+            refresh_completed_checksums(directory)
+        elif damage == 'directory-mode':
+            directory.chmod(0o755)
+        elif damage == 'file-mode':
+            (directory / 'meta').chmod(0o644)
+        elif damage in ('file-symlink', 'file-hardlink'):
+            (directory / 'meta').unlink()
+            if damage == 'file-symlink':
+                (directory / 'meta').symlink_to(operator)
+            else:
+                os.link(str(operator), str(directory / 'meta'))
+        elif damage == 'owner':
+            os.chown(str(directory / 'meta'), 1000, 1000)
+        else:
+            actual = directory.with_name('operator-directory')
+            directory.rename(actual)
+            directory.symlink_to(actual, target_is_directory=True)
+        metadata = operator.lstat()
+        operator_before = operator.read_bytes(), (metadata.st_dev, metadata.st_ino, metadata.st_mode,
+            metadata.st_uid, metadata.st_gid, metadata.st_nlink, metadata.st_mtime_ns, metadata.st_ctime_ns)
+        with pytest.raises(AssertionError):
+            CombinedDeployment.completed_route_snapshot(directory, identity, operations, clients)
+        assert operator.read_bytes() == operator_before[0]
+        metadata = operator.lstat()
+        assert (metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_uid, metadata.st_gid,
+                metadata.st_nlink, metadata.st_mtime_ns, metadata.st_ctime_ns) == operator_before[1]
 
     @pytest.mark.skipif(os.geteuid() != 0, reason='Requires root-owned policy/state')
     def test_waiting_renewal_reloads_policy_after_acquiring_lock(self, tmp_path, monkeypatch):
