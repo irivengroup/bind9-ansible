@@ -1,0 +1,51 @@
+---
+# Component compatibility recipe; public playbooks keep their RHEL-only guard.
+- name: Exercise real EL8 services with the unchanged canonical components
+  hosts: dns_deployment_order
+  serial: 1
+  any_errors_fatal: true
+  gather_facts: true
+  tasks:
+    - name: Require the explicitly identified compatibility platform
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == 'Rocky'
+          - ansible_distribution_major_version == '8'
+          - ansible_selinux.status == 'disabled'
+    - name: Derive canonical site and client context
+      ansible.builtin.include_role:
+        name: bind9
+        tasks_from: '{{ component }}'
+      loop:
+        - tasks.d/clients.yml
+        - tasks.d/site_peers.yml
+        - tasks.d/deploy/tsig.yml
+      loop_control:
+        loop_var: component
+    - name: Derive reverse data with the canonical filter
+      ansible.builtin.set_fact:
+        bind_generated_reverse_zones: '{{ bind_authoritative_zones | automatic_reverse_zones }}'
+    - name: Combine all authoritative definitions
+      ansible.builtin.set_fact:
+        bind_managed_zones: '{{ bind_authoritative_zones + bind_generated_reverse_zones }}'
+    - name: Run canonical components against genuine services
+      ansible.builtin.include_role:
+        name: bind9
+        tasks_from: '{{ component }}'
+      loop:
+        - tasks.d/path_safety.yml
+        - tasks.d/native_loopback.yml
+        - tasks.d/deploy/migration.yml
+        - tasks.d/deploy/directories.yml
+        - tasks.d/named_runtime.yml
+        - tasks.d/dnssec_prepare.yml
+        - tasks.d/deploy/configuration.yml
+        - tasks.d/deploy/zones.yml
+        - tasks.d/deploy/security.yml
+        - tasks.d/deploy/verify.yml
+        - tasks.d/deploy/firewall.yml
+        - tasks.d/deploy/service.yml
+        - tasks.d/dnssec_activate.yml
+        - tasks.d/deploy/health.yml
+      loop_control:
+        loop_var: component

@@ -1,0 +1,13 @@
+---
+- name: Run canonical FRONT transactions over actual SSH
+  hosts: dns_deployment_order
+  serial: 1
+  any_errors_fatal: true
+  gather_facts: false
+  tasks:
+    - name: Invoke the unchanged routing component
+      ansible.builtin.include_role:
+        name: bind9
+        tasks_from: tasks.d/deploy/front_return_routes.yml
+      vars:
+        bind_front_routes_defer_commit: false
