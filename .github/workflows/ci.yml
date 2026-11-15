@@ -127,6 +127,10 @@ jobs:
   five-metric-coverage:
     runs-on: ubuntu-22.04
     timeout-minutes: 360
+    env:
+      # AppArmor matches classic bind source and target paths. util-linux
+      # 2.41 otherwise uses move_mount for a detached, source-less mount.
+      LIBMOUNT_FORCE_MOUNT2: always
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -164,8 +168,10 @@ jobs:
           # Verify both necessary mounts and a forbidden destination. Never
           # substitute an unconfined/privileged container for a policy failure.
           docker run --rm --network none --cap-add SYS_ADMIN \
+            --security-opt no-new-privileges=true --env LIBMOUNT_FORCE_MOUNT2 \
             --security-opt seccomp=unconfined --security-opt apparmor=bind9-qa-native \
             --entrypoint /bin/bash bind9-private-qa:controller -euc '
+              grep -Eq "^NoNewPrivs:[[:space:]]+1$" /proc/self/status
               test "$(cat /proc/self/attr/current)" = "bind9-qa-native (enforce)"
               mount --bind /src /src
               mount -o remount,bind,ro /src
@@ -193,6 +199,7 @@ jobs:
               native_environment=(-e BIND_MANAGEMENT_CHECKCONF=/usr/bin/named-checkconf)
             fi
             docker run --rm --network none --cap-add SYS_ADMIN \
+              --security-opt no-new-privileges=true --env LIBMOUNT_FORCE_MOUNT2 \
               --security-opt apparmor=bind9-qa-native \
               --security-opt seccomp=unconfined \
               -e BIND9_NATIVE_STATE_LAB=1 -e BIND9_CANONICAL_BASH_LAB=1 \
@@ -202,6 +209,8 @@ jobs:
               --mount "type=bind,src=$PWD,dst=/snapshot,readonly" \
               --mount "type=bind,src=$RUNNER_TEMP/bind9-five-metrics,dst=/evidence" \
               "bind9-private-qa:$image" /bin/bash -euc '
+                grep -Eq "^NoNewPrivs:[[:space:]]+1$" /proc/self/status
+                test "$(cat /proc/self/attr/current)" = "bind9-qa-native (enforce)"
                 test -z "$(find /src -mindepth 1 -maxdepth 1 -print -quit)"
                 cp -a /snapshot/. /src/
                 PYTHONPATH=/src/tools/quality python - <<"PY"
@@ -226,6 +235,13 @@ jobs:
           campaign_step native-checker run checker 8
           campaign_step native-public run public 2
           campaign_step controller merge
+      - name: Record kernel diagnostics for a refused AppArmor mount
+        if: failure()
+        run: |
+          set -euo pipefail
+          sudo journalctl -k -b --no-pager -o cat |
+            awk '/apparmor="DENIED"/ && /profile="bind9-qa-native"/ && /operation="mount"/' |
+            tail -n 40 | tee "$RUNNER_TEMP/bind9-apparmor-mount-denials.log"
       - name: Export private evidence including incomplete or refused batches
         if: always()
         run: |
@@ -233,7 +249,7 @@ jobs:
           # An early refusal still needs evidence; an absent report is explicit.
           mkdir -p "$RUNNER_TEMP/bind9-five-metrics"
           chmod 0700 "$RUNNER_TEMP/bind9-five-metrics"
-          for diagnostic in bind9-apparmor-parser.log bind9-docker-security-options.json; do
+          for diagnostic in bind9-apparmor-parser.log bind9-apparmor-mount-denials.log bind9-docker-security-options.json; do
             if [ -f "$RUNNER_TEMP/$diagnostic" ] && [ ! -L "$RUNNER_TEMP/$diagnostic" ]; then
               cp "$RUNNER_TEMP/$diagnostic" "$RUNNER_TEMP/bind9-five-metrics/$diagnostic"
             fi
