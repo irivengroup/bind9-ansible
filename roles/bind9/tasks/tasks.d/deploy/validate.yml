@@ -16,8 +16,10 @@
 - name: Validate literal service addresses and TSIG material before interpolation
   ansible.builtin.assert:
     that:
-      - bind_front_ip | dns_identity_valid(bind_back_ip, bind_tsig_key_name, bind_tsig_algorithm, bind_tsig_secret)
-    fail_msg: 'FRONT/BACK must be distinct unicast IPv4 addresses; TSIG requires a safe name, SHA-256 algorithm and a canonical secret of at least 256 bits.'
+      - >-
+        bind_front_ip | dns_identity_valid(bind_back_ip, bind_tsig_key_name, bind_tsig_algorithm, bind_tsig_secret,
+                                         bind_dns_shared_listener | default(false) | bool)
+    fail_msg: 'The DNS addresses must match the resolved listener topology; TSIG requires a safe name, SHA-256 and a canonical secret of at least 256 bits.'
   no_log: true
 
 - name: Validate supported platform and mandatory inputs
@@ -28,10 +30,10 @@
       - ((bind_primary_group in group_names) | int) + ((bind_secondary_group in group_names) | int) == 1
       - bind_front_ip is defined
       - bind_back_ip is defined
-      - ansible_host is defined
-      - ansible_host != bind_back_ip
-      - ansible_host != bind_front_ip
-      - bind_front_ip != bind_back_ip
+      - >-
+        _bind_peer_networks is defined or
+        (ansible_host is defined and ansible_host not in [bind_front_ip, bind_back_ip]
+        and bind_front_ip != bind_back_ip)
       - bind_tsig_secret | length >= 32
       - bind_allowed_clients is sequence
       - bind_forward_zones is sequence
@@ -82,9 +84,9 @@
       - item.1.address | length > 0
       - >-
         item.1 | dns_forwarder_safe(
-        [bind_front_ip, bind_back_ip,
+        bind_site_dns_addresses | default([bind_front_ip, bind_back_ip,
         hostvars[bind_primary_host].bind_front_ip, hostvars[bind_primary_host].bind_back_ip,
-        hostvars[bind_secondary_host].bind_front_ip, hostvars[bind_secondary_host].bind_back_ip])
+        hostvars[bind_secondary_host].bind_front_ip, hostvars[bind_secondary_host].bind_back_ip]))
     fail_msg: 'Invalid forwarding server address or port.'
   loop: "{{ bind_forward_zones | subelements('forwarders') }}"
   loop_control:

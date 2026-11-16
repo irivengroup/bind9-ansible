@@ -23,6 +23,21 @@ def vendor_tree(tmp_path):
         yield files
 
 
+@pytest.fixture
+def linked_loopback(vendor_tree):
+    """Recreate the BIND 9.18 RPM layout and keep independent test-owned inodes."""
+    shared = Path('/usr/share/named')
+    shared.mkdir(mode=0o750)
+    links = vendor_tree[1:4]
+    for path in links:
+        target = shared / path.name
+        path.rename(target)
+        target.chmod(0o640)
+        os.utime(str(target), ns=(1, 2))
+        path.symlink_to('../../usr/share/named/' + path.name)
+    return links, shared
+
+
 @pytest.mark.parametrize('mode', ['auto', True, False, 'true', 'false'])
 def test_vendor_prerequisites_respect_dnssec_mode_without_opening_contents(vendor_tree, mode):
     status, result = NativeVendorRun('tasks.d/native_loopback.yml', {'bind_dnssec_active': mode}).run()
@@ -34,6 +49,7 @@ def test_vendor_prerequisites_respect_dnssec_mode_without_opening_contents(vendo
 
 
 @pytest.mark.parametrize('index,task', [(0, 'Require native BIND files without replacing missing or unsafe files'),
+    (1, 'Require native BIND files without replacing missing or unsafe files'),
     (4, 'Require native crypto-policy include'), (5, 'Require the native trust anchor for enabled DNSSEC modes')])
 @pytest.mark.parametrize('kind', ['missing', 'directory', 'symlink'])
 def test_missing_or_unsafe_vendor_assets_are_never_replaced(vendor_tree, tmp_path, index, task, kind):
@@ -52,3 +68,51 @@ def test_missing_or_unsafe_vendor_assets_are_never_replaced(vendor_tree, tmp_pat
     elif kind == 'symlink': assert path.is_symlink()
     else: assert path.is_dir()
     assert outside.read_text(encoding='utf-8') == 'keep unchanged'
+
+
+def test_packaged_native_loopback_links_are_accepted_without_reading_or_replacing_data(linked_loopback):
+    links, shared = linked_loopback
+    status, result = NativeVendorRun('tasks.d/native_loopback.yml', {'bind_dnssec_active': 'auto'}).run()
+    assert status == 0 and not result.failed
+    assert all(path.is_symlink() and path.resolve() == shared / path.name for path in links)
+    assert all((shared / path.name).stat().st_atime_ns == 1 for path in links)
+
+
+@pytest.mark.parametrize('kind,failed_check', [
+    ('absolute_link', 'Require native BIND files without replacing missing or unsafe files'),
+    ('foreign_link_owner', 'Require native BIND files without replacing missing or unsafe files'),
+    ('indirect_target', 'Require native BIND files without replacing missing or unsafe files'),
+    ('missing_target', 'Require protected native BIND link targets'),
+    ('directory_target', 'Require protected native BIND link targets'),
+    ('foreign_target_owner', 'Require protected native BIND link targets'),
+    ('group_writable_directory', 'Require protected native BIND link targets'),
+    ('world_writable_target', 'Require protected native BIND link targets'),
+])
+def test_rejects_unsafe_variants_of_packaged_native_loopback_links(linked_loopback, kind, failed_check):
+    links, shared = linked_loopback
+    link = links[0]
+    target = shared / link.name
+    if kind == 'absolute_link':
+        link.unlink()
+        link.symlink_to(target)
+    elif kind == 'foreign_link_owner':
+        os.chown(link, 65534, 65534, follow_symlinks=False)
+    elif kind == 'indirect_target':
+        target.unlink()
+        target.symlink_to(links[1].name)
+    elif kind == 'missing_target':
+        target.unlink()
+    elif kind == 'directory_target':
+        target.unlink()
+        target.mkdir()
+    elif kind == 'foreign_target_owner':
+        os.chown(target, 65534, 65534)
+    elif kind == 'group_writable_directory':
+        shared.chmod(0o770)
+    else:
+        target.chmod(0o646)
+    before_link = os.readlink(link)
+    status, result = NativeVendorRun('tasks.d/native_loopback.yml', {'bind_dnssec_active': 'auto'}).run()
+    assert status == 2 and result.failed == [failed_check]
+    assert os.readlink(link) == before_link
+    assert all((shared / path.name).stat().st_atime_ns == 1 for path in links[1:])

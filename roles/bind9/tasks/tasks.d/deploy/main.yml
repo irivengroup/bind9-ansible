@@ -7,8 +7,10 @@
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/clients.yml'
   tags: [always]
 
-- name: Derive local DNS peer addresses from inventory
+- name: Resolve and compare both DNS server topologies before deployment
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/site_peers.yml'
+  vars:
+    _bind_probe_legacy_network: true
   tags: [always]
 
 - name: Provision shared site TSIG on the controller
@@ -45,7 +47,7 @@
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/packages.yml'
   tags: [deploy, install]
 
-- name: Authorize DNS in existing FRONT and BACK firewalld zones
+- name: Authorize DNS in existing firewalld zones for the configured listeners
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/firewall.yml'
   environment:
     LC_ALL: C
@@ -79,11 +81,18 @@
   when: not bind_front_routes_enabled
   tags: [deploy, routes]
 
+- name: Report use of existing routing on shared interfaces
+  ansible.builtin.debug:
+    msg: 'FRONT return routes are unnecessary or unavailable without distinct FRONT, BACK and SSH interfaces. Existing routing is used.'
+  when: bind_front_routes_enabled and not (bind_dns_front_routes_applicable | default(true) | bool)
+  tags: [deploy, routes]
+
 - name: Add only return routes when explicitly running the routes tag
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/front_return_routes.yml'
   tags: [deploy, routes]
   when:
     - bind_front_routes_enabled
+    - bind_dns_front_routes_applicable | default(true) | bool
     - bind_cloud_clients | length > 0
     - not (bind_front_routes_defer_commit | bool)
 
@@ -119,6 +128,7 @@
       tags: [deploy]
       when:
         - bind_front_routes_enabled
+        - bind_dns_front_routes_applicable | default(true) | bool
         - bind_cloud_clients | length > 0
         - bind_front_routes_defer_commit | default(false) | bool
 

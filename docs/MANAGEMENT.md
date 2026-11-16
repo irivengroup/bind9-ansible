@@ -57,7 +57,7 @@ Le playbook exécute les hôtes séquentiellement et s’arrête au premier éch
 
 ## Contrat de la requête `bind_manage`
 
-La requête doit être un dictionnaire à clés chaînes, avec un nom explicite. Les noms d’options sont en minuscules et suivent la syntaxe `[a-z][a-z0-9-]*`. Les entrées mal typées sont refusées avec un message contrôlé avant toute commande native.
+La requête doit être un dictionnaire à clés chaînes. Elle identifie sa cible par `name` ou, pour la ressource `zone`, par `zone.domain`. Les noms d’options sont en minuscules et suivent la syntaxe `[a-z][a-z0-9-]*`. Les entrées mal typées sont refusées avec un message contrôlé avant toute commande native.
 
 | Champ | Type / usage |
 |---|---|
@@ -66,13 +66,14 @@ La requête doit être un dictionnaire à clés chaînes, avec un nom explicite.
 | `name` | Nom de l’option ou ACL, `logging` pour le bloc logging unique, suffixe de zone ou propriétaire du RRset ; absent pour `list` |
 | `expected_checksum` | Chaîne SHA-256 de 64 caractères hexadécimaux minuscules, obligatoire pour toute écriture ; surcharge possible par `bind_manage_checksums[inventory_hostname]` |
 | `value` | Option : syntaxe BIND sous forme de chaîne, sans point-virgule final. ACL/logging : corps complet du bloc, avec les points-virgules BIND internes |
-| `kind` | Création de zone : `forward` ou `authoritative` |
+| `kind` | Zone : `forward` ou `authoritative` pour créer ou modifier une déclaration sous `zone` |
+| `zone` | Ressource `zone` : objet identique à un élément de `bind_authoritative_zones` ou `bind_forward_zones`. Pour lire ou supprimer, fournir uniquement `domain`. Ressource `record` : suffixe sous forme de chaîne |
 | `forwarders` | Zone forward : liste non vide de `{address: chaîne IP, port: entier optionnel}` ; port 53 par défaut |
 | `dnssec_validate` | Booléen d’une zone forward ; `false` demande une exception privée limitée lorsque DNSSEC global est actif. Création : `true` par défaut ; mise à jour : politique existante conservée |
 | `settings` | Mise à jour autoritative : dictionnaire option de zone → valeur BIND chaîne ; stockage, type, signature dynamique, transferts et maîtres protégés |
-| `serial`, `ttl` | Création autoritative : entiers positifs, défauts 1 et 300. Pour un record, `ttl` accepte un entier ou un TTL BIND ; sinon TTL existant/hérité |
+| `serial`, `ttl` | Forme historique de création autoritative : entiers positifs, défauts 1 et 300. Dans l’objet `zone`, le TTL accepte les durées BIND comme dans l’inventaire. Pour `record`, omettre `ttl` pour conserver le TTL existant ou hérité |
 | `purge_data` | Suppression de zone : booléen, défaut `false`. `true` autorise uniquement le retrait du fichier primaire ciblé sous `/var/named/zones/` |
-| `zone`, `type`, `values` | Record : suffixe, type DNS et liste de chaînes RDATA. `values` requis pour créer/modifier, pas pour lire/supprimer |
+| `type`, `values` | Type DNS et liste de chaînes RDATA pour `record`. Fournir `values` à la création ou à la modification |
 
 Les champs inconnus sont refusés. `create` refuse un objet existant ; `update`/`delete` refusent un objet absent. Un update sans différence ne recharge pas BIND. La validation native reste nécessaire pour la syntaxe et la sémantique de chaque option/RDATA.
 
@@ -123,20 +124,24 @@ Le listing utilise `resource: acl` ou `resource: logging`, `action: list`, sans 
 
 ### Zone forward
 
+L’objet sous `zone` peut être repris tel quel de `bind_forward_zones`. Le format historique avec `name`, `forwarders` et `dnssec_validate` au niveau de la requête reste accepté. Utiliser un seul format par opération, y compris dans un lot.
+
 Une adresse de forwarder est obligatoirement une chaîne IP explicite, jamais un entier ou un booléen. La diffusion limitée `255.255.255.255` est refusée. Les contrôles multicast, link-local et adresse non spécifiée s’appliquent aussi à l’adresse IPv4 contenue dans une adresse IPv6 mappée.
 
 ```yaml
 bind_manage:
   resource: zone
   action: create
-  name: private.example.test
   kind: forward
-  dnssec_validate: false
-  forwarders:
-    - address: 10.11.0.53
-      port: 53
-    - address: 10.11.0.54
-      port: 53
+  zone:
+    domain: private.example.test
+    policy: only
+    dnssec_validate: false
+    forwarders:
+      - address: 10.11.0.53
+        port: 53
+      - address: 10.11.0.54
+        port: 53
 ```
 
 Le module ajoute `forward only` et les délégations NS/glue nécessaires dans le parent primaire local ou la racine privée. Il incrémente le SOA des fichiers primaires affectés. Un update remplace la liste `forwarders` et modifie éventuellement `dnssec_validate`. Un delete retire cette déclaration et ses seules délégations dérivées. Une délégation modifiée manuellement entraîne un refus de conflit ; le module ne l’écrase pas.
@@ -151,13 +156,20 @@ En mode DNSSEC actif, le helper existant `bind-private-dnssec` réconcilie l’e
 bind_manage:
   resource: zone
   action: create
-  name: service.example.test
   kind: authoritative
-  ttl: 300
-  serial: 1
+  zone:
+    domain: service.example.test
+    ttl: 300
+    serial: 1
+    records:
+      - name: web
+        type: A
+        value: 192.0.2.80
 ```
 
 Sur le primaire : création d’une zone statique avec SOA, NS `ns1`/`ns2`, adresses FRONT de la paire et transferts/notifies BACK authentifiés par la clé TSIG existante du site. Sur le secondaire : déclaration slave et maître BACK authentifié. Aucun fichier préexistant n’est écrasé par une création. Les zones natives, leurs recouvrements et la racine privée sont protégés. Les fichiers de zone d’un include externe ne sont pas réécrits par une action zone.
+
+Le même objet issu de `bind_authoritative_zones` accepte `action: update` sur une zone primaire gérée. Les RRsets déclarés sont ajoutés ou remplacés et les autres sont conservés. Un changement de contenu requiert un serial SOA plus récent si le champ `serial` est fourni. Omettre ce champ pour laisser le rôle incrémenter le serial. Le secondaire reçoit le transfert. Pour supprimer un RRset, utiliser `resource: record` avec `action: delete`. Les zones inverses automatiques restent générées par le déploiement. La gestion ciblée d’une zone directe s’applique uniquement à ce suffixe.
 
 Ajouter ensuite un RRset dans une **nouvelle exécution après lecture** :
 

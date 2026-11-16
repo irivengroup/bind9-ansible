@@ -114,6 +114,8 @@ class NativeTaskRun:
         for task in tasks:
             actions = set(task).intersection(self.SAFE_ACTIONS | {'ansible.builtin.import_tasks',
                 'ansible.builtin.import_role', 'ansible.builtin.meta'})
+            if self.safe_site_network_task(task) and 'ansible.builtin.command' in task:
+                actions.add('ansible.builtin.command')
             if (not self.safe_context(task) or
                     (not actions and 'block' not in task) or len(actions) > 1):
                 raise ValueError('Native read-only harness refuses task side effects')
@@ -138,7 +140,19 @@ class NativeTaskRun:
 
     def safe_context(self, task):
         """Keep transport/privilege changes opt-in for inspected fixtures."""
-        return 'delegate_to' not in task and 'become' not in task
+        return ('delegate_to' not in task and 'become' not in task) or self.safe_site_network_task(task)
+
+    @staticmethod
+    def safe_site_network_task(task):
+        """Admit only the reviewed IPv4 read and address facts on local peer aliases."""
+        if ('become' in task or task.get('delegate_to') != '{{ item }}' or
+                task.get('loop') != '{{ [bind_primary_host, bind_secondary_host] }}'):
+            return False
+        if task.get('ansible.builtin.command') == {'argv': ['ip', '-j', '-4', 'address', 'show', 'up']}:
+            return task.get('check_mode') is False and task.get('changed_when') is False
+        return (task.get('delegate_facts') is True and task.get('ansible.builtin.set_fact') == {
+            'bind_front_ip': '{{ _bind_peer_networks[item].front }}',
+            'bind_back_ip': '{{ _bind_peer_networks[item].back }}'})
 
     def transport_variables(self):
         """Keep local execution mandatory unless an inspected adapter opts in."""
@@ -347,7 +361,8 @@ class NativeVendorRun(NativeContainerRun):
 
     SAFE_ACTIONS = NativeTaskRun.SAFE_ACTIONS | {'ansible.builtin.stat'}
     FILES = {'tasks.d/native_loopback.yml'}
-    TARGETS = ('/etc/named.rfc1912.zones', '/etc/named.root.key', '/var/named', '/etc/crypto-policies')
+    TARGETS = ('/etc/named.rfc1912.zones', '/etc/named.root.key', '/var/named', '/etc/crypto-policies',
+               '/usr/share/named')
 
 
 class NativeSnapshotRun(NativeContainerRun):
@@ -544,7 +559,8 @@ class NativeMigrationRun(NativeContainerRun):
 
     SAFE_ACTIONS = NativeTaskRun.SAFE_ACTIONS | {'ansible.builtin.copy', 'ansible.builtin.file', 'ansible.builtin.command'}
     FILES = {'tasks.d/deploy/migration.yml'}
-    TARGETS = ('/etc/named.conf', '/etc/named', '/var/named', '/var/backups/Bind9-Ansible',
+    TARGETS = ('/etc/named.conf', '/etc/named', '/etc/named.ca', '/var/named', '/var/backups/Bind9-Ansible',
+               '/usr/share/named',
                '/usr/local/sbin/bind-configtool', '/usr/local/sbin/bind-backup.sh', '/usr/local/sbin/bind-configtool.sh')
     ROOT = '/var/backups/Bind9-Ansible/bind'
     ROLE_ASSETS = True
@@ -652,7 +668,7 @@ class NativeCliRun(NativeContainerRun):
         super().check_tasks(tasks, seen, basedir)
         for task in tasks:
             command = task.get('ansible.builtin.command')
-            if command is None:
+            if command is None or self.safe_site_network_task(task):
                 continue
             argv = command.get('argv')
             if not ((isinstance(argv, list) and argv and argv[0] in (*self.COMMANDS, *self.BARE_ALIASES)) or

@@ -326,9 +326,28 @@ verify() {
   (( count == ${#member_names[@]} )) || { echo 'Inconsistent archive catalogs' >&2; return 1; }
 }
 
+native_package_link() {
+  local link=$1 shared=$2 name=${1##*/} owner relative resolved path info mode
+  owner=$(stat -c '%u' -- "$link") || return 1
+  # Keep trailing newlines in the observations so a different file name
+  # cannot masquerade as the package path after command substitution.
+  relative=$(readlink -- "$link" && printf '.') || return 1
+  resolved=$(realpath -e -- "$link" && printf '.') || return 1
+  [[ $owner == 0 && $relative == "../..$shared/$name"$'\n.' &&
+     $resolved == "$shared/$name"$'\n.' && -f $shared/$name ]] || return 1
+  for path in "$shared" "$shared/$name"; do
+    info=$(stat -c '%u:%a' -- "$path") || return 1
+    mode=${info#*:}
+    [[ $info == 0:* ]] && valid_octal_mode "$mode" && (( (8#$mode & 022) == 0 )) || return 1
+  done
+}
+
 safe_sources() {
   # Reject unsafe extraction destinations as well as unsafe backup sources.
-  local item unsafe prefix=${1:-}
+  local -n exclusions=$1
+  local item unsafe link target_dir prefix=${2:-}
+  local -a ignored=()
+  exclusions=()
   for item in /etc/named.conf /etc/named /var/named; do
     item=$prefix$item
     [[ ! -L $item ]] || { echo "Refusing source/destination symlink: $item" >&2; return 1; }
@@ -338,9 +357,21 @@ safe_sources() {
     else
       [[ -d $item ]] || { echo 'BIND data paths must be directories' >&2; return 1; }
     fi
+    # Keep package-owned links outside the archive and out of live writes.
+    # Staged archives always use the original file/directory-only policy.
+    if [[ -z $prefix && $item == /var/named ]]; then
+      for link in /var/named/named.{localhost,loopback,empty,ca}; do
+        [[ -L $link ]] || continue
+        target_dir=/usr/share/named
+        [[ $link != /var/named/named.ca ]] || target_dir=/etc
+        native_package_link "$link" "$target_dir" || { echo "Unsafe native BIND package link: $link" >&2; return 1; }
+        ignored+=('!' -path "$link")
+        exclusions+=("--exclude=${link#/}")
+      done
+    fi
     unsafe=$(find "$item" -type f -links +1 -print -quit) || return 1
     [[ -z $unsafe ]] || { echo 'Hardlinked BIND source/destination file' >&2; return 1; }
-    unsafe=$(find "$item" ! -type f ! -type d -print -quit) || return 1
+    unsafe=$(find "$item" ! -type f ! -type d "${ignored[@]}" -print -quit) || return 1
     [[ -z $unsafe ]] || { echo 'Special BIND source/destination object' >&2; return 1; }
   done
 }
@@ -358,7 +389,8 @@ restore_labels() {
 # for compatibility but no longer changes the backup frequency.
 backup() {
   local stamp target partial item cutoff timestamp epoch catalog target_name checksum checksum_partial index cleanup_failed
-  safe_sources
+  local -a vendor_exclusions=()
+  safe_sources vendor_exclusions
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   target="$root/named-config-$stamp-$(od -An -N4 -tx1 /dev/urandom | tr -d " \n").tar.gz"
   [[ ! -e $target && ! -L $target && ! -e $target.sha256 && ! -L $target.sha256 ]] || {
@@ -371,7 +403,8 @@ backup() {
   local -a members=()
   for item in etc/named.conf etc/named var/named; do [[ ! -e /$item ]] || members+=("$item"); done
   if ((${#members[@]})); then
-    tar --create --gzip --acls --xattrs --selinux --numeric-owner --file "$partial" --directory / -- "${members[@]}" || { rm -f -- "$partial"; return 1; }
+    tar --create --gzip --acls --xattrs --selinux --numeric-owner --file "$partial" --directory / \
+      --anchored --no-wildcards "${vendor_exclusions[@]}" -- "${members[@]}" || { rm -f -- "$partial"; return 1; }
   else
     tar --create --gzip --file "$partial" --files-from /dev/null || { rm -f -- "$partial"; return 1; }
   fi
@@ -436,8 +469,13 @@ restore() {
   local -a staged_paths=() introduced_paths=() introduced_types=()
   [[ $archive_name =~ ^named-config-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}\.tar\.gz$ ]] || usage
   target="$root/$archive_name"
+  local -a vendor_exclusions=() staged_exclusions=()
   verify "$target"
-  safe_sources
+  safe_sources vendor_exclusions
+  restore_sources_unchanged() {
+    local -a checked_exclusions=()
+    safe_sources checked_exclusions && [[ "${checked_exclusions[*]}" == "${vendor_exclusions[*]}" ]]
+  }
   local service_state service_rc=0
   service_state=$(systemctl is-active named) || service_rc=$?
   [[ $service_rc == 3 || $service_rc == 4 ]] && [[ $service_state == inactive || $service_state == failed || $service_state == unknown ]] || {
@@ -457,8 +495,9 @@ restore() {
   work_identity=$(stat -c '%d:%i' -- "$work") || return 1
   stage=$work/tree
   if ! mkdir -m 0700 -- "$stage" ||
-     ! timeout --kill-after=5 60 tar --extract --ignore-zeros --gzip --acls --xattrs --selinux --numeric-owner --same-owner -f "$target" -C "$stage" ||
-     ! safe_sources "$stage"; then
+     ! timeout --kill-after=5 60 tar --extract --ignore-zeros --gzip --acls --xattrs --selinux --numeric-owner --same-owner \
+         --anchored --no-wildcards "${vendor_exclusions[@]}" -f "$target" -C "$stage" ||
+     ! safe_sources staged_exclusions "$stage"; then
     echo "Restore preparation failed; private evidence retained: $work" >&2; return 1
   fi
   if ! (ulimit -f 32768; timeout --kill-after=5 60 find "$stage" -mindepth 1 -depth -print0) >"$work/paths"; then
@@ -482,22 +521,23 @@ restore() {
   done
   # Native staging observations do not freeze the live destination graph.
   # Refuse drift before capturing safety data from newly unsafe destinations.
-  safe_sources || {
+  if ! restore_sources_unchanged; then
     echo "Live restore destinations changed after preparation; private evidence retained: $work" >&2; return 1;
-  }
+  fi
   safety=$(allocate_temporary "$root/.restore-safety." file) || return 1
   local -a members=()
   for item in etc/named.conf etc/named var/named; do [[ ! -e /$item ]] || members+=("$item"); done
   if ((${#members[@]})); then
-    tar --create --gzip --acls --xattrs --selinux --numeric-owner -f "$safety" -C / -- "${members[@]}" || { rm -f -- "$safety"; return 1; }
+    tar --create --gzip --acls --xattrs --selinux --numeric-owner \
+      --anchored --no-wildcards "${vendor_exclusions[@]}" -f "$safety" -C / -- "${members[@]}" || { rm -f -- "$safety"; return 1; }
   else
     tar -czf "$safety" -T /dev/null
   fi
   # No live write has happened yet. Do not run rollback over an external path
   # replacement merely because it appeared during native safety capture.
-  safe_sources || {
+  if ! restore_sources_unchanged; then
     echo "Live restore destinations changed before application; safety archive retained: $safety; private evidence: $work" >&2; return 1;
-  }
+  fi
   # Remove only project-marked zone files absent from the backup, never unrelated files.
   # The current BIND service must be stopped before manual restore.
   local -a archived_files=()
@@ -529,7 +569,8 @@ restore() {
         fi
       fi
     done
-    tar --extract --ignore-zeros --gzip --acls --xattrs --selinux --numeric-owner --same-owner -f "$target" -C / || return 1
+    tar --extract --ignore-zeros --gzip --acls --xattrs --selinux --numeric-owner --same-owner \
+      --anchored --no-wildcards "${vendor_exclusions[@]}" -f "$target" -C / || return 1
     named-checkconf -z /etc/named.conf || return 1
     restore_labels || return 1
   }
@@ -563,7 +604,7 @@ restore() {
     # Validate every current object before deleting any of them. Unexpected
     # links/types preserve the safety archive and staged recovery evidence.
     local -a removal_identities=()
-    safe_sources || return 1
+    restore_sources_unchanged || return 1
     for ((index=0;index<${#introduced_paths[@]};index++)); do
       item=${introduced_paths[$index]}
       # Absence never authorizes removing a later object at the same pathname.
@@ -591,7 +632,9 @@ restore() {
     echo "RESTORED $target"
   else
     echo 'Restore failed; recovering pre-restore safety archive' >&2
-    if ! tar --extract --ignore-zeros --gzip --acls --xattrs --selinux --numeric-owner --same-owner -f "$safety" -C / ||
+    if ! restore_sources_unchanged ||
+       ! tar --extract --ignore-zeros --gzip --acls --xattrs --selinux --numeric-owner --same-owner \
+         --anchored --no-wildcards "${vendor_exclusions[@]}" -f "$safety" -C / ||
        ! remove_introduced_paths ||
        ! named-checkconf -z /etc/named.conf || ! restore_labels; then
       echo "Safety recovery incomplete; preserved private archive: $safety; restore evidence: $work" >&2

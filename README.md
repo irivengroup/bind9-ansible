@@ -4,7 +4,7 @@
 
 **Déploiement :** `playbooks/bind9-deploy.yml` · **Gestion ciblée :** `playbooks/bind9-management.yml` · **Rôle :** `roles/bind9` · **Cible de référence :** RHEL 8, Ansible 2.9 et Python cible 3.6.8.
 
-Le rôle produit une configuration unique `/etc/named.conf`, sans vues BIND. Il conserve les zones localhost officielles, écoute le DNS en IPv4 sur loopback/FRONT/BACK et conserve les capacités IPv4/IPv6 sortantes. Les noms hors des zones déclarées reçoivent une réponse NXDOMAIN par la racine privée. La validation DNSSEC est activée en mode `auto` par défaut ; les routes de retour FRONT et le moniteur périodique restent optionnels et désactivés par défaut.
+Le rôle produit une configuration unique `/etc/named.conf`, sans vues BIND. Il conserve les zones localhost officielles, écoute le DNS sur loopback et les interfaces IPv4 sélectionnées, et conserve les capacités IPv4/IPv6 sortantes. Les noms hors des zones déclarées reçoivent une réponse NXDOMAIN par la racine privée. La validation DNSSEC est activée en mode `auto` par défaut. Les routes de retour FRONT et le moniteur périodique restent optionnels et désactivés par défaut.
 
 **Configuration live :** le management conserve les clauses non ciblées et refuse toute création sur un nom déjà présent. Routes et management partagent une exclusion de processus, libérée automatiquement à sa fin ; un fichier vide restant ne bloque pas la suite. Les écritures restent conditionnées aux checksums et aux journaux de reprise. Les déploiements complets et interventions manuelles exigent une fenêtre exclusive. Voir [les garanties et limites](docs/VERIFICATION_SYNTAXE_SCRIPTS.md).
 
@@ -57,7 +57,7 @@ Les versions imposées par le contexte nécessitent une politique de maintenance
 | Élément | Fonctionnement réel |
 |---|---|
 | Site | Un primaire et un secondaire dans le même environnement et le même groupe de site. |
-| ADM | Adresse SSH d’administration, distincte des deux adresses DNS. |
+| ADM | Adresse SSH locale. Elle peut partager une interface DNS. La gestion des routes FRONT exige trois interfaces distinctes. |
 | FRONT | Adresse DNS destinée aux clients `bind_cloud_clients` ; seuls ces clients peuvent déclencher une route retour optionnelle. |
 | BACK | Adresse DNS destinée aux clients `bind_internal_clients` et aux échanges entre pairs. Aucune route client interne ajoutée. |
 | Loopback | ACL `local_loopback` = `127.0.0.1` ; zones natives incluses depuis `/etc/named.rfc1912.zones`. |
@@ -87,8 +87,8 @@ Le rôle ne configure pas les adresses des interfaces, `/etc/resolv.conf`, le ro
 
 - `findutils`, `tar`, `gzip`, GNU coreutils et `util-linux` (`flock`) sont nécessaires aux opérations de sauvegarde/gestion. GNU coreutils, notamment `/usr/bin/sync`, est requis pour synchroniser les sauvegardes avant publication du management. Le contrôleur doit utiliser `ansible.cfg` livré (doublons YAML refusés). Voir [limites et compatibilité](docs/FIABILITE_DONNEES_ET_IO.md).
 - Python accessible à Ansible, DNF et ses bindings Python, systemd, dépôts RHEL accessibles. Le rôle installe **`bind`**, **`bind-utils`**, **`policycoreutils-python-utils`**.
-- **Firewalld installé et déjà actif**, avec `firewall-cmd` et `ip`. Le rôle ne l’installe pas et ne le démarre pas ; il autorise DNS immédiatement et de façon permanente dans les zones FRONT/BACK existantes.
-- FRONT/BACK déjà affectées, y compris en adresses secondaires, et ADM distincte. Les adresses absentes ou ambiguës sont refusées.
+- **Firewalld installé et déjà actif**, avec `firewall-cmd` et `ip` (`iproute`). Le rôle autorise DNS immédiatement et de façon permanente dans les zones existantes des interfaces d’écoute.
+- Adresses IPv4 DNS et SSH déjà configurées. Chaque adresse d’écoute doit apparaître une seule fois. Avec plusieurs adresses IPv4 sur une interface d’écoute, sélectionner l’adresse voulue explicitement.
 - Fichiers natifs présents : `/etc/named.rfc1912.zones`, `/var/named/named.localhost`, `/var/named/named.loopback`, `/var/named/named.empty`, `/etc/crypto-policies/back-ends/bind.config`. L’include de politique cryptographique doit résoudre vers un fichier régulier.
 - RNDC et `named-setup-rndc.service` natifs disponibles. Le rôle utilise ce générateur pour préparer `/etc/rndc.key` dans tous les modes DNSSEC.
 - Horloges synchronisées pour TSIG ; espace disque pour zones, archives et journaux.
@@ -160,6 +160,16 @@ ansible_host: 10.10.1.12
 bind_front_ip: 192.0.2.12
 bind_back_ip: 10.20.1.12
 ```
+
+### Choisir les interfaces d’écoute
+
+Le déploiement lit les interfaces actives portant une IPv4 utilisable sur les deux serveurs avant d’appliquer la configuration DNS, y compris lorsque le déploiement cible un seul pair. Ils doivent avoir le même nombre d’interfaces IPv4 actives et la même répartition des rôles et des écoutes. Les noms d’interfaces et les adresses peuvent différer.
+
+- **Une seule interface IPv4.** Indiquer la destination SSH avec `ansible_host`. Cette adresse sert au DNS et aux échanges entre les pairs. La configuration de routage existante, y compris la passerelle par défaut, est utilisée.
+- **Plusieurs interfaces, une écoute DNS.** Définir par exemple `bind_listen_interfaces: [ens192]`. Son IPv4 sert au DNS et aux échanges entre pairs. La destination SSH peut se trouver sur une autre interface. La gestion des routes FRONT reste inactive.
+- **Plusieurs écoutes DNS.** Définir `bind_listen_interfaces: [ens192, ens224]`, `bind_front_ip`, `bind_back_ip` et l’adresse SSH avec `ansible_host` ou `bind_admin_ip`. Les adresses FRONT et BACK appartiennent à deux des interfaces d’écoute. Une interface additionnelle explicitement sélectionnée écoute avec les mêmes autorisations de requête, tandis que la récursion reste réservée à FRONT et BACK selon les listes de clients. Les inventaires historiques déclarant deux adresses FRONT/BACK distinctes conservent cette sélection sans dépendre du nom des interfaces.
+
+Quand une interface porte plusieurs adresses, utiliser une table nom → IPv4, par exemple `bind_listen_interfaces: {ens192: 192.0.2.11, ens224: 10.20.1.11}`. Avec un nom DNS ou une adresse traduite comme destination de connexion Ansible, renseigner l’IPv4 locale de cette connexion dans `bind_admin_ip`. Les routes de retour restent optionnelles et exigent des interfaces distinctes pour FRONT, BACK et SSH.
 
 `inventory/prod/group_vars/site1.yml` — exemple complet avec **deux zones forwardées** et une autorité :
 
@@ -234,16 +244,18 @@ Les **12 valeurs par défaut** proviennent de [defaults/main.yml](roles/bind9/de
 |---|---|---|---|---|
 | `bind_environment` | chaîne non vide | Environnement commun aux pairs | Aucune | Oui |
 | `bind_site_name` | chaîne non vide | Groupe du site contenant les deux pairs | Aucune | Oui |
-| `ansible_host` | adresse ADM | Destination SSH distincte de FRONT/BACK | Aucune | Oui |
-| `bind_front_ip` | chaîne IPv4 unicast | Adresse FRONT locale déjà configurée | Aucune | Oui |
-| `bind_back_ip` | chaîne IPv4 unicast | Adresse BACK locale déjà configurée | Aucune | Oui |
+| `ansible_host` | destination SSH | IPv4 locale ou nom de connexion SSH | Nom d’inventaire utilisé par Ansible | Selon l’inventaire |
+| `bind_admin_ip` | chaîne IPv4 unicast | IPv4 locale de la connexion SSH lorsque sa destination Ansible est un nom ou une adresse traduite | `ansible_host` | Selon l’inventaire |
+| `bind_listen_interfaces` | liste de noms ou table nom → IPv4 | Interfaces DNS et adresses explicites si plusieurs IPv4 locales | Détection mono-interface ou sélection historique FRONT/BACK | Oui sur plusieurs interfaces hors sélection historique |
+| `bind_front_ip` | chaîne IPv4 unicast | Adresse FRONT locale déjà configurée | Adresse du seul listener | Oui avec plusieurs écoutes |
+| `bind_back_ip` | chaîne IPv4 unicast | Adresse BACK locale déjà configurée | Adresse du seul listener | Oui avec plusieurs écoutes |
 | `bind_tsig_key_name` | chaîne | Identifiant TSIG ; ne doit pas être `rndc-key` | Aucune | Oui |
 | `bind_tsig_algorithm` | chaîne | Algorithme admis : `hmac-sha256` | Aucune | Oui |
 | `bind_tsig_secret_file` | chemin absolu sur le contrôleur | Fichier contenant uniquement le secret Base64 persistant | Aucune | Oui |
 
 Les options `ansible_user`, `ansible_port`, `ansible_python_interpreter` et les variables d’élévation sont les entrées standard Ansible de votre environnement ; le rôle ne leur fournit pas de valeurs spécifiques.
 
-Le management reçoit `bind_manage` (requête CRUD, listing ou lot), `bind_manage_checksums` (hôte → SHA-256 de l’état), `bind_manage_plan_checksums` (hôte → empreinte du plan, obligatoire à l’application d’un lot) et `bind_manage_show_values` (booléen, `false` par défaut). Voir [le contrat unitaire](docs/MANAGEMENT.md) et [les lots/listings](docs/MANAGEMENT_LOTS_ET_LISTES.md). Il n’applique pas les listes déclaratives de zones et de clients du déploiement.
+Le management reçoit `bind_manage` (requête CRUD, listing ou lot), `bind_manage_checksums` (hôte → SHA-256 de l’état), `bind_manage_plan_checksums` (hôte → empreinte du plan, obligatoire à l’application d’un lot) et `bind_manage_show_values` (booléen, `false` par défaut). Pour la ressource `zone`, `bind_manage.zone` accepte directement un élément de `bind_authoritative_zones` ou de `bind_forward_zones`. L’action reste limitée à la déclaration transmise. Voir [le contrat unitaire](docs/MANAGEMENT.md) et [les lots/listings](docs/MANAGEMENT_LOTS_ET_LISTES.md).
 
 ### Faits calculés et clients
 
@@ -415,7 +427,7 @@ Les réglages de chemins, écoute, contrôle d’accès et runtime DNSSEC resten
 |---|---|
 | `deploy` | Parcours DNS complet, firewalld inclus, routes/DNSSEC selon paramètres, sauvegarde, contrôles et rollback du bloc protégé. Moniteur à sélectionner séparément. |
 | `hibernate` | Verrouillage seul de l’état existant, avec `-e hibernate_deployment=yes` ; syntaxe contrôlée, aucun redéploiement. Tag isolé, exclu des parcours normaux. |
-| `firewall` | Ajout de `dns` manquant dans les zones FRONT/BACK, runtime et permanent ; firewalld déjà actif requis. |
+| `firewall` | Ajout de `dns` manquant dans les zones des interfaces choisies, en runtime et en permanent. Firewalld doit être actif. |
 | `routes` | Retours cloud IPv4 si activés, avec observation, journal et vérification ; aucun déploiement DNS. |
 | `routes-recover` | Reprise explicite d’un journal interrompu ; exige ce tag explicite. Le tag réservé `never` seul ne déclenche pas la reprise. |
 | `preflight` | Entrées, chemins et disponibilité du primaire ; suppose les outils et le secret TSIG fournis pour cette exécution. |
@@ -525,7 +537,7 @@ valeurs fixes demandées.
 
 ### Firewalld : immédiatement et de façon permanente
 
-Le service autorisé est **`dns`**, normalement UDP/TCP 53. `named` est le nom systemd. Le rôle découvre séparément les zones runtime/permanentes des interfaces FRONT/BACK, utilise la zone par défaut si nécessaire, ajoute les seuls services manquants puis vérifie les deux états. Aucun reload global, changement d’affectation ou réécriture NetworkManager. RNDC 953 n’est pas ouvert.
+Le service autorisé est **`dns`**, normalement UDP/TCP 53. `named` est le nom systemd. Le rôle découvre séparément les zones runtime et permanentes des interfaces d’écoute DNS, utilise la zone par défaut si nécessaire, ajoute les seuls services manquants puis vérifie les deux états. Les affectations, le service SSH et RNDC restent inchangés.
 
 Rejouer cette seule opération :
 

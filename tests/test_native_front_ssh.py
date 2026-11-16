@@ -57,7 +57,7 @@ def front(tmp_path, monkeypatch):
 
 def test_native_front_plan_reads_the_actual_ssh_peer_and_preserves_both_route_stores(front):
     before = json.loads(json.dumps(front.route.data))
-    status, result = front.run('plan')
+    status, result = front.run('plan', _bind_local_admin_ip='127.0.0.1')
     assert status == 0 and not result.failed
     assert 'Read the real SSH peer before any route mutation' in result.ok
     peer = result.registers['bind_front_ssh_session']
@@ -71,6 +71,16 @@ def test_native_front_plan_reads_the_actual_ssh_peer_and_preserves_both_route_st
     assert front.route.data['operations'] == []
     assert hashlib.sha256(front.route.script.read_bytes()).digest() == hashlib.sha256(
         (Path(__file__).resolve().parents[1] / 'roles/bind9/files/bind-front-routes.sh').read_bytes()).digest()
+
+
+def test_native_front_rejects_a_different_resolved_admin_address_before_route_mutation(front):
+    before = json.loads(json.dumps(front.route.data))
+    status, result = front.run('apply', _bind_local_admin_ip='192.0.2.91')
+    assert status == 2 and result.failed == ['Read the real SSH peer before any route mutation']
+    session = result.registers['bind_front_ssh_session']
+    assert session['rc'] == 0 and session['stdout'].split()[2] == '127.0.0.1'
+    assert 'bind_front_operation' not in result.registers
+    assert front.route.data == before and not front.pending.exists()
 
 
 @pytest.mark.parametrize('clients', [['203.0.113.7'], ['203.0.113.0/24'],

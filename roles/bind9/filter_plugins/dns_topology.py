@@ -154,14 +154,14 @@ class FilterModule:
         return DnsTopology(authoritative, forwarded).delegations(parent)
 
     @staticmethod
-    def identity(front, back, key, algorithm, secret):
+    def identity(front, back, key, algorithm, secret, shared=False):
         """Prevent BIND interpolation/injection and accidental weaker TSIG."""
         if not all(isinstance(value, str) for value in (front, back, key, algorithm, secret)):
             return False
         try:
             addresses = [ipaddress.IPv4Address(front), ipaddress.IPv4Address(back)]
             # Legacy stdlib accepts aliases such as zero-padded IPv4 octets.
-            if addresses[0] == addresses[1] or any(x.is_loopback or x.is_unspecified or x.is_multicast or x.is_link_local or
+            if (addresses[0] == addresses[1]) != shared or any(x.is_loopback or x.is_unspecified or x.is_multicast or x.is_link_local or
                                     str(x) == '255.255.255.255' for x in addresses):
                 return False
             decoded = base64.b64decode(secret, validate=True)

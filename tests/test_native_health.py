@@ -95,6 +95,37 @@ def test_native_health_empty_zone_lists_preserve_loopback_checks_and_reset_stale
             assert len(json.loads(state.read_text())['calls']) == 4
 
 
+@pytest.mark.parametrize('fault', [None, 'rc', 'status', 'address'])
+def test_native_listener_probes_require_both_transports_for_each_dns_address(tmp_path, fault):
+    data, _ = replies(False)
+    listeners = ['192.0.2.2', '198.51.100.2']
+    probes = [['dig', '-r', '-4', '+ignore', transport, '+time=3', '+tries=1', '+norecurse',
+               '+noall', '+comments', '+answer', '-b', '192.0.2.2', '@' + address, 'localhost', 'A']
+              for address in listeners for transport in ('+notcp', '+tcp')]
+    for command in probes:
+        data[json.dumps(command)] = {'rc': 0, 'stdout': answer('localhost', 'A', '127.0.0.1')}
+    target = data[json.dumps(probes[-1])]
+    if fault == 'rc':
+        target['rc'] = 17
+    elif fault == 'status':
+        target['stdout'] = target['stdout'].replace('NOERROR', 'REFUSED')
+    elif fault == 'address':
+        target['stdout'] = target['stdout'].replace('127.0.0.1', '127.0.0.2')
+    with NativeFilesystemScope(NativeHealthRun):
+        with NativeRecordedBoundary(tmp_path, NativeHealthRun, data) as state:
+            status, result = NativeHealthRun('tasks.d/deploy/health.yml',
+                dict(variables(False), bind_dns_listen_addresses=listeners)).run()
+            observed = json.loads(state.read_text())['calls']
+            assert observed[4:8] == probes
+            if fault:
+                assert status == 2 and result.failed == ['Verify every configured DNS listener over UDP and TCP']
+                assert observed[8:] == [probes[-1]] * 3
+                assert 'bind_deployment_health_completed' not in result.facts
+            else:
+                assert status == 0 and observed[8:] == []
+                assert result.facts['bind_deployment_health_completed'] is True
+
+
 @pytest.mark.parametrize('kind', ['command-failure', 'missing-serial'])
 def test_native_health_primary_serial_refusal_prevents_soa_probes_and_completion(tmp_path, kind):
     data, keys = replies()

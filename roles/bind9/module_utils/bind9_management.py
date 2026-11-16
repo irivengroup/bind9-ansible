@@ -486,19 +486,20 @@ class ZoneDocument:
                 index += 1
             if not owner:
                 raise ManagementError('Missing inherited record owner')
-            record_ttl = ttl
+            explicit_ttl = None
             for _ in range(2):
                 if index < len(values) and values[index].upper() == 'IN':
                     index += 1
                 elif index < len(values) and re.fullmatch(r'[0-9]+[WDHMSwdhms0-9]*', values[index]):
-                    record_ttl = values[index]
+                    explicit_ttl = values[index]
                     index += 1
             if index >= len(values):
                 raise ManagementError('Missing record type')
             kind = values[index].upper()
             if len(self.records) >= self.MAX_RECORDS:
                 raise ManagementError('Zone record count exceeds the supported safety bound')
-            self.records.append({'name': owner, 'type': kind, 'ttl': record_ttl,
+            self.records.append({'name': owner, 'type': kind, 'ttl': ttl if explicit_ttl is None else explicit_ttl,
+                                 'explicit_ttl': explicit_ttl,
                                  'tokens': tokens[index + 1:], 'start': start, 'end': end})
 
     @staticmethod
@@ -573,7 +574,7 @@ class ZoneDocument:
         value = int(token.text) + 1 if int(token.text) < 4294967295 else 1
         return self.text[:token.start] + str(value) + self.text[token.end:]
 
-    def change(self, action, owner, kind, values, ttl=None):
+    def change(self, action, owner, kind, values, ttl=None, bump_serial=True):
         old = self.rrset(owner, kind)
         if action == 'create' and any(record['name'] == owner for record in self.records):
             raise ManagementError('Record owner already exists; create never extends or replaces an existing name')
@@ -587,12 +588,13 @@ class ZoneDocument:
                 # A semicolon outside a quoted string would hide trailing data.
                 if any(token in re.sub(r'"(?:\\.|[^"\\])*"', '', value) for token in (';', '(', ')', '$')):
                     raise ManagementError('Unsafe RDATA presentation')
-            if ttl is None:
-                ttl = old[0]['ttl'] if old else None
+            ttl_field = 'explicit_ttl' if action == 'upsert' else 'ttl'
+            if ttl is None and old:
+                ttl = old[0][ttl_field]
             if ttl is not None and (isinstance(ttl, bool) or not re.fullmatch(r'[0-9]+[WDHMSwdhms0-9]*', str(ttl))):
                 raise ManagementError('Invalid record TTL')
             rendered = ''.join(owner + (' ' + str(ttl) if ttl is not None else '') + ' IN ' + kind + ' ' + value.strip() + '\n' for value in values)
-            if old and [" ".join(token.text for token in r['tokens']) for r in old] == [v.strip() for v in values] and all(str(r['ttl']) == str(ttl) for r in old):
+            if old and [" ".join(token.text for token in r['tokens']) for r in old] == [v.strip() for v in values] and all(str(r[ttl_field]) == str(ttl) for r in old):
                 return self.text
         text = self.text
         for number, record in reversed(list(enumerate(old))):
@@ -605,7 +607,7 @@ class ZoneDocument:
                           for r in records if (r['name'], r['type']) != (owner, kind))
         if unaffected(self.records) != unaffected(after.records):
             raise ManagementError('This edit would change inherited owners/TTL of another record; make those owners explicit first')
-        return after.bump()
+        return after.bump() if bump_serial else after.text
 
 
 class DnsReply:
@@ -652,6 +654,145 @@ class DnsReply:
         return False
 
 
+class ZoneDeclaration:
+    """Translate an inventory zone object into the targeted management contract."""
+
+    DOMAIN = re.compile(r'^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$',
+                        re.ASCII | re.IGNORECASE)
+    OWNER = re.compile(r'^(?:@|\*|[a-z0-9_-]+(?:\.[a-z0-9_-]+)*)$', re.ASCII | re.IGNORECASE)
+    TYPES = {'A', 'AAAA', 'CNAME', 'TXT', 'MX', 'PTR', 'SRV', 'CAA'}
+    TTL = r'(?:[0-9]+|(?:[0-9]+[WDHMSwdhms])+)'
+
+    def __init__(self, request):
+        zone = request['zone']
+        if not isinstance(zone, dict) or not isinstance(zone.get('domain'), str) or not self.DOMAIN.fullmatch(zone['domain']):
+            raise ManagementError('zone must be an inventory-style mapping with a valid domain')
+        if set(request) & {'name', 'policy', 'forwarders', 'dnssec_validate', 'records', 'serial', 'ttl', 'settings'}:
+            raise ManagementError('Put the zone declaration fields inside zone only')
+        self.domain = canonical_name(zone['domain'])
+        self.action = request.get('action')
+        self.kind = request.get('kind')
+        self.request = {key: value for key, value in request.items() if key != 'zone'}
+        self.request['name'] = zone['domain']
+        if self.action in ('read', 'delete') and self.kind is None and set(zone) == {'domain'}:
+            return
+        if self.action not in ('create', 'update') or self.kind not in ('forward', 'authoritative'):
+            raise ManagementError('Use kind forward or authoritative for a zone declaration write')
+        if self.kind == 'forward':
+            self.forward(zone)
+        else:
+            self.authoritative(zone)
+
+    def forward(self, zone):
+        if set(zone) - {'domain', 'policy', 'forwarders', 'dnssec_validate'} or zone.get('policy', 'only') != 'only':
+            raise ManagementError('A forwarding zone uses policy only, forwarders and optional dnssec_validate')
+        if not isinstance(zone.get('forwarders'), list) or not zone['forwarders']:
+            raise ManagementError('forwarders must be a nonempty list')
+        # Deploy accepts decimal YAML strings as well as integer ports.
+        forwarders = []
+        for server in zone['forwarders']:
+            if isinstance(server, dict) and isinstance(server.get('port'), str) and re.fullmatch(r'[0-9]{1,5}', server['port']):
+                server = dict(server, port=int(server['port']))
+            forwarders.append(server)
+        self.request['forwarders'] = forwarders
+        if 'dnssec_validate' in zone:
+            self.request['dnssec_validate'] = zone['dnssec_validate']
+        if self.action == 'update':
+            self.request.pop('kind')
+
+    def authoritative(self, zone):
+        if set(zone) - {'domain', 'serial', 'ttl', 'records'}:
+            raise ManagementError('An authoritative zone uses domain, serial, ttl and records')
+        if self.action == 'create' and 'serial' not in zone:
+            raise ManagementError('An authoritative zone declaration requires serial at creation')
+        if self.action == 'update' and set(zone) == {'domain'}:
+            raise ManagementError('Update an authoritative zone with serial, ttl or records')
+        self.serial, self.ttl = self.serial_number(zone), self.ttl_seconds(zone)
+        if self.action == 'create':
+            self.request['serial'] = self.serial
+            if self.ttl is not None:
+                self.request['ttl'] = self.ttl
+        else:
+            self.request.pop('kind')
+        self.records = self.record_sets(zone.get('records', []))
+
+    @staticmethod
+    def serial_number(zone):
+        if 'serial' not in zone:
+            return None
+        value = zone['serial']
+        if isinstance(value, str) and re.fullmatch(r'[0-9]{1,10}', value):
+            value = int(value)
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 4294967295:
+            raise ManagementError('A zone serial must be a positive 32-bit integer')
+        return value
+
+    @classmethod
+    def ttl_seconds(cls, zone):
+        if 'ttl' not in zone:
+            return None
+        value = zone['ttl']
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            raise ManagementError('Invalid default zone TTL')
+        text = str(value)
+        if len(text) > 128 or not re.fullmatch(cls.TTL, text):
+            raise ManagementError('Invalid default zone TTL')
+        units = {'': 1, 'w': 604800, 'd': 86400, 'h': 3600, 'm': 60, 's': 1}
+        seconds = sum(int(amount) * units[unit.lower()] for amount, unit in
+                      re.findall(r'([0-9]+)([WDHMSwdhms]?)', text))
+        if seconds > 2147483647:
+            raise ManagementError('Invalid default zone TTL')
+        return seconds
+
+    def record_sets(self, records):
+        if not isinstance(records, list):
+            raise ManagementError('Zone records must be an inventory-style list')
+        grouped = {}
+        for record in records:
+            if not isinstance(record, dict) or set(record) != {'name', 'type', 'value'}:
+                raise ManagementError('A zone record requires name, type and value')
+            name, kind, value = record['name'], record['type'], record['value']
+            if not isinstance(name, str) or not self.OWNER.fullmatch(name) or not isinstance(kind, str) or kind not in self.TYPES:
+                raise ManagementError('Invalid inventory-style zone record name or type')
+            # Apply the inventory's whitespace rule before rendering zone data.
+            if (not isinstance(value, str) or not value or value != value.strip() or
+                    any(ord(char) < 32 or ord(char) == 127 for char in value)):
+                raise ManagementError('A zone record must have a printable one-line value')
+            owner = canonical_name(name, self.domain)
+            grouped.setdefault((owner, kind), []).append(value)
+        return grouped
+
+    def apply_records(self, text, zones, context):
+        # The zone template generates these two A records before declared data.
+        required = {'ns1.' + self.domain: context.get('primary_front'),
+                    'ns2.' + self.domain: context.get('secondary_front')}
+        for (owner, kind), values in self.records.items():
+            if any(zone['kind'] == 'forward' and (owner == name or owner.endswith('.' + name))
+                   for name, zone in zones.items()):
+                raise ManagementError('A record below a forwarding cut would be hidden; manage its upstream data instead')
+            if kind == 'A' and owner in required:
+                values = [required[owner]] + values
+            values = list(dict.fromkeys(values))
+            text = ZoneDocument(text, self.domain).change('upsert', owner, kind, values, bump_serial=False)
+        return text
+
+    def update_data(self, original, zones, context):
+        if not original.startswith('; Bind9-Ansible-MANAGED-ZONE\n'):
+            raise ManagementError('Inventory-style updates require a managed primary zone data file')
+        text = original
+        if self.ttl is not None:
+            text, count = re.subn(r'(?im)^(\$TTL[ \t]+)' + self.TTL + r'([ \t]*)$',
+                                  lambda match: match[1] + str(self.ttl) + match[2], text)
+            if count != 1:
+                raise ManagementError('Expected one ordinary default TTL in managed zone data')
+        text = self.apply_records(text, zones, context)
+        document = ZoneDocument(text, self.domain)
+        if self.serial is None:
+            return text if text == original else document.bump()
+        token = document.serial()
+        return text[:token.start] + str(self.serial) + text[token.end:]
+
+
 class Manager:
     """One compare-and-swap operation, preserving all other concrete source."""
 
@@ -677,6 +818,9 @@ class Manager:
             raise ManagementError('Management request must be bounded ordinary JSON data') from error
         if len(encoded) > self.MAX_REQUEST_BYTES:
             raise ManagementError('Management request exceeds the 256 KiB safety bound')
+        self.zone_declaration = ZoneDeclaration(request) if request.get('resource') == 'zone' and 'zone' in request else None
+        if self.zone_declaration is not None:
+            request = self.zone_declaration.request
         self.request, self.context, self.root = request, context, Path(root)
         self.files = BoundedFiles(root)
         self.runner = runner or self.command
@@ -715,6 +859,7 @@ class Manager:
         if 'purge_data' in request and not isinstance(request['purge_data'], bool):
             raise ManagementError('purge_data must be a YAML boolean')
         self.changes, self.originals = {}, {}
+        self.explicit_serials = {}
 
     @staticmethod
     def command(argv):
@@ -1030,9 +1175,21 @@ class Manager:
                     raise ManagementError('Only primary data in /var/named/zones can be explicitly purged')
                 self.changes[old['file']] = None
         elif self.action == 'update':
+            if self.zone_declaration and (old['kind'] == 'forward') != (self.zone_declaration.kind == 'forward'):
+                raise ManagementError('A zone declaration update cannot change the existing zone kind')
             if old['kind'] != 'forward':
                 if {'forwarders', 'dnssec_validate'} & set(self.request):
                     raise ManagementError('Forwarding fields cannot be applied to an authoritative zone')
+                if self.zone_declaration:
+                    if old['kind'] in ('master', 'primary'):
+                        path = old['file']
+                        if not path.startswith('/var/named/zones/'):
+                            raise ManagementError('Inventory-style updates require primary data under /var/named/zones')
+                        before = self.config.contents[path].decode('utf-8')
+                        self.changes[path] = self.zone_declaration.update_data(before, new_zones, self.context).encode('utf-8')
+                        if self.zone_declaration.serial is not None:
+                            self.explicit_serials[path] = self.zone_declaration.serial
+                    return
                 settings = self.request.get('settings')
                 if not isinstance(settings, dict) or not settings:
                     raise ManagementError('Update a static zone using an explicit settings mapping; use record actions for its data')
@@ -1099,6 +1256,11 @@ class Manager:
         if not isinstance(value, list) or not value:
             raise ManagementError('forwarders must be a nonempty list')
         servers = []
+        listeners = self.context.get('service_addresses', [])
+        if not isinstance(listeners, list):
+            raise ManagementError('DNS listener context must be a list of addresses')
+        peers = [self.context.get(key) for key in ('primary_front', 'secondary_front', 'primary_back', 'secondary_back')]
+        protected = peers + listeners
         for item in value:
             if not isinstance(item, dict) or set(item) - {'address', 'port'}:
                 raise ManagementError('A forwarder accepts address and optional port only')
@@ -1106,6 +1268,10 @@ class Manager:
                 raise ManagementError('A forwarder address must be an explicit IP string')
             try:
                 address = ipaddress.ip_address(item.get('address', ''))
+                if self.zone_declaration and ('%' in item['address'] or
+                        (address.version == 6 and address.ipv4_mapped is not None) or
+                        (address.version == 4 and str(address) != item['address'])):
+                    raise ValueError()
                 port = item.get('port', 53)
                 if address.is_multicast or address.is_unspecified or address.is_link_local or isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
                     raise ValueError()
@@ -1113,8 +1279,7 @@ class Manager:
                 # Apply the same policy to IPv4-mapped IPv6 endpoints.
                 if endpoint.is_multicast or endpoint.is_unspecified or endpoint.is_link_local or str(endpoint) == '255.255.255.255':
                     raise ValueError()
-                peers = [self.context.get(key) for key in ('primary_front', 'secondary_front', 'primary_back', 'secondary_back')]
-                if port == 53 and (endpoint.is_loopback or str(endpoint) in peers):
+                if port == 53 and (endpoint.is_loopback or str(endpoint) in protected):
                     raise ValueError()
             except ValueError:
                 raise ManagementError('Invalid forwarder address or port')
@@ -1150,12 +1315,15 @@ class Manager:
             if self.files.path(filename).exists():
                 raise ManagementError('A pre-existing zone data file must not be overwritten by create')
             serial, ttl = self.request.get('serial', 1), self.request.get('ttl', 300)
-            if any(isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 4294967295 for v in (serial, ttl)):
+            if self.zone_declaration is None and any(
+                    isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 4294967295 for v in (serial, ttl)):
                 raise ManagementError('Positive integer serial and ttl are required')
             data = ('; Bind9-Ansible-MANAGED-ZONE\n$TTL ' + str(ttl) + '\n@ IN SOA ns1.' + domain +
                     ' hostmaster.' + domain + ' ( ' + str(serial) + ' 3600 900 1209600 300 )\n' +
                     '@ IN NS ns1.' + domain + '\n@ IN NS ns2.' + domain + '\nns1 IN A ' + context['primary_front'] +
                     '\nns2 IN A ' + context['secondary_front'] + '\n')
+            if self.zone_declaration:
+                data = self.zone_declaration.apply_records(data, self.config.zones, context)
             self.changes[filename] = data.encode('utf-8')
             body = ('type master;\n    file "' + filename + '";\n    allow-transfer { !{ !bind_secondary_back_ip; any; }; key "' + key +
                     '"; };\n    notify explicit;\n    also-notify { ' + context['secondary_back'] + ' key "' + key + '"; };')
@@ -1259,7 +1427,12 @@ class Manager:
             before = original.serial()
             text = self.changes[path].decode('utf-8')
             after = ZoneDocument(text, domain).serial()
-            target = int(before.text) + 1 if int(before.text) < 4294967295 else 1
+            previous = int(before.text)
+            target = self.explicit_serials.get(path)
+            if target is None:
+                target = previous + 1 if previous < 4294967295 else 1
+            elif not 0 < (target - previous) % (1 << 32) < (1 << 31):
+                raise ManagementError('Updated SOA serial must be newer under RFC 1982')
             self.changes[path] = (text[:after.start] + str(target) + text[after.end:]).encode('utf-8')
 
     def validate(self):
@@ -1883,6 +2056,7 @@ class BatchManager(Manager):
         self.operations = json.loads(encoded.decode('utf-8'))
         self.batch_digest = hashlib.sha256(encoded).hexdigest()
         identities, deleted, record_zones = set(), set(), set()
+        self.zone_operations = []
         for index, operation in enumerate(self.operations, 1):
             if not isinstance(operation, dict) or operation.get('action') not in ('create', 'update', 'delete') or 'expected_checksum' in operation:
                 raise ManagementError('Batch operation ' + str(index) + ' must be a write without its own checksum')
@@ -1893,7 +2067,8 @@ class BatchManager(Manager):
                 identity = ('record', domain, owner, kind)
                 record_zones.add(domain)
             elif planner.resource == 'zone':
-                domain = canonical_name(operation['name'])
+                self.zone_operations.append(planner.request)
+                domain = canonical_name(planner.request['name'])
                 identity = ('zone', domain)
                 if planner.action == 'delete':
                     deleted.add(domain)
@@ -1908,7 +2083,7 @@ class BatchManager(Manager):
         self.files, self.runner, self.check = BoundedFiles(root), runner or self.command, check
         self.resource, self.action = 'batch', request['action']
         self.changes, self.originals, self.results = {}, {}, []
-        self.zone_operations = [op for op in self.operations if op['resource'] == 'zone']
+        self.explicit_serials = {}
 
     def selected(self, operation, config):
         """Read a selector against one snapshot, including not-yet-created zones."""
@@ -1923,18 +2098,20 @@ class BatchManager(Manager):
         overlay = dict(self.config.contents)
         pending = []
         initial_serials = {}
-        for index, operation in enumerate(self.operations, 1):
+        for index, raw_operation in enumerate(self.operations, 1):
+            planner = Manager(raw_operation, self.context, root=self.root, runner=self.runner, check=True)
+            operation = planner.request
             result = {'index': index, 'resource': operation['resource'], 'action': operation['action'], 'name': operation['name']}
             if operation['resource'] == 'record' and not self.context.get('primary'):
                 result.update(skipped=True, reason='primary-only', changed=False)
             else:
-                planner = Manager(operation, self.context, root=self.root, runner=self.runner, check=True)
                 planner.files = SnapshotFiles(self.files, overlay)
                 planner.config = Configuration(planner.files)
                 before = self.selected(operation, self.config)
                 planner.plan()
                 overlay.update(planner.changes)
                 self.changes.update(planner.changes)
+                self.explicit_serials.update(planner.explicit_serials)
                 result.update(skipped=False, changed=any(planner.config.contents.get(name) != data for name, data in planner.changes.items()))
                 pending.append((result, operation, before))
                 if operation['resource'] == 'zone' and operation['action'] == 'create' and operation.get('kind') == 'authoritative' and self.context.get('primary'):

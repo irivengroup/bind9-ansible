@@ -20,7 +20,10 @@
   register: bind_front_ssh_session
   changed_when: false
   check_mode: false
-  failed_when: bind_front_ssh_session.rc != 0 or bind_front_ssh_session.stdout.split() | length != 4
+  failed_when: >-
+    bind_front_ssh_session.rc != 0 or bind_front_ssh_session.stdout.split() | length != 4 or
+    (bind_front_action in ['plan', 'apply'] and _bind_local_admin_ip is defined and
+     bind_front_ssh_session.stdout.split()[2] != _bind_local_admin_ip)
   when:
     - bind_front_action in ['plan', 'apply', 'rollback', 'recover']
     - ansible_connection | default('ssh') != 'local'
@@ -31,7 +34,7 @@
       {%- set ns = namespace(args=['--action', bind_front_action]) -%}
       {%- if bind_front_action in ['plan', 'apply'] -%}
         {%- set ns.args = ns.args + ['--front-ip', bind_front_ip, '--back-ip', bind_back_ip,
-          '--adm-ip', ansible_host, '--metric', bind_front_route_metric | string,
+          '--adm-ip', _bind_local_admin_ip | default(ansible_host), '--metric', bind_front_route_metric | string,
           '--peer-back-ip', hostvars[bind_primary_host].bind_back_ip,
           '--peer-back-ip', hostvars[bind_secondary_host].bind_back_ip] -%}
         {%- for client in bind_cloud_clients -%}

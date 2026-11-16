@@ -38,8 +38,9 @@ class NativeDeploymentPlayRun(NativeContainerRun):
             raise ValueError('Native dispatch fixture refuses an unreviewed deployment play envelope')
 
     def safe_context(self, task):
-        return (task.get('become', False) is False and task.get('delegate_to', 'localhost') in (
-            'localhost', '{{ bind_primary_host }}', '{{ inventory_hostname }}'))
+        return (self.safe_site_network_task(task) or
+                (task.get('become', False) is False and task.get('delegate_to', 'localhost') in (
+                    'localhost', '{{ bind_primary_host }}', '{{ inventory_hostname }}')))
 
     def check_tasks(self, tasks, seen, basedir):
         super().check_tasks(tasks, seen, basedir)

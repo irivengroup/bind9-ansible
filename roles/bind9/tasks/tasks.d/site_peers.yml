@@ -47,11 +47,72 @@
     bind_primary_host: "{{ bind_site_primary_hosts[0] }}"
     bind_secondary_host: "{{ bind_site_secondary_hosts[0] }}"
 
-- name: Validate required peer host variables
-  ansible.builtin.assert:
-    that:
-      - hostvars[bind_primary_host].bind_back_ip is defined
-      - hostvars[bind_secondary_host].bind_back_ip is defined
-      - hostvars[bind_primary_host].bind_front_ip is defined
-      - hostvars[bind_secondary_host].bind_front_ip is defined
-    fail_msg: 'Missing peer address or inconsistent host_vars role.'
+- name: Determine whether the pair needs interface discovery
+  ansible.builtin.set_fact:
+    _bind_observe_site_network: >-
+      {{ (_bind_probe_legacy_network | default(false)) or
+         (hostvars[bind_primary_host].bind_front_ip | default(none) | dns_network_required(
+            hostvars[bind_primary_host].bind_back_ip | default(none),
+            hostvars[bind_primary_host].bind_listen_interfaces is defined,
+            hostvars[bind_primary_host].bind_admin_ip is defined)) or
+         (hostvars[bind_secondary_host].bind_front_ip | default(none) | dns_network_required(
+            hostvars[bind_secondary_host].bind_back_ip | default(none),
+            hostvars[bind_secondary_host].bind_listen_interfaces is defined,
+            hostvars[bind_secondary_host].bind_admin_ip is defined)) }}
+
+- name: Resolve observed interface topology on both DNS peers
+  block:
+    - name: Read active IPv4 interfaces from the kernel of each peer
+      ansible.builtin.command:
+        argv: [ip, -j, '-4', address, show, up]
+      delegate_to: '{{ item }}'
+      loop: '{{ [bind_primary_host, bind_secondary_host] }}'
+      register: _bind_peer_links
+      check_mode: false
+      changed_when: false
+
+    - name: Reset the resolved topology for this invocation
+      ansible.builtin.set_fact:
+        _bind_peer_networks: {}
+
+    - name: Resolve the local DNS and SSH addresses of each peer
+      ansible.builtin.set_fact:
+        _bind_peer_networks: >-
+          {{ _bind_peer_networks | combine({item.item: (item.stdout | from_json |
+             dns_network_resolve(hostvars[item.item].bind_listen_interfaces | default(none),
+                                 hostvars[item.item].bind_front_ip | default(none),
+                                 hostvars[item.item].bind_back_ip | default(none),
+                                 hostvars[item.item].bind_admin_ip |
+                                 default(hostvars[item.item].ansible_host | default(item.item))))}) }}
+      loop: '{{ _bind_peer_links.results }}'
+      loop_control:
+        label: '{{ item.item }}'
+
+    - name: Require equivalent DNS and SSH topology on the primary and secondary
+      ansible.builtin.assert:
+        that:
+          - _bind_peer_networks[bind_primary_host] | dns_network_peer_valid(_bind_peer_networks[bind_secondary_host])
+        fail_msg: 'The primary and secondary must have equivalent IPv4 interface and DNS/SSH roles with distinct service addresses.'
+
+    # Publish the existing address variables only after both observations agree.
+    - name: Resolve the DNS service identities used by peer transfers and zone data
+      ansible.builtin.set_fact:
+        bind_front_ip: '{{ _bind_peer_networks[item].front }}'
+        bind_back_ip: '{{ _bind_peer_networks[item].back }}'
+      delegate_to: '{{ item }}'
+      delegate_facts: true
+      loop: '{{ [bind_primary_host, bind_secondary_host] }}'
+
+    - name: Resolve local listeners and the applicability of FRONT return routes
+      ansible.builtin.set_fact:
+        bind_dns_listen_addresses: '{{ selected.listeners }}'
+        bind_dns_shared_listener: '{{ selected.listener_count == 1 }}'
+        bind_dns_front_routes_applicable: '{{ selected.front_routes }}'
+        _bind_local_admin_ip: '{{ selected.admin }}'
+        bind_site_dns_addresses: '{{ _bind_peer_networks[bind_primary_host].listeners + _bind_peer_networks[bind_secondary_host].listeners }}'
+      vars:
+        selected: '{{ _bind_peer_networks[inventory_hostname] }}'
+  when:
+    - _bind_observe_site_network | bool
+    # Recovery must be able to use the saved transaction after a topology change.
+    - ansible_run_tags | difference(['routes-recover', 'never']) | length > 0

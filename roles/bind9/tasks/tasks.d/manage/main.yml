@@ -43,6 +43,7 @@
           secondary_front: '{{ hostvars[bind_secondary_host].bind_front_ip }}'
           primary_back: '{{ hostvars[bind_primary_host].bind_back_ip }}'
           secondary_back: '{{ hostvars[bind_secondary_host].bind_back_ip }}'
+          service_addresses: '{{ bind_site_dns_addresses | default(omit) }}'
           tsig_key_name: '{{ bind_tsig_key_name }}'
           backup_root: '{{ bind_backup_root }}'
       register: bind_management_result

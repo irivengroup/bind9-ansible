@@ -5,6 +5,7 @@ and iproute2 use the existing isolated CLI doubles; no BIND task is substituted.
 """
 import pytest
 
+from test_dns_network import link, write_ip_probe
 from test_front_routes_ansible import AnsibleRouteSandbox, BASE, NEW, pytestmark as inherited_pytestmark
 
 pytestmark = inherited_pytestmark
@@ -16,9 +17,15 @@ def public_entry_sandbox(folder):
     sandbox.inventory.write_text(
         '[dns_primary]\nlocalhost ansible_connection=local ansible_host=192.0.2.2 '
         'bind_front_ip=198.51.100.2 bind_back_ip=10.0.0.2\n'
-        '[dns_secondary]\nsecondary bind_front_ip=198.51.100.3 bind_back_ip=10.0.0.3\n'
+        '[dns_secondary]\nsecondary ansible_connection=local ansible_host=192.0.2.3 '
+        'bind_front_ip=198.51.100.3 bind_back_ip=10.0.0.3\n'
         '[site1]\nlocalhost\nsecondary\n'
         '[site1:vars]\nbind_environment=test\nbind_site_name=site1\n')
+    write_ip_probe(folder / 'bin', {'': [
+        link('front0', '198.51.100.2', '198.51.100.3'),
+        link('back0', '10.0.0.2', '10.0.0.3'),
+        link('adm0', '192.0.2.2', '192.0.2.3'),
+    ]}, existing=True)
     role = folder / 'roles/bind9'
     # Keep production role imports, tags and acquisition/release unchanged.
     # Rebase privileged paths only, as in the existing deployment transport lab.

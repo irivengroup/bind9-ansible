@@ -1,11 +1,13 @@
 """Resolve peers with the real inventory and action plugins, including refusals."""
 import copy
+import os
 
 from ansible import release
 import jinja2
 import pytest
 
 from native_ansible_runner import NativeTaskRun
+from test_dns_network import link, write_ip_probe
 
 pytestmark = pytest.mark.skipif(release.__version__ != '2.16.19' or jinja2.__version__ != '3.1.6',
                                reason='Native observer integration requires the inspected QA controller')
@@ -36,7 +38,8 @@ def test_native_inventory_resolves_exact_site_membership_and_peers():
     status, result = run(variables, hosts, groups)
     assert status == 0 and not result.failed
     assert result.facts == dict(bind_site_primary_hosts=['localhost'], bind_site_secondary_hosts=['peer'],
-                                bind_primary_host='localhost', bind_secondary_host='peer')
+                                bind_primary_host='localhost', bind_secondary_host='peer',
+                                _bind_observe_site_network=False)
     assert len(result.ok) == 5
 
 
@@ -108,8 +111,17 @@ def test_different_peer_environment_or_site_is_rejected(host, key):
 
 @pytest.mark.parametrize('host,key', [(host, key) for host in ('localhost', 'peer')
                                     for key in ('bind_back_ip', 'bind_front_ip')])
-def test_missing_peer_addresses_fail_explicitly(host, key):
+def test_missing_peer_addresses_fail_explicitly_on_a_multi_interface_site(host, key, tmp_path, monkeypatch):
     variables, hosts, groups = scope()
     del hosts[host][key]
+    hosts['localhost']['bind_admin_ip'] = '192.0.2.11'
+    hosts['peer']['bind_admin_ip'] = '192.0.2.12'
+    observations = [
+        link('front0', '198.51.100.2', '198.51.100.3'),
+        link('back0', '10.0.0.2', '10.0.0.3'),
+        link('admin0', '192.0.2.11', '192.0.2.12'),
+    ]
+    write_ip_probe(tmp_path, {'': observations})
+    monkeypatch.setenv('PATH', str(tmp_path) + os.pathsep + os.environ['PATH'])
     status, result = run(variables, hosts, groups)
-    assert status == 2 and result.failed == ['Validate required peer host variables']
+    assert status == 2 and result.failed == ['Resolve the local DNS and SSH addresses of each peer']

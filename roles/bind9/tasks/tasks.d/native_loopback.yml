@@ -18,10 +18,44 @@
   ansible.builtin.assert:
     that:
       - item.stat.exists
-      - not (item.stat.islnk | default(false))
-      - item.stat.isreg | default(false)
+      - >-
+        (item.stat.isreg | default(false)) or
+        ((item.item | dirname) == '/var/named' and
+         (item.stat.islnk | default(false)) and item.stat.uid == 0 and
+         [item.stat.lnk_target, item.stat.lnk_source] ==
+         ['../../usr/share/named/' ~ (item.item | basename),
+          '/usr/share/named/' ~ (item.item | basename)])
     fail_msg: 'Native BIND file missing or unsafe: {{ item.item }}. Repair the RHEL bind package; the role does not replace vendor files.'
   loop: '{{ bind_native_loopback_files.results }}'
+  loop_control:
+    label: '{{ item.item }}'
+
+# Recent bind RPMs place the immutable loopback data under /usr/share/named.
+# Inspect both the directory and the target inodes of the approved links.
+- name: Inspect approved native BIND link targets and their directory
+  ansible.builtin.stat:
+    path: '{{ item }}'
+    follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  vars:
+    bind_native_link_targets: >-
+      {{ bind_native_loopback_files.results | selectattr('stat.lnk_source', 'defined')
+         | map(attribute='stat.lnk_source') | list }}
+  loop: "{{ ['/usr/share/named'] + bind_native_link_targets if bind_native_link_targets else [] }}"
+  register: bind_native_link_target_files
+
+- name: Require protected native BIND link targets
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat['isdir' if item.item == '/usr/share/named' else 'isreg'] | default(false)
+      - item.stat.uid == 0
+      - not item.stat.wgrp
+      - not item.stat.woth
+    fail_msg: 'Native BIND link target missing or unsafe: {{ item.item }}. Repair the installed bind package.'
+  loop: '{{ bind_native_link_target_files.results }}'
   loop_control:
     label: '{{ item.item }}'
 

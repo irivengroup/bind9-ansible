@@ -88,6 +88,21 @@ def test_native_public_management_previews_new_resources_on_both_hosts(playbook,
     assert result.ok.count('Run the private management transaction') == 2
 
 
+@pytest.mark.parametrize('kind,zone', [
+    ('forward', {'domain': 'inventory-forward.test', 'policy': 'only',
+                 'forwarders': [{'address': '198.51.100.5'}]}),
+    ('authoritative', {'domain': 'inventory-authority.test', 'serial': 2026111501,
+                       'records': [{'name': 'www', 'type': 'A', 'value': '192.0.2.80'}]}),
+])
+@pytest.mark.skipif(not Path('/usr/sbin/named-checkconf').is_file(), reason='Changed previews require the real BIND checker')
+def test_native_public_management_previews_inventory_zone_objects(playbook, kind, zone):
+    preview = dict(resource='zone', action='create', kind=kind, zone=zone,
+                   expected_checksum=M.Configuration(M.SafeFiles()).revision())
+    status, result = playbook.run(preview, check=True)
+    assert status == 0 and not result.failed
+    assert result.ok.count('Run the private management transaction') == 2
+
+
 @pytest.mark.parametrize('check', [False, True])
 def test_native_public_management_unchanged_approved_batch_respects_preflight_and_check_mode(playbook, check):
     status, result = playbook.run(dict(BATCH, action='apply'), check=check, **playbook.approvals())

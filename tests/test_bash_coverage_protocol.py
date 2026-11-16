@@ -261,7 +261,7 @@ def test_native_health_profile_file_does_not_infer_unobserved_outcomes_from_an_e
 # the complete production functions measured independently for each source.
 @pytest.mark.parametrize('profile_type,count', [
     pytest.param(NativeFrontProfile, 39, id='NativeFrontProfile-37'),
-    pytest.param(NativeConfigtoolProfile, 16, id='NativeConfigtoolProfile-14')])
+    pytest.param(NativeConfigtoolProfile, 18, id='NativeConfigtoolProfile-14')])
 def test_complete_profiles_keep_all_five_independent_denominators(profile_type, count):
     profile = profile_type(ROOT)
     assert len(profile.units['functions']) == count

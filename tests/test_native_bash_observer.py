@@ -362,6 +362,8 @@ for mode in ('baseline','observed'):
     collector.save(Path(output)/(mode+'.json'))
 baseline=json.loads((Path(output)/'baseline.json').read_text())
 observed=json.loads((Path(output)/'observed.json').read_text())
+assert baseline['errors']==[], ('baseline collector errors', baseline['errors'])
+assert observed['errors']==[], ('observed collector errors', observed['errors'])
 name='roles/bind9/files/named-healthcheck.sh'
 profile,hits=NativeBashCollector.checked_pair(root,manifest,baseline,observed)[name]
 assert len(baseline['profiles'][name]['processes'])==len(observed['profiles'][name]['processes'])==1
@@ -376,7 +378,6 @@ print('independent baseline and partial native facts verified')
     baseline = json.loads((tmp_path / 'baseline.json').read_text())
     observed = json.loads((tmp_path / 'observed.json').read_text())
     for receipt in (baseline, observed):
-        assert receipt['errors'] == []
         assert len(receipt['profiles']['roles/bind9/files/named-healthcheck.sh']['processes']) == 1
     assert len(observed['profiles']['roles/bind9/files/named-healthcheck.sh']['processes'][0]['rows']) > 0
     assert baseline['toolchain_sha256'] == observed['toolchain_sha256']
@@ -415,11 +416,11 @@ assert hits['lines'] and hits['lines']<front.units['lines']
 assert len(front.units['branches'])==911 and len(front.units['conditions'])==896
 assert all(hits[key] and hits[key]<front.units[key]for key in ('branches','conditions'))
 tool,hits=profiles['roles/bind9/files/bind-configtool.sh']
-assert len(tool.units['functions'])==16 and len(hits['functions'])==1
-assert len(tool.units['statements'])==854 and len(tool.units['lines'])==403
+assert len(tool.units['functions'])==18 and len(hits['functions'])==1
+assert len(tool.units['statements'])==904 and len(tool.units['lines'])==433
 assert hits['statements'] and hits['statements']<tool.units['statements']
 assert hits['lines'] and hits['lines']<tool.units['lines']
-assert len(tool.units['branches'])==570 and len(tool.units['conditions'])==580
+assert len(tool.units['branches'])==614 and len(tool.units['conditions'])==622
 assert all(hits[key] and hits[key]<tool.units[key]for key in ('branches','conditions'))
 path,hits=profiles['roles/bind9/files/bind9-sbin-path.sh']
 assert {key:len(value)for key,value in path.units.items()}==dict(statements=3,branches=6,functions=0,lines=2,conditions=6)
@@ -568,7 +569,7 @@ def test_native_health_argument_refusal():
     assert (health['functions']['hit'], health['functions']['total']) == (0, 3)
     assert report['accepted'] is False
     for name, functions, statements, lines, branches, conditions in [('bind-front-routes.sh', 39, 1230, 677, 911, 896),
-                                               ('bind-configtool.sh', 16, 854, 403, 570, 580)]:
+                                               ('bind-configtool.sh', 18, 904, 433, 614, 622)]:
         metrics = report['components']['roles/bind9/files/' + name]['metrics']
         assert metrics['functions']['hit'] == 0 and metrics['functions']['total'] == functions
         assert metrics['functions']['status'] == 'ÉCHOUÉ'
@@ -579,7 +580,7 @@ def test_native_health_argument_refusal():
         assert (metrics['conditions']['hit'], metrics['conditions']['total']) == (0, conditions)
         assert all(metrics[key]['status'] == 'ÉCHOUÉ' for key in ('branches', 'conditions'))
     # Every known denominator remains present even when its source never ran.
-    assert report['project_totals']['functions']['total'] == 59
+    assert report['project_totals']['functions']['total'] == 61
     assert report['project_totals']['functions']['hit'] == 1
     assert report['project_totals']['functions']['status'] == 'ÉCHOUÉ'
     for metric in ('statements', 'branches', 'lines', 'conditions'):
