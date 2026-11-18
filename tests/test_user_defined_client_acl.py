@@ -48,3 +48,16 @@ class TestUserDefinedClientAcl:
         assert f'bind_{server}_{expected}_ip;' in recursion
         assert f'bind_{server}_{other}_ip;' not in recursion
         assert '    192.0.2.10;' in output
+
+    @pytest.mark.parametrize('role', ['dns_primary', 'dns_secondary'])
+    def test_an_omitted_mapping_renders_the_same_technical_acls_as_empty_defaults(self, role):
+        adapter = LoopbackIntegration(Path('.'), Path('.'), Path('.'))
+        _, original = next(adapter.contexts())
+        context = copy.deepcopy(original)
+        context.update(group_names=[role], bind_allowed_clients=[])
+        context.pop('bind_trusted_networks', None)
+        template = adapter.jinja.get_template('named.conf.j2')
+        omitted = template.render(**context)
+        context['bind_trusted_networks'] = {'cloud_clients': [], 'internal_clients': []}
+        assert template.render(**context) == omitted
+        assert 'acl "bind_servers_back_ip"' in omitted
