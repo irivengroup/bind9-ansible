@@ -93,7 +93,7 @@
   when:
     - bind_front_routes_enabled
     - bind_dns_front_routes_applicable | default(true) | bool
-    - bind_cloud_clients | length > 0
+    - bind_trusted_networks.cloud_clients | default([]) | length > 0
     - not (bind_front_routes_defer_commit | bool)
 
 - name: Back up full BIND configuration before changes
@@ -129,7 +129,7 @@
       when:
         - bind_front_routes_enabled
         - bind_dns_front_routes_applicable | default(true) | bool
-        - bind_cloud_clients | length > 0
+        - bind_trusted_networks.cloud_clients | default([]) | length > 0
         - bind_front_routes_defer_commit | default(false) | bool
 
     - name: Preserve native transport and prepare administrative reload

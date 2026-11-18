@@ -45,7 +45,7 @@ class TestOptionalDnssec:
         context=dict(bind_dnssec_active=value,bind_allowed_clients=['192.0.2.0/24'],
                      # Stale internal names must not influence the rendered policy.
                      bind_dnssec_mode='auto' if not anchor else 'disabled',bind_dnssec_enabled=not anchor,
-                     bind_cloud_clients=['192.0.2.0/24'],bind_internal_clients=[],
+                     bind_trusted_networks=dict(cloud_clients=['192.0.2.0/24'], internal_clients=[]),
                      bind_primary_host='p',bind_secondary_host='s',group_names=['dns_primary'],
                      hostvars={'p':{'bind_back_ip':'10.0.0.11'},'s':{'bind_back_ip':'10.0.0.12'}},
                      bind_front_ip='192.0.2.11',bind_back_ip='10.0.0.11',

@@ -22,8 +22,7 @@ class LoggingIntegration(LoopbackIntegration):
         _, context = next(self.contexts())
         context = copy.deepcopy(context)
         context.update(bind_dnssec_active=False, bind_front_ip='127.0.0.2', bind_back_ip='127.0.0.3',
-                       group_names=[context['bind_primary_group']], bind_cloud_clients=['127.0.0.10'],
-                       bind_internal_clients=[], bind_forward_zones=[])
+                       group_names=[context['bind_primary_group']], bind_trusted_networks=dict(cloud_clients=['127.0.0.10'], internal_clients=[]), bind_forward_zones=[])
         context['hostvars'][context['bind_primary_host']].update(bind_front_ip='127.0.0.2', bind_back_ip='127.0.0.3')
         context['hostvars'][context['bind_secondary_host']].update(bind_front_ip='127.0.0.4', bind_back_ip='127.0.0.5')
         with tempfile.TemporaryDirectory(prefix='bind-logging-') as temp:

@@ -37,7 +37,7 @@
           '--adm-ip', _bind_local_admin_ip | default(ansible_host), '--metric', bind_front_route_metric | string,
           '--peer-back-ip', hostvars[bind_primary_host].bind_back_ip,
           '--peer-back-ip', hostvars[bind_secondary_host].bind_back_ip] -%}
-        {%- for client in bind_cloud_clients -%}
+        {%- for client in bind_trusted_networks.cloud_clients | default([]) -%}
           {%- set ns.args = ns.args + ['--client', client] -%}
         {%- endfor -%}
         {%- if bind_front_routes_defer_commit | default(false) | bool -%}

@@ -186,7 +186,7 @@ def test_hibernation_guard_does_not_infer_dispatch_from_a_tag(tags, expected):
     (True, ['203.0.113.0/24'], False, True, False), (True, ['203.0.113.0/24'], True, False, True),
 ])
 def test_route_dispatch_keeps_standalone_and_protected_paths_distinct(enabled, clients, deferred, standalone, protected):
-    values = dict(bind_front_routes_enabled=enabled, bind_cloud_clients=clients, bind_front_routes_defer_commit=deferred)
+    values = dict(bind_front_routes_enabled=enabled, bind_trusted_networks=dict(cloud_clients=clients), bind_front_routes_defer_commit=deferred)
     guards = CanonicalPredicates('deploy/main.yml')
     guards.check('Add only return routes when explicitly running the routes tag', values, standalone, key='when')
     guards.check('Add return routes as part of the protected DNS deployment', values, protected, key='when')

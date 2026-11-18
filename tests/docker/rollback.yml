@@ -13,7 +13,7 @@
             tasks_from: tasks.d/deploy/front_return_routes.yml
           vars:
             bind_front_routes_defer_commit: true
-            bind_cloud_clients: ['198.51.100.128/26']
+            bind_trusted_networks.cloud_clients: ['198.51.100.128/26']
         - name: Require a real pending transaction before injecting failure
           ansible.builtin.assert:
             that:

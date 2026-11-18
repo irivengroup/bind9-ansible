@@ -67,14 +67,14 @@ def test_native_adapter_keeps_all_existing_task_values_and_original_positions():
 ])
 def test_client_list_types(cloud, internal, expected):
     CanonicalPredicates('clients.yml').check('Validate the cloud and internal client list types',
-        {'bind_cloud_clients': cloud, 'bind_internal_clients': internal}, expected)
+        {'bind_trusted_networks': {'cloud_clients': cloud, 'internal_clients': internal}}, expected)
 
 
 @pytest.mark.parametrize('cloud,internal,expected', [([], [], False), (['203.0.113.25'], [], True),
     ([], ['10.0.0.0/24'], True), (['203.0.113.25'], ['10.0.0.0/24'], True)])
 def test_client_union_is_nonempty(cloud, internal, expected):
     CanonicalPredicates('clients.yml').check('Require at least one configured DNS client network',
-        {'bind_cloud_clients': cloud, 'bind_internal_clients': internal}, expected)
+        {'bind_trusted_networks': {'cloud_clients': cloud, 'internal_clients': internal}}, expected)
 
 
 @pytest.mark.parametrize('item,expected', [('203.0.113.25', True), ('203.0.113.0/24', True),
@@ -90,7 +90,7 @@ def test_client_entries_follow_the_real_authorization_contract(item, expected):
     (['203.0.113.25'], False), (['0.0.0.0/0'], False)])
 def test_computed_union_cannot_be_bypassed(allowed, expected):
     CanonicalPredicates('clients.yml').check('Reject an override that bypasses the computed client union',
-        {'bind_cloud_clients': ['203.0.113.25', '203.0.113.25'], 'bind_internal_clients': ['10.0.0.0/24'],
+        {'bind_trusted_networks': {'cloud_clients': ['203.0.113.25', '203.0.113.25'], 'internal_clients': ['10.0.0.0/24']},
          'bind_allowed_clients': allowed}, expected)
 
 

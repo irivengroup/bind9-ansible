@@ -4,7 +4,7 @@
 
 > Historique du routage natif : les nombres ci-dessous décrivent la livraison source. Le contrat client courant et ses contrôles figurent dans [CLIENTS_UNIQUES.md](CLIENTS_UNIQUES.md).
 
-Cette adaptation de **Bind9-Ansible** reprend le principe du playbook fourni : sélectionner l’interface portant l’adresse connue, lire la passerelle du seul profil NetworkManager actif, persister les routes avec `nmcli`, puis les ajouter à chaud avec `ip route`. Le point d’entrée reste `playbooks/bind9-deploy.yml`. Aucun nouveau playbook autonome ni variable `target_secondary_ip`/`route_destination` n’est ajouté : les entrées existantes sont `bind_front_ip` et `bind_cloud_clients`.
+Cette adaptation de **Bind9-Ansible** reprend le principe du playbook fourni : sélectionner l’interface portant l’adresse connue, lire la passerelle du seul profil NetworkManager actif, persister les routes avec `nmcli`, puis les ajouter à chaud avec `ip route`. Le point d’entrée reste `playbooks/bind9-deploy.yml`. Aucun nouveau playbook autonome ni variable `target_secondary_ip`/`route_destination` n’est ajouté : les entrées existantes sont `bind_front_ip` et `bind_trusted_networks.cloud_clients`.
 
 ## Corrections et intégration
 

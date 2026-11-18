@@ -24,9 +24,11 @@ La liste de destinations du rôle accepte des IP seules, des sous-réseaux IPv4 
 
 ```yaml
 bind_front_routes_enabled: true
-bind_cloud_clients:
-  - 203.0.113.25
-  - 172.20.0.0/16
+bind_trusted_networks:
+  cloud_clients:
+    - 203.0.113.25
+    - 172.20.0.0/16
+  internal_clients: []
 ```
 
 L'IP seule devient `203.0.113.25/32` ; le sous-réseau garde son masque. La normalisation et l'agrégation existantes conservent exactement l'union des destinations, sans élargir les accès. Ces valeurs sont des exemples de laboratoire, à remplacer par les destinations autorisées.

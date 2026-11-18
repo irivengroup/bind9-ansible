@@ -1,14 +1,28 @@
 # Clients cloud, clients internes et fusion DNS
 
-Le rôle expose deux listes plates d’IP IPv4 ou de sous-réseaux CIDR :
+Le rôle expose une seule variable `bind_trusted_networks`, contenant deux listes
+plates d’IP IPv4 ou de sous-réseaux CIDR.
+
+Les valeurs par défaut sont les suivantes.
 
 ```yaml
-bind_cloud_clients:
-  - 192.0.2.0/24
-  - 10.150.1.23
-bind_internal_clients:
-  - 192.168.20.25
-  - 10.30.1.0/24
+bind_trusted_networks:
+  cloud_clients: []
+  internal_clients: []
+```
+
+Le déploiement exige au moins une liste remplie. Une sous-liste omise vaut
+`[]`. Une valeur `null`, un autre type de collection ou une clé inconnue
+provoque une erreur avant modification du serveur. Exemple de configuration
+
+```yaml
+bind_trusted_networks:
+  cloud_clients:
+    - 192.0.2.0/24
+    - 10.150.1.23
+  internal_clients:
+    - 192.168.20.25
+    - 10.30.1.0/24
 ```
 
 Ces valeurs sont fictives. Les inventaires conservent les internes à `[]`
@@ -26,7 +40,7 @@ autoritatives restent admises sur les écoutes locales pour la fusion et les
 ACL techniques. Le loopback et les pairs BACK ne sont pas des entrées clientes.
 
 `bind_allowed_clients` est un **fait calculé**, pas une troisième entrée :
-`(bind_cloud_clients + bind_internal_clients) | unique | list`. Les doublons
+`(bind_trusted_networks.cloud_clients + bind_trusted_networks.internal_clients) | unique | list`. Les doublons
 textuellement identiques sont retirés ; aucune liste n’est modifiée et les
 sous-réseaux ne sont pas élargis pour l’autorisation DNS. Une surcharge
 contradictoire par extra-vars échoue explicitement. Les deux entrées sont
@@ -35,7 +49,7 @@ structures de groupes et caractères d’injection sont refusés.
 
 La fusion alimente uniquement l’ACL BIND commune `user_defined_clients` et ses
 contrôles de requêtes/récursion/cache. Le plan de routes lit exclusivement
-`bind_cloud_clients` : IP seule normalisée en `/32`, déduplication/agrégation
+`bind_trusted_networks.cloud_clients` : IP seule normalisée en `/32`, déduplication/agrégation
 des routes, profil et passerelle FRONT existants, gardes BACK/ADM/SSH et
 rollback des seuls ajouts possédés conservés. Les réseaux internes ne passent
 pas au plan, même s’ils appartiennent directement au sous-réseau BACK.
@@ -55,8 +69,12 @@ transfert restent exclus de la récursion.
 
 ## Migration, tests et rollback
 
-Conserver la version et les variables précédentes. Renseigner les deux listes
-selon l’arrivée réelle ; supprimer toute définition manuelle de la fusion.
+Conserver la version et les variables précédentes. Déplacer les anciennes
+listes dans les clés `cloud_clients` et `internal_clients` de
+`bind_trusted_networks`, en conservant toutes leurs valeurs. Renseigner les
+listes selon l’arrivée réelle et supprimer toute définition manuelle de la
+fusion. Les anciennes variables de premier niveau doivent être retirées des
+inventaires et des fichiers de surcharge pendant cette migration.
 Les hôtes internes ne doivent pas rester dans la liste cloud uniquement pour
 obtenir une autorisation DNS : cela les exposerait au calcul de routes FRONT.
 

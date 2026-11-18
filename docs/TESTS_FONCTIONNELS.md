@@ -103,8 +103,8 @@ Arrêter la mise en production en cas de syntaxe invalide, service inactif, mauv
 
 ## Deux listes clientes et absence de routes internes
 
-Depuis une IP déclarée dans `bind_cloud_clients`, interroger une zone forwardée
-sur FRONT en UDP puis TCP. Depuis une IP de `bind_internal_clients`, faire le
+Depuis une IP déclarée dans `bind_trusted_networks.cloud_clients`, interroger une zone forwardée
+sur FRONT en UDP puis TCP. Depuis une IP de `bind_trusted_networks.internal_clients`, faire le
 même contrôle sur BACK. Attendu : la donnée du forwarder sur les deux pairs.
 Les IP sources doivent réellement appartenir aux machines de recette.
 

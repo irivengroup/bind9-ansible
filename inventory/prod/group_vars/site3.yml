@@ -4,9 +4,10 @@ bind_tsig_key_name: prod-site3-transfer
 bind_tsig_algorithm: hmac-sha256
 bind_tsig_secret_file: "{{ lookup('env', 'HOME') }}/.local/share/bind9-ansible/tsig/prod/site3.key"
 
-bind_internal_clients: []
-bind_cloud_clients:
-  - 198.51.100.0/24
+bind_trusted_networks:
+  cloud_clients:
+    - 198.51.100.0/24
+  internal_clients: []
 
 bind_forward_zones:
   - domain: corp.site3.prod.example.test

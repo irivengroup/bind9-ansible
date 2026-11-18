@@ -19,7 +19,7 @@ class NativeRouteIntegration:
         self.variables = dict(ansible_python_interpreter=str(interpreter), ansible_host='192.0.2.2',
                               bind_front_ip='198.51.100.2', bind_back_ip='10.0.0.2',
                               bind_primary_host='localhost', bind_secondary_host='secondary',
-                              bind_cloud_clients=['203.0.113.0/24'], bind_front_route_metric=100)
+                              bind_trusted_networks=dict(cloud_clients=['203.0.113.0/24']), bind_front_route_metric=100)
         self.inventory = workarea / 'hosts.ini'
         self.inventory.write_text('[dns_primary]\nlocalhost ansible_connection=local bind_back_ip=10.0.0.2\n'
                                   '[dns_secondary]\nsecondary bind_back_ip=10.0.0.3\n')
@@ -84,7 +84,7 @@ class NativeRouteIntegration:
         # without applying the profile's other pending changes.
         self.command('nmcli', 'connection', 'modify', 'front', 'ipv4.route-metric', '-1')
         self.command('nmcli', 'connection', 'modify', 'front', '+ipv4.routes', '172.21.0.0/24 198.51.100.1')
-        self.variables['bind_cloud_clients'] += ['172.21.0.0/24']
+        self.variables['bind_trusted_networks']['cloud_clients'] += ['172.21.0.0/24']
         self.role()
         assert self.role()['stats']['localhost']['changed'] == 0
         inherited = next(row for row in self.routes() if row.get('dst') == '172.21.0.0/24')
@@ -102,7 +102,7 @@ class NativeRouteIntegration:
         # Reproduce an active gateway omitted from the persistent gateway field.
         self.command('nmcli', 'connection', 'modify', 'front', 'ipv4.gateway', '')
         assert self.command('nmcli', '-g', 'IP4.GATEWAY', 'device', 'show', 'front0') == '198.51.100.1'
-        self.variables['bind_cloud_clients'] += ['172.20.0.0/24']
+        self.variables['bind_trusted_networks']['cloud_clients'] += ['172.20.0.0/24']
         self.role()
         assert self.role()['stats']['localhost']['changed'] == 0
         assert protected == {name: self.profile(name) for name in protected}
@@ -116,7 +116,7 @@ class NativeRouteIntegration:
         assert not any(row.get('dst') == 'default' and row.get('dev') == 'front0' for row in self.routes())
         before_specific = self.routes()
         before_profile = self.command('nmcli', '-g', 'ipv4.routes', 'connection', 'show', 'front')
-        self.variables['bind_cloud_clients'] += ['172.19.0.0/24']
+        self.variables['bind_trusted_networks']['cloud_clients'] += ['172.19.0.0/24']
         self.role('plan')
         assert self.routes() == before_specific
         assert self.command('nmcli', '-g', 'ipv4.routes', 'connection', 'show', 'front') == before_profile

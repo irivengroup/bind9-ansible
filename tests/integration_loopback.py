@@ -95,7 +95,7 @@ class LoopbackIntegration:
         for zone in context['bind_managed_zones']:
             template = 'reverse.zone.j2' if zone.get('reverse') else 'authoritative.zone.j2'
             (data / 'zones' / (zone['domain'] + '.zone')).write_text(self.jinja.get_template(template).render(auth_zone=zone, **context))
-        context['bind_allowed_clients'] = list(dict.fromkeys(context.get('bind_cloud_clients', []) + context.get('bind_internal_clients', [])))
+        context['bind_allowed_clients'] = list(dict.fromkeys(context.get('bind_trusted_networks', {}).get('cloud_clients', []) + context.get('bind_trusted_networks', {}).get('internal_clients', [])))
         config = self.jinja.get_template('named.conf.j2').render(**context)
         config = config.replace('/var/named', str(data)).replace('/etc/named.rfc1912.zones', str(native))
         config = config.replace('/etc/crypto-policies/back-ends/bind.config', str(self.native_dir / 'bind.config'))
@@ -237,7 +237,7 @@ class LoopbackIntegration:
         primary = copy.deepcopy(original)
         primary.update(bind_dnssec_active=validation, bind_front_ip='127.0.0.2', bind_back_ip='127.0.0.3',
                        group_names=[primary['bind_primary_group']],
-                       bind_cloud_clients=['127.0.0.10'], bind_internal_clients=['127.0.0.11'])
+                       bind_trusted_networks=dict(cloud_clients=['127.0.0.10'], internal_clients=['127.0.0.11']))
         primary['hostvars'][primary['bind_primary_host']].update(bind_front_ip='127.0.0.2', bind_back_ip='127.0.0.3')
         primary['hostvars'][primary['bind_secondary_host']].update(bind_front_ip='127.0.0.4', bind_back_ip='127.0.0.5')
         # Reserve all ports together so the kernel cannot assign duplicates.
@@ -451,7 +451,7 @@ class LoopbackIntegration:
         context['group_names'] = [context['bind_primary_group']]
         context['hostvars'][context['bind_primary_host']].update(bind_front_ip='127.0.0.2', bind_back_ip='127.0.0.3')
         context['hostvars'][context['bind_secondary_host']].update(bind_front_ip='127.0.0.4', bind_back_ip='127.0.0.5')
-        context['bind_cloud_clients'], context['bind_internal_clients'] = ['127.0.0.10'], ['127.0.0.11']
+        context['bind_trusted_networks']['cloud_clients'], context['bind_trusted_networks']['internal_clients'] = ['127.0.0.10'], ['127.0.0.11']
         for zone in context['bind_forward_zones']:
             zone['forwarders'] = [{'address': '127.0.0.6', 'port': 65534}]
         path = self.render(folder, context)
@@ -582,7 +582,7 @@ class LoopbackIntegration:
         context.update(bind_dnssec_active=False,bind_authoritative_zones=[],bind_managed_zones=[],
                        bind_forward_zones=[{'domain':domain,'forwarders':[{'address':'::1','port':uport}]}],
                        bind_front_ip='127.0.0.2',bind_back_ip='127.0.0.3',
-                       group_names=[context['bind_primary_group']],bind_cloud_clients=['127.0.0.10'],bind_internal_clients=[])
+                       group_names=[context['bind_primary_group']],bind_trusted_networks=dict(cloud_clients=['127.0.0.10'], internal_clients=[]))
         context['hostvars'][context['bind_primary_host']].update(bind_front_ip='127.0.0.2',bind_back_ip='127.0.0.3')
         context['hostvars'][context['bind_secondary_host']].update(bind_front_ip='127.0.0.4',bind_back_ip='127.0.0.5')
         config=self.render(folder/'resolver',context)
@@ -675,8 +675,8 @@ class LoopbackIntegration:
                             context = copy.deepcopy(original)
                             context['bind_dnssec_active'] = validation
                             context['group_names'] = [role]
-                            context['bind_cloud_clients'] = clients
-                            context['bind_internal_clients'] = internal
+                            context['bind_trusted_networks']['cloud_clients'] = clients
+                            context['bind_trusted_networks']['internal_clients'] = internal
                             if not auth:
                                 context['bind_authoritative_zones'] = []
                                 context['bind_managed_zones'] = []

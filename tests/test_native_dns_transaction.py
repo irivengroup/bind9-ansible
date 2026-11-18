@@ -130,7 +130,7 @@ def test_native_dns_transaction_commits_front_only_after_health_and_keeps_failed
     monkeypatch.setenv('BIND_NETWORK_DOUBLE_STATE', str(route.data_file))
     values, hosts, groups = variables(False)
     values.update(bind_front_routes_enabled=True, bind_front_routes_defer_commit=True,
-                  bind_cloud_clients=['203.0.113.0/24'])
+                  bind_trusted_networks=dict(cloud_clients=['203.0.113.0/24']))
     hosts['localhost']['bind_back_ip'] = '10.0.0.2'
     hosts['peer']['bind_back_ip'] = '10.0.0.3'
     with route.canonical.rebased(route.state, folder / 'bin', route.env):

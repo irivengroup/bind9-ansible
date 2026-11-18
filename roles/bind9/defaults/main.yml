@@ -5,8 +5,9 @@ hibernate_deployment: no
 # The legacy deployment directory lease remains optional outside hibernation.
 # Routes and management always use an automatically released kernel process lock.
 bind_operation_lock_enabled: false
-bind_cloud_clients: []
-bind_internal_clients: []
+bind_trusted_networks:
+  cloud_clients: []
+  internal_clients: []
 # Automatic validation by default; explicit false deploys no DNSSEC runtime assets.
 bind_dnssec_active: auto
 bind_forward_zones: []

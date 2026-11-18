@@ -23,7 +23,7 @@ def run(phase, locked=False, check=False, **values):
         bind_front_routes_enabled=False, ansible_distribution='RedHat', ansible_distribution_major_version='8',
         bind_tsig_key_name='site-transfer', bind_tsig_algorithm='hmac-sha256',
         bind_tsig_secret=base64.b64encode(b'public-synthetic-test-fixture-0000').decode('ascii'),
-        bind_authoritative_zones=[], bind_forward_zones=[], bind_cloud_clients=[], bind_internal_clients=['203.0.113.0/24'])
+        bind_authoritative_zones=[], bind_forward_zones=[], bind_trusted_networks=dict(cloud_clients=[], internal_clients=['203.0.113.0/24']))
     variables.update(values)
     return NativeDeploymentPlayRun('main.yml', variables, check_mode=check, inventory_hosts=hosts,
         inventory_groups=dict(site=['localhost', 'peer'], dns_primary=['localhost'], dns_secondary=['peer'],
@@ -97,7 +97,7 @@ def test_native_routes_dispatch_reports_shared_routing_only_when_applicable(sepa
 
 
 def test_native_public_deployment_releases_its_lease_after_a_real_input_guard_failure():
-    status, result = run('routes', locked=True, bind_cloud_clients='invalid scalar')
+    status, result = run('routes', locked=True, bind_trusted_networks=dict(cloud_clients='invalid scalar'))
     assert status == 2 and result.failed == ['Validate the cloud and internal client list types',
         'Stop the failed deployment after controlled lease cleanup']
     assert not Path('/var/lib/Bind9-Ansible/.operation.lock').exists()
@@ -112,7 +112,7 @@ def test_native_public_deployment_retains_lease_for_an_on_disk_front_journal_wit
     journal.mkdir(mode=0o700)
     progress = journal / 'progress'
     progress.write_bytes(b'1 intent\n')
-    status, result = run('routes', locked=True, bind_cloud_clients='invalid scalar')
+    status, result = run('routes', locked=True, bind_trusted_networks=dict(cloud_clients='invalid scalar'))
     assert status == 2 and result.failed == ['Validate the cloud and internal client list types',
         'Preserve the operation lease while FRONT recovery evidence exists']
     assert (state / '.operation.lock').is_dir()
@@ -138,7 +138,7 @@ def test_native_public_deployment_refusal_preserves_another_invocations_lease():
 
 
 def test_native_public_deployment_does_not_release_owned_lease_with_pending_route_recovery():
-    status, result = run('routes', locked=True, bind_cloud_clients='invalid scalar',
+    status, result = run('routes', locked=True, bind_trusted_networks=dict(cloud_clients='invalid scalar'),
                          bind_front_route_transaction_pending=True)
     assert status == 2 and result.failed == ['Validate the cloud and internal client list types',
                                            'Preserve the operation lease if recovery did not complete']
@@ -184,7 +184,7 @@ def test_native_deployment_optional_seal_guard_keeps_full_success_and_check_mode
 def test_native_route_dispatch_requires_separate_paths_even_when_explicitly_enabled(deferred, task, separate_paths):
     from test_ansible_canonical_predicates import CanonicalPredicates
     CanonicalPredicates('deploy/main.yml').check(task,
-        dict(bind_front_routes_enabled=True, bind_cloud_clients=['203.0.113.0/24'],
+        dict(bind_front_routes_enabled=True, bind_trusted_networks=dict(cloud_clients=['203.0.113.0/24']),
              bind_front_routes_defer_commit=deferred, bind_dns_front_routes_applicable=separate_paths),
         separate_paths, key='when')
 

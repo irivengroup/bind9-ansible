@@ -148,8 +148,7 @@ class DockerComponentRecipe:
             bind_primary_host='primary', bind_secondary_host='secondary',
             bind_front_route_metric=100, bind_operation_lock_enabled=False,
             bind_front_routes_enabled=True, bind_dnssec_active='auto',
-            bind_internal_clients=['192.0.2.101', '10.154.0.101'],
-            bind_cloud_clients=['198.51.100.0/25', '198.51.100.200', '198.51.100.200/32', '198.51.100.0/25'],
+            bind_trusted_networks=dict(internal_clients=['192.0.2.101', '10.154.0.101'], cloud_clients=['198.51.100.0/25', '198.51.100.200', '198.51.100.200/32', '198.51.100.0/25']),
             bind_forward_zones=[], bind_authoritative_zones=[dict(
                 domain='recipe.example.test', serial=2026110901, ttl=300,
                 records=[dict(name='app', type='A', value='198.51.100.50')])])

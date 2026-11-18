@@ -8,7 +8,7 @@ Livraison **2026.10.19-routes-management.1**, issue exclusivement de `Bind9-Ansi
 
 La route par défaut du système reste sur **BACK**. La découverte suit **IP FRONT → interface qui la porte → profil NetworkManager actif → passerelle de ce profil ou de cette même interface**. FRONT peut ne porter aucune route par défaut active. Le moteur ne choisit jamais une passerelle BACK/ADM/globale comme repli. Une unique passerelle déclarée dans les routes du même profil FRONT reste utilisable si les deux propriétés de passerelle sont absentes. Une ambiguïté ou un conflit est refusé explicitement.
 
-Le routage reste additif et optionnel : destinations IPv4 isolées/CIDR de `bind_cloud_clients`, aucune route pour `bind_internal_clients`, aucun remplacement de route existante ni activation globale du profil. Les clients directement connectés n’exigent pas de route via passerelle. L’union des CIDR est normalisée sans élargissement. Les routes contradictoires, politiques non standard, VRF et multipath sont refusés plutôt que réécrits.
+Le routage reste additif et optionnel : destinations IPv4 isolées/CIDR de `bind_trusted_networks.cloud_clients`, aucune route pour `bind_trusted_networks.internal_clients`, aucun remplacement de route existante ni activation globale du profil. Les clients directement connectés n’exigent pas de route via passerelle. L’union des CIDR est normalisée sans élargissement. Les routes contradictoires, politiques non standard, VRF et multipath sont refusés plutôt que réécrits.
 
 ## Impact et invariants
 

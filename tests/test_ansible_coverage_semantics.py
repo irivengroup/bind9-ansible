@@ -130,7 +130,8 @@ def test_real_role_inventory_retains_all_yaml_and_unmeasured_surfaces():
         for folder in ('roles/bind9', 'playbooks') for path in (ROOT / folder).rglob('*.yml')}
     # Include both tasks and every predicate that protects packaged BIND data.
     assert sum(row[0] for row in raw.values()) == 270
-    assert sum(row[1] for row in raw.values()) == 330
+    # The grouped input adds the mapping-type and allowed-key schema guards.
+    assert sum(row[1] for row in raw.values()) == 332
     assert {name: len(component['tasks']) for name, component in inventory.components.items()} == {
         name: row[0] for name, row in raw.items()}
     assert len(inventory.predicates) == sum(row[1] for row in raw.values())

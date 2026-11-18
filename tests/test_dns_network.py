@@ -159,8 +159,7 @@ def test_listen_and_query_acl_render_the_selected_addresses_once(shared, cloud, 
         bind_primary_host='p', bind_secondary_host='s', hostvars=hosts,
         group_names=['dns_primary'], bind_tsig_key_name='transfer', bind_tsig_algorithm='hmac-sha256',
         bind_tsig_secret='render-only', bind_dnssec_active=False,
-        bind_allowed_clients=cloud_networks + internal_networks, bind_cloud_clients=cloud_networks,
-        bind_internal_clients=internal_networks, bind_authoritative_zones=[], bind_forward_zones=[])
+        bind_allowed_clients=cloud_networks + internal_networks, bind_trusted_networks=dict(cloud_clients=cloud_networks, internal_clients=internal_networks), bind_authoritative_zones=[], bind_forward_zones=[])
     source = (ROLE / 'templates/named.conf.j2').read_text()
     if controller == 'ansible':
         from ansible.parsing.dataloader import DataLoader

@@ -46,7 +46,7 @@ class TestNativeLoopback:
         primary = role == 'dns_primary'
         context = dict(bind_tsig_key_name='test-transfer', bind_tsig_algorithm='hmac-sha256',
                        bind_tsig_secret='test-render-only', bind_front_ip='192.0.2.11' if primary else '192.0.2.12',
-                       bind_back_ip='10.0.0.11' if primary else '10.0.0.12', bind_cloud_clients=clients, bind_internal_clients=internal,
+                       bind_back_ip='10.0.0.11' if primary else '10.0.0.12', bind_trusted_networks=dict(cloud_clients=clients, internal_clients=internal),
                        bind_allowed_clients=list(dict.fromkeys(clients + internal)), group_names=[role],
                        bind_primary_host='p', bind_secondary_host='s',
                        hostvars={'p': {'bind_back_ip': '10.0.0.11', 'bind_front_ip': '192.0.2.11'},

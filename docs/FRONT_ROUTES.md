@@ -1,6 +1,6 @@
 # Routes de retour FRONT : exploitation
 
-Le réseau existe déjà. Le rôle ajoute uniquement les routes IPv4 nécessaires aux `bind_cloud_clients`, dans le profil NetworkManager actif de FRONT et dans le noyau. Les `bind_internal_clients` ne déclenchent aucun ajout de route. Les adresses isolées deviennent des `/32` ; les CIDR sont normalisés et leur union est conservée, sans élargissement des destinations.
+Le réseau existe déjà. Le rôle ajoute uniquement les routes IPv4 nécessaires aux `bind_trusted_networks.cloud_clients`, dans le profil NetworkManager actif de FRONT et dans le noyau. Les `bind_trusted_networks.internal_clients` ne déclenchent aucun ajout de route. Les adresses isolées deviennent des `/32` ; les CIDR sont normalisés et leur union est conservée, sans élargissement des destinations.
 
 **La découverte suit l’IP FRONT, puis son interface et son profil actif. FRONT n’a pas besoin de porter la route par défaut du système, ni même une route `0.0.0.0/0` active. La passerelle système ou celle d’une autre interface ne sert jamais de repli.**
 
@@ -14,9 +14,11 @@ Dans les variables du site :
 
 ```yaml
 bind_front_routes_enabled: true
-bind_cloud_clients:
-  - 203.0.113.0/24
-  - 172.20.1.25
+bind_trusted_networks:
+  cloud_clients:
+    - 203.0.113.0/24
+    - 172.20.1.25
+  internal_clients: []
 bind_front_route_metric: 100
 ```
 

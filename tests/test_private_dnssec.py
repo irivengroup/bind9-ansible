@@ -180,7 +180,7 @@ def test_single_client_acl_preserves_dnssec_and_front_only_recursion(clients):
                    group_names=['dns_primary'], bind_primary_host='p', bind_secondary_host='s',
                    hostvars={'p': {'bind_front_ip': '192.0.2.11', 'bind_back_ip': '10.20.1.11'},
                              's': {'bind_front_ip': '192.0.2.12', 'bind_back_ip': '10.20.1.12'}},
-                   bind_cloud_clients=clients, bind_allowed_clients=clients, bind_authoritative_zones=[],
+                   bind_trusted_networks=dict(cloud_clients=clients), bind_allowed_clients=clients, bind_authoritative_zones=[],
                    bind_forward_zones=[{'domain': 'corp.test', 'dnssec_validate': False,
                                         'forwarders': [{'address': '10.11.0.53'}]},
                                        {'domain': 'signed.test', 'dnssec_validate': True,

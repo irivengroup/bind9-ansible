@@ -17,7 +17,7 @@ class TestClientList:
         tasks = yaml.safe_load((cls.ROOT / 'roles/bind9/tasks/tasks.d/deploy/validate.yml').read_text())
         names = {'Validate template input types before rendering',
                  'Require at least one configured DNS client network'}
-        scope = dict(bind_cloud_clients=clients, bind_internal_clients=[] if internal is None else internal,
+        scope = dict(bind_trusted_networks=dict(cloud_clients=clients, internal_clients=[] if internal is None else internal),
                      bind_tsig_key_name='test-transfer',
                      bind_tsig_algorithm='hmac-sha256', bind_tsig_secret='render-only-' * 4,
                      bind_front_ip='192.0.2.11', bind_back_ip='10.20.1.11')
@@ -36,8 +36,8 @@ class TestClientList:
         result = self.validate(['192.0.2.0/24', '192.0.2.0/24'],
                                internal=['10.30.1.20', '192.0.2.0/24'])
         assert result['bind_allowed_clients'] == ['192.0.2.0/24', '10.30.1.20']
-        assert result['bind_cloud_clients'] == ['192.0.2.0/24', '192.0.2.0/24']
-        assert result['bind_internal_clients'] == ['10.30.1.20', '192.0.2.0/24']
+        assert result['bind_trusted_networks']['cloud_clients'] == ['192.0.2.0/24', '192.0.2.0/24']
+        assert result['bind_trusted_networks']['internal_clients'] == ['10.30.1.20', '192.0.2.0/24']
 
     def test_empty_union_is_refused_before_any_tag_can_change_the_server(self):
         with pytest.raises(ValueError):
@@ -55,20 +55,40 @@ class TestClientList:
                 self.validate(clients)
             else:
                 # Bypass the convenience default so explicit null is tested too.
-                TaskExpressions({'bind_cloud_clients': ['192.0.2.0/24'],
-                                 'bind_internal_clients': clients}).run('clients.yml')
+                TaskExpressions({'bind_trusted_networks': {'cloud_clients': ['192.0.2.0/24'], 'internal_clients': clients}}).run('clients.yml')
 
-    def test_defaults_expose_two_inputs_and_no_override_for_the_computed_union(self):
+    def test_defaults_expose_one_mapping_and_no_override_for_the_computed_union(self):
         paths = [self.ROOT / 'roles/bind9/defaults/main.yml']
         paths += list((self.ROOT / 'inventory').glob('*/group_vars/site*.yml'))
         for path in paths:
             values = yaml.safe_load(path.read_text())
             client_keys = {key for key in values if key.endswith('_clients')}
             assert 'bind_allowed_clients' not in values, path
-            assert client_keys <= {'bind_cloud_clients', 'bind_internal_clients'}, path
-            assert isinstance(values['bind_cloud_clients'], list)
+            assert not client_keys, path
+            assert set(values['bind_trusted_networks']) == {'cloud_clients', 'internal_clients'}
+            assert isinstance(values['bind_trusted_networks']['cloud_clients'], list)
+            assert isinstance(values['bind_trusted_networks']['internal_clients'], list)
         defaults = yaml.safe_load(paths[0].read_text())
-        assert defaults['bind_internal_clients'] == []
+        assert defaults['bind_trusted_networks'] == {'cloud_clients': [], 'internal_clients': []}
+
+    @pytest.mark.parametrize('networks', [None, False, 0, [], '192.0.2.1',
+        {'clients': ['192.0.2.1']}, {'cloud_clients': ['192.0.2.1'], 'internals': []}])
+    def test_invalid_trusted_network_mapping_is_refused(self, networks):
+        with pytest.raises(ValueError, match='Validate the cloud and internal client list types'):
+            TaskExpressions({'bind_trusted_networks': networks}).run('clients.yml')
+
+    @pytest.mark.parametrize('key', ['cloud_clients', 'internal_clients'])
+    def test_an_omitted_list_defaults_to_empty_without_mutating_the_other_list(self, key):
+        networks = {key: ['192.0.2.1']}
+        result = TaskExpressions({'bind_trusted_networks': networks}).run('clients.yml')
+        assert result['bind_allowed_clients'] == ['192.0.2.1']
+        assert result['bind_trusted_networks'] == networks
+
+    def test_both_omitted_lists_are_refused_before_computing_dns_authorization(self):
+        runner = TaskExpressions({'bind_trusted_networks': {}})
+        with pytest.raises(ValueError, match='Require at least one configured DNS client network'):
+            runner.run('clients.yml')
+        assert 'bind_allowed_clients' not in runner.variables
 
     def test_union_is_prepared_for_all_role_tags_before_template_validation(self):
         main = yaml.safe_load((self.ROOT / 'roles/bind9/tasks/tasks.d/deploy/main.yml').read_text())

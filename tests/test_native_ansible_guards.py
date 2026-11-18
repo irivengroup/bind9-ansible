@@ -30,7 +30,7 @@ def test_real_dispatch_accepts_only_the_public_dnssec_modes(value, accepted):
 ])
 def test_real_client_workflow_derives_only_the_verified_union(cloud, internal, accepted):
     status, result = NativeTaskRun('tasks.d/clients.yml',
-        {'bind_cloud_clients': cloud, 'bind_internal_clients': internal}).run()
+        {'bind_trusted_networks': {'cloud_clients': cloud, 'internal_clients': internal}}).run()
     assert status == (0 if accepted else 2)
     if accepted:
         assert not result.failed
@@ -42,9 +42,24 @@ def test_real_client_workflow_derives_only_the_verified_union(cloud, internal, a
 
 
 def test_a_higher_precedence_client_override_is_rejected_by_native_ansible():
-    status, result = NativeTaskRun('tasks.d/clients.yml', {'bind_cloud_clients': ['203.0.113.25'],
-        'bind_internal_clients': [], 'bind_allowed_clients': ['0.0.0.0/0']}).run()
+    status, result = NativeTaskRun('tasks.d/clients.yml', {'bind_trusted_networks': {'cloud_clients': ['203.0.113.25'], 'internal_clients': []}, 'bind_allowed_clients': ['0.0.0.0/0']}).run()
     assert status == 2 and result.failed == ['Reject an override that bypasses the computed client union']
+
+
+@pytest.mark.parametrize('networks,accepted', [
+    ({'cloud_clients': ['203.0.113.25']}, True),
+    ({'internal_clients': ['10.0.0.0/24']}, True),
+    ({}, False), (None, False), ([], False), ('203.0.113.25', False),
+    ({'cloud_clients': ['203.0.113.25'], 'typo': []}, False),
+])
+def test_native_grouped_contract_defaults_missing_lists_and_refuses_unknown_fields(networks, accepted):
+    status, result = NativeTaskRun('tasks.d/clients.yml', {'bind_trusted_networks': networks}).run()
+    assert status == (0 if accepted else 2)
+    if accepted:
+        expected = networks.get('cloud_clients', []) + networks.get('internal_clients', [])
+        assert result.facts['bind_allowed_clients'] == expected and not result.failed
+    else:
+        assert len(result.failed) == 1 and 'bind_allowed_clients' not in result.facts
 
 
 def test_readonly_native_harness_refuses_modifying_task_files():

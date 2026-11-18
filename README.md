@@ -58,8 +58,8 @@ Les versions imposées par le contexte nécessitent une politique de maintenance
 |---|---|
 | Site | Un primaire et un secondaire dans le même environnement et le même groupe de site. |
 | ADM | Adresse SSH locale. Elle peut partager une interface DNS. La gestion des routes FRONT exige trois interfaces distinctes. |
-| FRONT | Adresse DNS destinée aux clients `bind_cloud_clients` ; seuls ces clients peuvent déclencher une route retour optionnelle. |
-| BACK | Adresse DNS destinée aux clients `bind_internal_clients` et aux échanges entre pairs. Aucune route client interne ajoutée. |
+| FRONT | Adresse DNS destinée aux clients `bind_trusted_networks.cloud_clients` ; seuls ces clients peuvent déclencher une route retour optionnelle. |
+| BACK | Adresse DNS destinée aux clients `bind_trusted_networks.internal_clients` et aux échanges entre pairs. Aucune route client interne ajoutée. |
 | Loopback | ACL `local_loopback` = `127.0.0.1` ; zones natives incluses depuis `/etc/named.rfc1912.zones`. |
 | Clients | Union calculée `bind_allowed_clients`, utilisée par l’ACL BIND `user_defined_clients`. Une liste d’entrée peut être vide, jamais les deux. |
 | Autorité | Zones directes gérées sur le primaire, copies transférées sur le secondaire ; inverses générées depuis les A/AAAA. |
@@ -180,10 +180,11 @@ bind_tsig_key_name: prod-site1-transfer
 bind_tsig_algorithm: hmac-sha256
 bind_tsig_secret_file: "{{ lookup('env', 'HOME') }}/.local/share/bind9-ansible/tsig/prod/site1.key"
 
-bind_cloud_clients:
-  - 198.51.100.0/24
-  - 203.0.113.25
-bind_internal_clients: []
+bind_trusted_networks:
+  cloud_clients:
+    - 198.51.100.0/24
+    - 203.0.113.25
+  internal_clients: []
 
 bind_dnssec_active: auto
 bind_front_routes_enabled: false
@@ -226,8 +227,8 @@ Les **12 valeurs par défaut** proviennent de [defaults/main.yml](roles/bind9/de
 |---|---|---|---|---|
 | `bind_operation_lock_enabled` | booléen YAML strict | Active à `true` la coopération avec le répertoire historique `.operation.lock`. Routes et management gardent toujours leur exclusion de processus ; les déploiements complets exigent une fenêtre exclusive. L’hibernation conserve son verrou historique | `false` | Non |
 | `hibernate_deployment` | booléen, ou chaîne CLI minuscule `yes/no/true/false` | À `yes`, crée le sceau après déploiement complet réussi, ou avec le tag dédié `hibernate`. Un sceau existant bloque toujours la reconstruction, même à `no` | `no` | Non |
-| `bind_cloud_clients` | liste plate de chaînes | IP/CIDR IPv4 FRONT ; seules destinations candidates aux routes retour | `[]` | Oui si internes vides |
-| `bind_internal_clients` | liste plate de chaînes | IP/CIDR IPv4 BACK ; aucune route ajoutée | `[]` | Oui si cloud vide |
+| `bind_trusted_networks.cloud_clients` | liste plate de chaînes | IP/CIDR IPv4 FRONT ; seules destinations candidates aux routes retour | `[]` | Oui si internes vides |
+| `bind_trusted_networks.internal_clients` | liste plate de chaînes | IP/CIDR IPv4 BACK ; aucune route ajoutée | `[]` | Oui si cloud vide |
 | `bind_dnssec_active` | booléen ou chaîne `auto` | Validation globale : `false` → `no`, `true` → `yes`, `auto` → `auto` | `auto` | Non |
 | `bind_forward_zones` | liste d’objets | Suffixes forwardés et résolveurs associés | `[]` | Non |
 | `bind_authoritative_zones` | liste d’objets | Autorités, serials et records ; génération des inverses | `[]` | Non |
@@ -266,9 +267,11 @@ Ne pas déclarer ni surcharger `bind_allowed_clients`, `bind_tsig_secret`, `bind
 Exemple de liste interne en complément ou en remplacement de la liste cloud :
 
 ```yaml
-bind_internal_clients:
-  - 192.168.20.25
-  - 10.30.1.0/24
+bind_trusted_networks:
+  cloud_clients: []
+  internal_clients:
+    - 192.168.20.25
+    - 10.30.1.0/24
 ```
 
 Les anciens noms `bind_frontend_clients`, `bind_backend_clients`, `bind_dnssec_enabled`, `bind_dnssec_validation` ne sont pas le contrat de cette livraison. Retirer leurs définitions et utiliser les noms actuels. Migration : [CLIENTS_UNIQUES.md](docs/CLIENTS_UNIQUES.md).
@@ -468,7 +471,7 @@ L’absence des unités privées est attendue après nettoyage en mode désactiv
 
 ### Gérer les routes de retour FRONT
 
-La fonction est **désactivée par défaut**. Elle confirme l’interface portant l’IP FRONT par `ip -o -4 route show match`, plus long préfixe numérique puis métrique, identifie son UUID NetworkManager actif et cherche le prochain saut unique parmi les routes main de ce device. Le profil peut avoir un autre nom que l’interface ; `ipv4.gateway` et `IP4.GATEWAY` ne sont plus interrogés. **La route par défaut système reste sur BACK : FRONT n’a pas besoin d’une route par défaut active.** Aucune passerelle BACK/ADM/globale n’est utilisée comme repli. Seules les routes manquantes vers `bind_cloud_clients` sont ajoutées au profil et au noyau, sans réactivation de connexion. Les clients directement connectés n’exigent pas de route par passerelle ; leur chemin reste vérifié.
+La fonction est **désactivée par défaut**. Elle confirme l’interface portant l’IP FRONT par `ip -o -4 route show match`, plus long préfixe numérique puis métrique, identifie son UUID NetworkManager actif et cherche le prochain saut unique parmi les routes main de ce device. Le profil peut avoir un autre nom que l’interface ; `ipv4.gateway` et `IP4.GATEWAY` ne sont plus interrogés. **La route par défaut système reste sur BACK : FRONT n’a pas besoin d’une route par défaut active.** Aucune passerelle BACK/ADM/globale n’est utilisée comme repli. Seules les routes manquantes vers `bind_trusted_networks.cloud_clients` sont ajoutées au profil et au noyau, sans réactivation de connexion. Les clients directement connectés n’exigent pas de route par passerelle ; leur chemin reste vérifié.
 
 Prévisualiser puis appliquer sur un hôte :
 

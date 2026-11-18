@@ -6,8 +6,8 @@
 {% set validation_mode = bind_dnssec_active | default('auto') | string | lower %}
 {% set dnssec_mode = 'auto' if validation_mode == 'auto' else ('yes' if validation_mode == 'true' else 'no') %}
 {% set client_networks = bind_allowed_clients %}
-{% set cloud_networks = bind_cloud_clients | default([], true) %}
-{% set internal_networks = bind_internal_clients | default([], true) %}
+{% set cloud_networks = bind_trusted_networks.cloud_clients | default([]) %}
+{% set internal_networks = bind_trusted_networks.internal_clients | default([]) %}
 {% set extra_listeners = bind_dns_listen_addresses | default([]) | reject('equalto', bind_front_ip) | reject('equalto', bind_back_ip) | list %}
 {% set recurse_on_front = cloud_networks or (shared_listener and internal_networks) %}
 {% set recurse_on_back = not shared_listener and internal_networks %}

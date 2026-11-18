@@ -204,7 +204,7 @@ class CombinedDeployment:
             ansible_distribution_major_version='8', ansible_selinux={'status': 'disabled'},
             bind_dnssec_active='auto', bind_front_routes_enabled=True, bind_operation_lock_enabled=False,
             hibernate_deployment=False, bind_environment='lab', bind_site_name='lab', bind_primary_host='primary', bind_secondary_host='secondary',
-            bind_cloud_clients=['203.0.113.0/24', '172.21.7.23'], bind_internal_clients=['10.30.1.20'],
+            bind_trusted_networks=dict(cloud_clients=['203.0.113.0/24', '172.21.7.23'], internal_clients=['10.30.1.20']),
             bind_tsig_key_name='lab-transfer', bind_tsig_algorithm='hmac-sha256',
             bind_tsig_secret_file=str(self.work / 'secrets/site.key'), bind_authoritative_zones=[],
             bind_forward_zones=[{'domain': domain, 'dnssec_validate': False,
@@ -330,7 +330,7 @@ class CombinedDeployment:
         identity = (profile_uuid, 'front0', '198.51.100.1', self.front, self.back, self.adm, metric)
         operations = [store + '|' + destination + '|198.51.100.1|' + metric
             for destination in ('172.21.7.23/32', '203.0.113.0/24') for store in ('P', 'R')]
-        journal = self.completed_route_snapshot(directory, identity, operations, self.variables['bind_cloud_clients'])
+        journal = self.completed_route_snapshot(directory, identity, operations, self.variables['bind_trusted_networks']['cloud_clients'])
         assert set(journal) == additions, 'Unexpected files cannot be admitted as journal evidence'
         expected = dict(protected)
         expected.update(journal)
@@ -424,7 +424,9 @@ class CombinedDeployment:
             assert routes == self.routes() and profile == self.profile('front')
             assert files == {name: hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in files}
             if self.role == 'primary':
-                failed = self.deploy('rollback', {'bind_cloud_clients': self.variables['bind_cloud_clients'] + ['172.22.0.0/16'],
+                failed = self.deploy('rollback', {'bind_trusted_networks': {
+                    'cloud_clients': self.variables['bind_trusted_networks']['cloud_clients'] + ['172.22.0.0/16'],
+                    'internal_clients': self.variables['bind_trusted_networks']['internal_clients']},
                                                   'bind_lab_fail_health': True}, success=False)
                 assert 'Controlled combined DNS and route rollback' in failed and 'managed files restored' in failed
                 self.probes()

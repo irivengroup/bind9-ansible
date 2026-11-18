@@ -41,7 +41,7 @@ def test_native_configuration_publication_and_second_run_are_idempotent(configur
         groups = {'dns_primary': ['peer'], 'dns_secondary': ['localhost']}
         values.update(bind_primary_host='peer', bind_secondary_host='localhost')
     if populated:
-        values.update(bind_cloud_clients=['203.0.113.0/25'], bind_internal_clients=['203.0.113.128/25'])
+        values.update(bind_trusted_networks=dict(cloud_clients=['203.0.113.0/25'], internal_clients=['203.0.113.128/25']))
     else:
         values.update(bind_allowed_clients=[], bind_authoritative_zones=[], bind_managed_zones=[], bind_forward_zones=[])
     retired = Path('/usr/local/sbin/named-transaction')

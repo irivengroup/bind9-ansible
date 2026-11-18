@@ -72,7 +72,7 @@ class AnsibleRouteSandbox:
                      'ansible_host': '192.0.2.2', 'ansible_env': {'SSH_CONNECTION': ''},
                      'bind_front_ip': '198.51.100.2', 'bind_back_ip': '10.0.0.2',
                      'bind_primary_host': 'localhost', 'bind_secondary_host': 'secondary',
-                     'bind_cloud_clients': ['203.0.113.0/24'], 'bind_internal_clients': ['10.0.0.0/24','10.30.1.20'], 'bind_front_route_metric': 100,
+                     'bind_trusted_networks': {'cloud_clients': ['203.0.113.0/24'], 'internal_clients': ['10.0.0.0/24','10.30.1.20']}, 'bind_front_route_metric': 100,
                      'bind_front_routes_enabled': True}
         variables.update(extra_vars or {})
         play = [{'hosts': 'localhost', 'gather_facts': False, 'vars': variables,
@@ -99,7 +99,7 @@ class AnsibleRouteSandbox:
 class TestAnsibleNativeFrontRoutes:
     def test_two_empty_lists_fail_before_route_commands_even_with_routes_tag(self, tmp_path):
         sandbox = AnsibleRouteSandbox(tmp_path)
-        result = sandbox.run(tags='routes', extra_vars={'bind_cloud_clients': [], 'bind_internal_clients': []})
+        result = sandbox.run(tags='routes', extra_vars={'bind_trusted_networks': {'cloud_clients': [], 'internal_clients': []}})
         assert result.returncode != 0, result.stdout
         assert 'cannot both be empty' in result.stdout
         assert sandbox.read() == sandbox.data
@@ -119,7 +119,7 @@ class TestAnsibleNativeFrontRoutes:
         sandbox.data['addresses'][0]['addr_info'].insert(0, {'family': 'inet', 'local': '198.51.100.10', 'prefixlen': 24})
         sandbox.data['addresses'][0]['addr_info'][1]['secondary'] = True
         sandbox.save()
-        result = sandbox.run(extra_vars={'bind_cloud_clients': ['203.0.113.0/24', '172.16.0.0/16']})
+        result = sandbox.run(extra_vars={'bind_trusted_networks': {'cloud_clients': ['203.0.113.0/24', '172.16.0.0/16']}})
         assert result.returncode == 0, result.stdout
         data = sandbox.read()
         assert len(data['persistent']) == 2 and len(data['runtime']) == len(BASE) + 2
@@ -170,7 +170,7 @@ class TestAnsibleNativeFrontRoutes:
             {'network': '172.16.0.0/24', 'gateway': NEW['gateway'], 'metric': 150}])
         sandbox.save()
         before = copy.deepcopy(sandbox.data)
-        variables = {'bind_cloud_clients': ['203.0.113.25', '172.20.0.0/16']}
+        variables = {'bind_trusted_networks': {'cloud_clients': ['203.0.113.25', '172.20.0.0/16']}}
         planned = sandbox.run(check=True, extra_vars=variables)
         assert planned.returncode == 0, planned.stdout
         assert sandbox.read() == before
@@ -231,7 +231,9 @@ class TestAnsibleNativeFrontRoutes:
         path.write_text(yaml.safe_dump([deployment]))
         result = sandbox.run('tests_dns_rollback.yml', tags='deploy', extra_vars={'bind_front_routes_defer_commit': True,
                               'bind_front_routes_enabled': failure_phase != 'disabled',
-                              'bind_cloud_clients': [] if failure_phase == 'internal-only' else ['203.0.113.0/24'],
+                              'bind_trusted_networks': {
+                                  'cloud_clients': [] if failure_phase == 'internal-only' else ['203.0.113.0/24'],
+                                  'internal_clients': ['10.0.0.0/24', '10.30.1.20']},
                               'bind_backup_root': '/unused', 'bind_recovery_archive': 'unused.tar.gz'})
         assert (result.returncode != 0) == (failure_phase in ('health', 'reload')), result.stdout
         data = sandbox.read()

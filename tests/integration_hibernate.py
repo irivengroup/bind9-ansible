@@ -44,7 +44,7 @@ class HibernateIntegration(LoopbackIntegration):
                     for authority, forward in ((True, True), (True, False), (False, True), (False, False)):
                         context = copy.deepcopy(initial)
                         context.update(bind_dnssec_active=validation, group_names=[role],
-                                       bind_cloud_clients=cloud, bind_internal_clients=internal)
+                                       bind_trusted_networks=dict(cloud_clients=cloud, internal_clients=internal))
                         if not authority:
                             context.update(bind_authoritative_zones=[], bind_managed_zones=[])
                         if not forward:

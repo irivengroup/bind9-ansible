@@ -23,7 +23,7 @@ class FrontWorkflow:
         self.hosts = {'localhost': {'bind_back_ip': '10.0.0.2'}, 'peer': {'bind_back_ip': '10.0.0.3'}}
         self.values = dict(bind_front_ip='198.51.100.2', bind_back_ip='10.0.0.2',
             bind_primary_host='localhost', bind_secondary_host='peer', bind_front_route_metric=100,
-            bind_cloud_clients=['203.0.113.0/24'])
+            bind_trusted_networks=dict(cloud_clients=['203.0.113.0/24']))
 
     def run(self, action=None, check=False, local=False, **variables):
         self.route.data_file.write_text(json.dumps(self.route.data))
@@ -87,7 +87,7 @@ def test_native_front_rejects_a_different_resolved_admin_address_before_route_mu
     ['203.0.113.7', '203.0.113.7/32', '203.0.113.0/24', '203.0.113.0/24']])
 def test_native_front_adds_ip_or_subnet_once_without_duplicate_routes(front, clients):
     for iteration in range(2):
-        status, result = front.run(bind_cloud_clients=clients)
+        status, result = front.run(bind_trusted_networks=dict(cloud_clients=clients))
         assert status == 0 and not result.failed
         operation = result.registers['bind_front_operation']
         assert operation['rc'] == (2 if iteration == 0 else 0)
@@ -160,7 +160,7 @@ def test_native_front_refuses_recovery_without_an_owned_journal_before_route_mut
 
 
 def test_native_front_empty_client_list_is_an_unchanged_plan(front):
-    status, result = front.run('plan', bind_cloud_clients=[])
+    status, result = front.run('plan', bind_trusted_networks=dict(cloud_clients=[]))
     assert status == 0 and not result.failed
     assert result.registers['bind_front_operation']['rc'] == 0
     assert result.registers['bind_front_operation']['changed'] is False
@@ -198,7 +198,7 @@ def test_native_front_refuses_a_failed_or_malformed_ssh_session_read_before_rout
 
 def test_native_front_shell_quoting_keeps_an_invalid_client_as_one_argument(front, tmp_path):
     marker = tmp_path / 'must-not-execute'
-    status, result = front.run('apply', bind_cloud_clients=['203.0.113.7; touch ' + str(marker)])
+    status, result = front.run('apply', bind_trusted_networks=dict(cloud_clients=['203.0.113.7; touch ' + str(marker)]))
     assert status == 2 and result.failed == ['Run the single native FRONT transaction with bounded observations']
     assert not marker.exists() and front.route.data['operations'] == []
 

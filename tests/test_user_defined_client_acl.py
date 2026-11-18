@@ -17,7 +17,7 @@ class TestUserDefinedClientAcl:
         adapter = LoopbackIntegration(Path('.'), Path('.'), Path('.'))
         _, original = next(adapter.contexts())
         context = copy.deepcopy(original)
-        context.update(group_names=[role], bind_cloud_clients=cloud, bind_internal_clients=internal,
+        context.update(group_names=[role], bind_trusted_networks=dict(cloud_clients=cloud, internal_clients=internal),
                        bind_allowed_clients=list(dict.fromkeys(cloud + internal)))
         output = adapter.jinja.get_template('named.conf.j2').render(**context)
         assert 'acl "allowed_clients"' not in output and '\n    allowed_clients;' not in output
@@ -31,3 +31,20 @@ class TestUserDefinedClientAcl:
         template = (root / 'roles/bind9/templates/named.conf.j2').read_text()
         assert '{% set client_networks = bind_allowed_clients %}' in template
         assert 'bind_user_defined_clients' not in template
+
+    @pytest.mark.parametrize('role', ['dns_primary', 'dns_secondary'])
+    @pytest.mark.parametrize('field', ['cloud_clients', 'internal_clients'])
+    def test_a_single_supplied_list_preserves_acl_and_recursion_destination(self, role, field):
+        adapter = LoopbackIntegration(Path('.'), Path('.'), Path('.'))
+        _, original = next(adapter.contexts())
+        context = copy.deepcopy(original)
+        context.update(group_names=[role], bind_trusted_networks={field: ['192.0.2.10']},
+                       bind_allowed_clients=['192.0.2.10'])
+        output = adapter.jinja.get_template('named.conf.j2').render(**context)
+        recursion = output.split('allow-recursion-on {', 1)[1].split('};', 1)[0]
+        server = 'primary' if role == 'dns_primary' else 'secondary'
+        expected = 'front' if field == 'cloud_clients' else 'back'
+        other = 'back' if expected == 'front' else 'front'
+        assert f'bind_{server}_{expected}_ip;' in recursion
+        assert f'bind_{server}_{other}_ip;' not in recursion
+        assert '    192.0.2.10;' in output
