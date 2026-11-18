@@ -1,0 +1,34 @@
+---
+- name: Check generated BIND configuration and authoritative zones
+  ansible.builtin.command:
+    argv: [/usr/sbin/named-checkconf, -z, /etc/named.conf]
+  changed_when: false
+
+- name: Check named configuration contains no insecure transfer ACL
+  ansible.builtin.command:
+    argv: [/usr/sbin/named-checkconf, -p, /etc/named.conf]
+  register: bind_checked_configuration
+  changed_when: false
+  no_log: true
+
+- name: Ensure no wildcard zone transfers are enabled
+  # Keep brace levels and quoted names distinct: an entry after a nested ACL
+  # still belongs to its outer allow-transfer list. Native syntax validation
+  # above remains responsible for the complete BIND grammar.
+  ansible.builtin.assert:
+    that:
+      - >-
+        bind_checked_configuration.stdout | transfer_acl_has_no_direct_wildcard
+  no_log: true
+
+- name: Verify each generated authoritative zone independently
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/named-checkzone
+      - "{{ item.domain }}"
+      - "/var/named/zones/{{ item.domain }}.zone"
+  loop: "{{ bind_managed_zones }}"
+  loop_control:
+    label: "{{ item.domain }}"
+  when: "bind_primary_group in group_names"
+  changed_when: false

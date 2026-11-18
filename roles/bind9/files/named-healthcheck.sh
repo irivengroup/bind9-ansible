@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+# Protocol tokens and DNS case folding use ASCII, independent of the caller.
+export LC_ALL=C
+[[ $# -ge 1 ]] || { echo 'usage: named-healthcheck LOCAL_BACK_IP [ZONE...]' >&2; exit 2; }
+ip=$1; shift
+systemctl is-active --quiet named || { echo 'CRITICAL named inactive'; exit 2; }
+# dig is invoked with +noall +comments +answer. Each health question expects
+# exactly one record; never accept a truncated or contradictory response.
+complete_answer() {
+  local response=$1
+  [[ $(grep -c 'status:' <<<"$response") == 1 ]] &&
+    grep -Eq '^;; .*status: NOERROR([,[:space:]]|$)' <<<"$response" &&
+    [[ $(grep -c '^;; flags:' <<<"$response") == 1 ]] &&
+    ! grep -Eq '^;; flags:([^;]*[[:space:]])tc([[:space:]]|;)' <<<"$response" &&
+    grep -Eq '^;; flags:.*ANSWER: 1([,[:space:]]|$)' <<<"$response" &&
+    [[ $(grep -Ec '^[^;[:space:]]' <<<"$response") == 1 ]]
+}
+# Share the exact owner/TTL/class/type contract across loopback and SOA checks.
+# Native dig prints decimal TTLs; malformed rows must never qualify as healthy.
+answer_identity_matches() {
+  local response=$1 owner=${2%.}. kind=$3 row observed ttl class type _rdata
+  while IFS= read -r row; do
+    IFS=$' \t' read -r observed ttl class type _rdata <<< "$row"
+    if [[ ${observed,,} == "${owner,,}" && $ttl =~ ^[0-9]+$ && $class == IN && $type == "$kind" ]]; then
+      return 0
+    fi
+  done <<< "$response"
+  return 1
+}
+# Check the package-owned loopback data through the IPv4 local listener.
+check_loopback() {
+  local transport=$1 name=$2 type=$3 expected=$4 result
+  result=$(dig -r -4 -b 127.0.0.1 @127.0.0.1 "$transport" +ignore +time=3 +tries=1 +norecurse +noall +comments +answer "$name" "$type") || {
+    echo "CRITICAL loopback query failed: $name $type $transport"; exit 2;
+  }
+  if ! complete_answer "$result" ||
+     ! grep -Eq '^;; flags: ([a-z]+ )*aa([[:space:]]|;)' <<<"$result" ||
+     ! answer_identity_matches "$result" "$name" "$type" ||
+     ! grep -Eq "[[:space:]]IN[[:space:]]+${type}[[:space:]]+${expected}[[:space:]]*$" <<<"$result"; then
+    echo "CRITICAL loopback answer invalid: $name $type $transport"; exit 2
+  fi
+}
+for transport in +notcp +tcp; do
+  check_loopback "$transport" localhost A '127[.]0[.]0[.]1'
+  check_loopback "$transport" 1.0.0.127.in-addr.arpa PTR 'localhost[.]'
+done
+for zone in "$@"; do
+  result=$(dig -r -4 -b "$ip" @"$ip" +tcp +time=3 +tries=1 +norecurse +noall +comments +answer "$zone" SOA) || { echo "CRITICAL DNS query failed: $zone"; exit 2; }
+  complete_answer "$result" || { echo "CRITICAL DNS incomplete/status: $zone"; exit 2; }
+  grep -Eq '^;; flags: ([a-z]+ )*aa([[:space:]]|;)' <<<"$result" || { echo "CRITICAL non-authoritative: $zone"; exit 2; }
+  answer_identity_matches "$result" "$zone" SOA || {
+    echo "CRITICAL SOA owner/type: $zone"; exit 2;
+  }
+done
+echo "OK named active, native loopback UDP/TCP, ${#@} authoritative zone(s)"

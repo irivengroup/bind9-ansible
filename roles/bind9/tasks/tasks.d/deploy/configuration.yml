@@ -1,0 +1,15 @@
+---
+- name: Deploy the single canonical BIND configuration
+  ansible.builtin.template:
+    src: named.conf.j2
+    dest: /etc/named.conf
+    owner: root
+    group: named
+    mode: '0640'
+  no_log: true
+  notify: Reload named configuration
+
+- name: Remove obsolete transaction executable from previous deployments
+  ansible.builtin.file:
+    path: /usr/local/sbin/named-transaction
+    state: absent

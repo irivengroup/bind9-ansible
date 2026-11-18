@@ -1,0 +1,15 @@
+---
+# Accept explicit YAML booleans and the equivalent CLI strings; reject truthy
+# numbers and unknown strings instead of silently enabling validation.
+- name: Validate the optional DNSSEC mode
+  ansible.builtin.assert:
+    that:
+      - ((bind_dnssec_active | type_debug) == 'bool') or (bind_dnssec_active is string and bind_dnssec_active in ['true', 'false', 'auto'])
+    fail_msg: >-
+      bind_dnssec_active must be the YAML boolean true/false or the exact
+      string true/false/auto. Received type: {{ bind_dnssec_active | type_debug }}.
+
+# No set_fact here: the validated public input controls tasks and rendering
+# directly, so stale facts and higher-precedence internal names cannot select
+# another policy. Activation uses bool only after this strict validation, with
+# an explicit auto branch. type_debug also works with Jinja versions before 2.11.

@@ -1,0 +1,59 @@
+# Build-only tools never enter a managed server or the source distribution.
+# The named gnu-bash context must contain the independently hashed GNU archive.
+FROM python:3.11-slim@sha256:b27df5841f3355e9473f9a516d38a6783b6c8dfeacaf2d14a240f443b368ddb6 AS build
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       gcc=4:14.2.0-1 make=4.4.1-2 patch=2.8-2 \
+       libc6-dev=2.41-12+deb13u4 libssl-dev=3.5.7-1~deb13u3 \
+    && rm -rf /var/lib/apt/lists/*
+COPY tools/quality/requirements-qa.lock /opt/qa/requirements-qa.lock
+RUN python -m pip --isolated install --index-url https://pypi.org/simple \
+       --no-cache-dir --only-binary=:all: --require-hashes -r /opt/qa/requirements-qa.lock \
+    && python -m pip check
+COPY tools/quality/native_bash/build.py tools/quality/native_bash/gnu-bash-5.2.37-observer.patch tools/quality/native_bash/COPYING /opt/qa/native_bash/
+COPY --from=gnu-bash /bash-5.2.37.tar.gz /opt/qa/bash-5.2.37.tar.gz
+RUN python /opt/qa/native_bash/build.py --archive /opt/qa/bash-5.2.37.tar.gz --output /opt/bind9-native-bash \
+    || { find /opt/bind9-native-bash -maxdepth 1 -type f -name '*.log' -exec cat {} \; ; exit 1; }
+
+FROM python:3.11-slim@sha256:b27df5841f3355e9473f9a516d38a6783b6c8dfeacaf2d14a240f443b368ddb6 AS controller
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       openssh-client=1:10.0p1-7+deb13u4 openssh-server=1:10.0p1-7+deb13u4 \
+       util-linux=2.41-5 mount=2.41-5 libssl3t64=3.5.7-1~deb13u3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*' -delete \
+    && rmdir /run/sshd \
+    && test ! -e /usr/bin/python3 \
+    && ln -s /usr/local/bin/python3 /usr/bin/python3
+COPY --from=build /usr/local /usr/local
+RUN mkdir -m 0700 /opt/bind9-native-bash
+COPY --from=build /opt/bind9-native-bash/baseline-bash /opt/bind9-native-bash/baseline-bash
+COPY --from=build /opt/bind9-native-bash/observed-bash /opt/bind9-native-bash/observed-bash
+COPY --from=build /opt/bind9-native-bash/manifest.json /opt/bind9-native-bash/manifest.json
+COPY --from=build /opt/qa/native_bash/COPYING /usr/local/share/bind9-native-bash-COPYING
+RUN chmod 0711 /opt/bind9-native-bash \
+    && chmod 0511 /opt/bind9-native-bash/*-bash \
+    && chmod 0600 /opt/bind9-native-bash/manifest.json \
+    && python -m pip check \
+    && python -m pip freeze --all > /usr/local/share/bind9-qa-python.txt \
+    && dpkg-query -W > /usr/local/share/bind9-qa-packages.txt
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    ANSIBLE_CONFIG=/src/ansible.cfg \
+    BIND9_NATIVE_BASH_MANIFEST=/opt/bind9-native-bash/manifest.json
+WORKDIR /src
+CMD ["python", "tools/quality/run_coverage_suite.py", "--root", "/src", "--output", "/evidence/coverage", "--batch-size", "16", "tests"]
+
+# Native semantic tests need genuine BIND parsing. Keep these tools out of the
+# controller: its filesystem fixtures must own otherwise absent system paths.
+FROM controller AS native-checker
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       bind9-utils=1:9.20.30-1~deb13u1 bind9-libs=1:9.20.30-1~deb13u1 \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM native-checker AS native-public
+RUN test ! -e /usr/sbin/named-checkconf \
+    && ln -s /usr/bin/named-checkconf /usr/sbin/named-checkconf
+
+# Preserve the original default build/runtime contract.
+FROM controller AS default

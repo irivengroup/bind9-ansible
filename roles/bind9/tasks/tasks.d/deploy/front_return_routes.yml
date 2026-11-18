@@ -1,0 +1,98 @@
+---
+# One native process holds the transient kernel lock for the complete route action.
+# The script module transfers the helper temporarily: no new resident service.
+- name: Select the explicit FRONT action without altering the DNS workflow
+  ansible.builtin.set_fact:
+    bind_front_action: '{{ bind_front_requested_action | default("plan" if ansible_check_mode else "apply") }}'
+
+- name: Validate the native FRONT action envelope
+  ansible.builtin.assert:
+    that:
+      - bind_front_action in ['plan', 'apply', 'verify', 'commit', 'rollback', 'recover']
+      - not ansible_check_mode or bind_front_action == 'plan'
+      - (bind_front_route_metric | type_debug) in ['int', 'long']
+    fail_msg: 'FRONT accepts plan/apply/verify/commit/rollback/recover, an integer metric, and plan only with --check.'
+
+- name: Read the real SSH peer before any route mutation
+  ansible.builtin.command:
+    argv: [printenv, SSH_CONNECTION]
+  become: false
+  register: bind_front_ssh_session
+  changed_when: false
+  check_mode: false
+  failed_when: >-
+    bind_front_ssh_session.rc != 0 or bind_front_ssh_session.stdout.split() | length != 4 or
+    (bind_front_action in ['plan', 'apply'] and _bind_local_admin_ip is defined and
+     bind_front_ssh_session.stdout.split()[2] != _bind_local_admin_ip)
+  when:
+    - bind_front_action in ['plan', 'apply', 'rollback', 'recover']
+    - ansible_connection | default('ssh') != 'local'
+
+- name: Prepare explicit shell-quoted arguments for the native route transaction
+  ansible.builtin.set_fact:
+    bind_front_arguments: >-
+      {%- set ns = namespace(args=['--action', bind_front_action]) -%}
+      {%- if bind_front_action in ['plan', 'apply'] -%}
+        {%- set ns.args = ns.args + ['--front-ip', bind_front_ip, '--back-ip', bind_back_ip,
+          '--adm-ip', _bind_local_admin_ip | default(ansible_host), '--metric', bind_front_route_metric | string,
+          '--peer-back-ip', hostvars[bind_primary_host].bind_back_ip,
+          '--peer-back-ip', hostvars[bind_secondary_host].bind_back_ip] -%}
+        {%- for client in bind_cloud_clients -%}
+          {%- set ns.args = ns.args + ['--client', client] -%}
+        {%- endfor -%}
+        {%- if bind_front_routes_defer_commit | default(false) | bool -%}
+          {%- set ns.args = ns.args + ['--defer-commit'] -%}
+        {%- endif -%}
+      {%- elif bind_front_action != 'recover' -%}
+        {%- set ns.args = ns.args + ['--token', bind_front_transaction_token | default('')] -%}
+      {%- endif -%}
+      {%- if bind_front_action in ['plan', 'apply', 'rollback', 'recover'] and ansible_connection | default('ssh') != 'local' -%}
+        {%- set ns.args = ns.args + ['--ssh-peer', bind_front_ssh_session.stdout.split()[0]] -%}
+      {%- endif -%}
+      {{ ns.args }}
+
+- name: Run the single native FRONT transaction with bounded observations
+  ansible.builtin.script:
+    cmd: '{{ (role_path ~ "/files/bind-front-routes.sh") | quote }} {{ bind_front_arguments | map("quote") | join(" ") }}'
+    executable: /bin/bash
+  register: bind_front_operation
+  check_mode: false
+  changed_when: bind_front_operation.rc == 2
+  failed_when: bind_front_operation.rc not in [0, 2]
+
+- name: Record pending FRONT changes without trusting an unverified receipt
+  ansible.builtin.set_fact:
+    bind_front_transaction_token: ''
+    bind_front_route_transaction_pending: true
+    bind_front_route_rollback_attempted: false
+  when:
+    - bind_front_action == 'apply'
+    - bind_front_operation.rc == 2
+    - bind_front_routes_defer_commit | default(false) | bool
+
+- name: Require an unambiguous receipt before any deferred route operation
+  ansible.builtin.assert:
+    that:
+      - >-
+        bind_front_operation.stdout | regex_findall('(?m)^transaction:.*$') | length == 1
+      - >-
+        bind_front_operation.stdout | regex_findall('(?m)^transaction: ([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})\r?$') | length == 1
+    fail_msg: 'FRONT applied routes but its receipt is missing, malformed or ambiguous. Journal retained; inspect it before routes-recover.'
+  when:
+    - bind_front_action == 'apply'
+    - bind_front_operation.rc == 2
+    - bind_front_routes_defer_commit | default(false) | bool
+
+- name: Retain only the transaction created by this DNS deployment
+  ansible.builtin.set_fact:
+    bind_front_transaction_token: '{{ (bind_front_operation.stdout | regex_findall("(?m)^transaction: ([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})\r?$")) | first }}'
+  when:
+    - bind_front_action == 'apply'
+    - bind_front_operation.rc == 2
+    - bind_front_routes_defer_commit | default(false) | bool
+
+- name: Clear pending FRONT ownership only after successful completion
+  ansible.builtin.set_fact:
+    bind_front_route_transaction_pending: false
+    bind_front_route_rollback_attempted: '{{ bind_front_action in ["rollback", "recover"] }}'
+  when: bind_front_action in ['commit', 'rollback', 'recover']

@@ -1,0 +1,43 @@
+---
+- name: Wait for local primary DNS TCP listener on back interface
+  ansible.builtin.wait_for:
+    host: "{{ hostvars[bind_primary_host].bind_back_ip }}"
+    port: 53
+    connect_timeout: 3
+    timeout: 30
+    state: started
+  # wait_for runs on the managed secondary, not on the Ansible controller.
+  # The controller only needs SSH access through ansible_host (ADM).
+  delegate_to: "{{ inventory_hostname }}"
+  changed_when: false
+
+- name: Verify primary SOA from secondary over back network
+  ansible.builtin.command:
+    argv:
+      - dig
+      - -r
+      - '-4'
+      - +tcp
+      - +time=3
+      - +tries=1
+      - +norecurse
+      - -b
+      - "{{ bind_back_ip }}"
+      - +noall
+      - +comments
+      - +answer
+      - "@{{ hostvars[bind_primary_host].bind_back_ip }}"
+      - "{{ item.domain }}"
+      - SOA
+  loop: "{{ bind_managed_zones }}"
+  loop_control:
+    label: "{{ item.domain }}"
+  # Run from the secondary and bind the DNS query source to its BACK IP.
+  delegate_to: "{{ inventory_hostname }}"
+  register: bind_primary_soa
+  changed_when: false
+  # Before its serial is known, require the same complete, case-insensitive SOA
+  # grammar as replication health. None skips only the serial equality check.
+  failed_when: >-
+    bind_primary_soa.rc != 0 or
+    not (bind_primary_soa.stdout | soa_matches(item.domain, none))

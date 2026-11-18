@@ -1,0 +1,53 @@
+# Only disposable CI containers use this profile. No managed DNS host uses it.
+# Keep mount mediation enabled: allow source locking and the exact private
+# ownership fixtures, rather than using privileged or an unconfined profile.
+#include <tunables/global>
+profile bind9-qa-native flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  file,
+  # Limit sockets to DNS/SSH, local IPC, and native routing observations.
+  # Unlisted families (including AF_ALG and AF_VSOCK) stay denied.
+  network inet,
+  network inet6,
+  network unix,
+  network netlink,
+  network packet,
+  # Keep critical denials effective even if an included abstraction changes.
+  deny network vsock,
+  deny network alg,
+  capability,
+  signal (send, receive) peer=bind9-qa-native,
+  signal (receive) peer=unconfined,
+  signal (receive) peer=runc,
+  signal (receive) peer=crun,
+  ptrace (trace, read, tracedby, readby) peer=bind9-qa-native,
+  umount /usr/sbin{,/},
+  umount /var{,/},
+  umount /tmp/**,
+  umount /var/lib/Bind9-Ansible/.front-routes.retired.*/,
+
+  # The mandatory source lock remains a native read-only self-bind.
+  mount options=(rw,bind) /src{,/} -> /src{,/},
+  mount options=(ro,remount,bind) -> /src{,/},
+  mount options=(ro,remount,bind,relatime) -> /src{,/},
+  mount options=(rprivate) -> /,
+
+  # Private prerequisites, state-parent and inode-alias refusal scenarios.
+  mount options=(rw,bind) /tmp/** -> /usr/sbin{,/},
+  mount options=(rw,bind) /tmp/** -> /var{,/},
+  mount options=(rw,bind) /tmp/** -> /tmp/**,
+  mount options=(rw,bind) /var/lib/Bind9-Ansible/front-routes.pending/ -> /var/lib/Bind9-Ansible/.front-routes.retired.*/,
+
+  # All other mounts are denied implicitly. Protect kernel policy and controls
+  # independently of the container capability set and ordinary file rules.
+  # Preserve default-container proc controls and deny all sysctl writes.
+  deny /proc/* w,
+  deny /proc/[^0-9]*/** w,
+  deny /proc/sys/** wklx,
+  deny /proc/sysrq-trigger rwklx,
+  deny /proc/{mem,kmem,kcore} rwklx,
+  deny /sys/** wklx,
+  deny /sys/kernel/security/** rwklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+}

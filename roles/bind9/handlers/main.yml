@@ -1,0 +1,14 @@
+---
+- name: Reload named configuration
+  ansible.builtin.systemd:
+    name: named
+    daemon_reload: true
+    # Restart applies changed unit definitions, including removal of a legacy
+    # ExecStart override that forced IPv4 for the entire process.
+    state: >-
+      {{ "restarted" if
+         ((bind_named_runtime_override | default({})).get("changed", false) or
+          (bind_named_override | default({})).get("changed", false) or
+          (bind_legacy_named_override | default({})).get("changed", false) or
+          (bind_dnssec_removed | default({})).get("changed", false))
+         else "reloaded" }}

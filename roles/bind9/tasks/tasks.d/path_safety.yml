@@ -1,0 +1,52 @@
+---
+- name: Inspect managed BIND paths without following symlinks
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    # Establish inode safety before any content reader can open the file.
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  loop:
+    - /etc/named.conf
+    - /etc/named
+    - /etc/named/zones
+    - /etc/systemd/system/named.service.d
+    - /usr/local/sbin
+    # Legacy cleanup uses file(state=absent); reject directories before it can
+    # recursively remove operator data at an old executable's pathname.
+    - /usr/local/sbin/bind-backup.sh
+    - /usr/local/sbin/bind-configtool.sh
+    - /usr/local/sbin/named-transaction
+    - /var/named
+    - /var/named/zones
+    - /var/named/slaves
+    - /var/named/data
+    - /var/named/dynamic
+    - /var/log/named
+    - /var/log/named/default.log
+    - /var/log/named/security.log
+    - /var/log/named/xfer.log
+  register: bind_managed_paths
+  changed_when: false
+
+- name: Refuse symlinks and non-regular managed files
+  ansible.builtin.assert:
+    that:
+      - not item.stat.islnk | default(false)
+      # A directory at a file path must not reach template/chown/touch tasks.
+      - not item.stat.exists or ((item.item in bind_managed_file_paths) and (item.stat.isreg | default(false))) or ((item.item not in bind_managed_file_paths) and (item.stat.isdir | default(false)))
+      - not item.stat.exists or item.item not in bind_managed_file_paths or (item.stat.nlink | default(0) | int) == 1
+    fail_msg: "Unsafe BIND managed path: {{ item.item }}"
+  loop: "{{ bind_managed_paths.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  vars:
+    bind_managed_file_paths:
+      - /etc/named.conf
+      - /usr/local/sbin/bind-backup.sh
+      - /usr/local/sbin/bind-configtool.sh
+      - /usr/local/sbin/named-transaction
+      - /var/log/named/default.log
+      - /var/log/named/security.log
+      - /var/log/named/xfer.log

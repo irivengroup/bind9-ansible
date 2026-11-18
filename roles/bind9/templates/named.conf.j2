@@ -1,0 +1,217 @@
+{# Single canonical RHEL 8+ BIND configuration; zone data remains in /var/named. #}
+{% set primary_role = (bind_primary_group | default("dns_primary")) in group_names %}
+{% set local_front_acl = "bind_primary_front_ip" if primary_role else "bind_secondary_front_ip" %}
+{% set local_back_acl = "bind_primary_back_ip" if primary_role else "bind_secondary_back_ip" %}
+{% set shared_listener = bind_front_ip == bind_back_ip %}
+{% set validation_mode = bind_dnssec_active | default('auto') | string | lower %}
+{% set dnssec_mode = 'auto' if validation_mode == 'auto' else ('yes' if validation_mode == 'true' else 'no') %}
+{% set client_networks = bind_allowed_clients %}
+{% set cloud_networks = bind_cloud_clients | default([], true) %}
+{% set internal_networks = bind_internal_clients | default([], true) %}
+{% set extra_listeners = bind_dns_listen_addresses | default([]) | reject('equalto', bind_front_ip) | reject('equalto', bind_back_ip) | list %}
+{% set recurse_on_front = cloud_networks or (shared_listener and internal_networks) %}
+{% set recurse_on_back = not shared_listener and internal_networks %}
+key "{{ bind_tsig_key_name }}" {
+    algorithm {{ bind_tsig_algorithm }};
+    secret "{{ bind_tsig_secret }}";
+};
+
+// Administrative control uses the separate vendor-generated key, never site TSIG.
+include "/etc/rndc.key";
+
+// Exact IPv4 loopback, shared by listener and access rules.
+acl "local_loopback" {
+    127.0.0.1;
+};
+
+// Peer addresses belong to the current environment/site, never the whole inventory.
+acl "bind_primary_back_ip" {
+    {{ hostvars[bind_primary_host].bind_back_ip }};
+};
+acl "bind_secondary_back_ip" {
+    {{ hostvars[bind_secondary_host].bind_back_ip }};
+};
+// Only the local FRONT address is consumed by this server's destination rules.
+acl "{{ local_front_acl }}" {
+    {{ bind_front_ip }};
+};
+acl "bind_servers_back_ip" {
+    bind_primary_back_ip;
+    bind_secondary_back_ip;
+};
+{% if client_networks %}
+acl "user_defined_clients" {
+{% for cidr in client_networks %}    {{ cidr }};
+{% endfor %}};
+{% endif %}
+
+// Shared source authorization; destination policy follows declared client lists.
+// Without views, source and destination ACLs do not enforce a source/interface pair.
+acl "dns_query_clients" {
+    local_loopback;
+    bind_servers_back_ip;
+{% if client_networks %}
+    user_defined_clients;
+{% endif %}
+};
+acl "dns_recursive_clients" {
+    // DNS peers and the transfer key must not open recursive service.
+    !bind_servers_back_ip;
+    !key "{{ bind_tsig_key_name }}";
+    local_loopback;
+{% if client_networks %}
+    user_defined_clients;
+{% endif %}
+};
+
+controls {
+    inet 127.0.0.1 port 953 allow { local_loopback; } keys { "rndc-key"; };
+};
+
+options {
+    directory "/var/named";
+    // Diagnostic paths follow the distribution's native EL8 named.conf.
+    dump-file "/var/named/data/cache_dump.db";
+    statistics-file "/var/named/data/named_stats.txt";
+    memstatistics-file "/var/named/data/named_mem_stats.txt";
+    secroots-file "/var/named/data/named.secroots";
+    recursing-file "/var/named/data/named.recursing";
+    pid-file "/run/named/named.pid";
+    session-keyfile "/run/named/session.key";
+    listen-on port 53 { local_loopback; {{ local_front_acl }}; {% if not shared_listener %}{{ local_back_acl }}; {% endif %}{% for address in extra_listeners %}{{ address }}; {% endfor %}};
+    listen-on-v6 { none; };
+    allow-query { dns_query_clients; };
+    allow-query-on {
+        local_loopback;
+        {{ local_front_acl }};
+{% if not shared_listener %}
+        {{ local_back_acl }};
+{% endif %}
+{% for address in extra_listeners %}
+        {{ address }};
+{% endfor %}
+    };
+    recursion yes;
+    // Bound recursive cache memory and positive/negative answer retention.
+    max-cache-size 256m;
+    max-cache-ttl 3600;
+    max-ncache-ttl 300;
+    allow-recursion { dns_recursive_clients; };
+    allow-query-cache { dns_recursive_clients; };
+    allow-recursion-on {
+        local_loopback;
+{% if recurse_on_front %}
+        {{ local_front_acl }};
+{% endif %}
+{% if recurse_on_back %}
+        {{ local_back_acl }};
+{% endif %}
+    };
+    allow-query-cache-on {
+        local_loopback;
+{% if recurse_on_front %}
+        {{ local_front_acl }};
+{% endif %}
+{% if recurse_on_back %}
+        {{ local_back_acl }};
+{% endif %}
+    };
+    allow-transfer { none; };
+    allow-update { none; };
+    notify no;
+    transfer-source {{ bind_back_ip }};
+    notify-source {{ bind_back_ip }};
+    dnssec-validation {{ dnssec_mode }};
+{% if dnssec_mode != 'no' %}
+{% if dnssec_mode == 'auto' %}
+    bindkeys-file "/etc/named.root.key";
+{% endif %}
+    managed-keys-directory "/var/named/dynamic";
+{% endif %}
+    minimal-responses yes;
+    // A queries category exists below; explicitly avoid per-query processing.
+    querylog no;
+    version "not disclosed";
+    include "/etc/crypto-policies/back-ends/bind.config";
+};
+
+logging {
+    // Rotation is size-based: versions counts archives, excluding the live file.
+    channel default_log {
+        file "/var/log/named/default.log" versions 5 size 10m;
+        severity info;
+        print-time yes;
+        print-category yes;
+        print-severity yes;
+    };
+    channel security_log {
+        file "/var/log/named/security.log" versions 5 size 10m;
+        severity info;
+        print-time yes;
+        print-category yes;
+        print-severity yes;
+    };
+    channel xfer_log {
+        file "/var/log/named/xfer.log" versions 3 size 5m;
+        severity info;
+        print-time yes;
+    };
+    channel queries_null {
+        null;
+    };
+    category default  { default_log; };
+    category general  { default_log; };
+    category config   { default_log; };
+    category security { security_log; };
+    // DNSSEC validation failures have their own BIND category.
+    category dnssec   { security_log; };
+    category xfer-in  { xfer_log; };
+    category xfer-out { xfer_log; };
+    category queries  { queries_null; };
+};
+
+{% if dnssec_mode == 'yes' %}
+// Explicit vendor-managed trust anchors for manual validation mode on EL8.
+include "/etc/named.root.key";
+{% endif %}
+// Keep distribution-owned native definitions and data unchanged.
+include "/etc/named.rfc1912.zones";
+
+{% for auth_zone in (bind_managed_zones | default(bind_authoritative_zones | default([], true), true)) %}
+zone "{{ auth_zone.domain }}" IN {
+{% if primary_role %}
+    type master;
+    file "/var/named/zones/{{ auth_zone.domain }}.zone";
+    // Nested ACL: secondary BACK source AND site TSIG, on this server's listeners.
+    allow-transfer { !{ !bind_secondary_back_ip; any; }; key "{{ bind_tsig_key_name }}"; };
+    notify explicit;
+    also-notify { {{ hostvars[bind_secondary_host].bind_back_ip }} key "{{ bind_tsig_key_name }}"; };
+{% else %}
+    type slave;
+    file "slaves/{{ auth_zone.domain }}.zone";
+    masters { {{ hostvars[bind_primary_host].bind_back_ip }} key "{{ bind_tsig_key_name }}"; };
+    allow-notify { !{ !bind_primary_back_ip; any; }; key "{{ bind_tsig_key_name }}"; };
+{% endif %}
+};
+{% endfor %}
+
+// Preserve the existing private DNS policy for undeclared names.
+zone "." IN {
+    type master;
+    file "/var/named/empty-root.zone";
+};
+
+{% for zone in bind_forward_zones | default([], true) %}
+{% if dnssec_mode != 'no' and not (zone.dnssec_validate | default(true)) %}
+// Bind9-Ansible DNSSEC-PRIVATE {{ zone.domain | lower }}
+{% endif %}
+zone "{{ zone.domain }}" IN {
+    type forward;
+    forward only;
+    forwarders {
+{% for server in zone.forwarders %}
+        {{ server.address }} port {{ server.port | default(53) }};
+{% endfor %}
+    };
+};
+{% endfor %}

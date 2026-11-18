@@ -1,0 +1,11 @@
+---
+- name: Exercise the canonical firewall component with a genuine daemon
+  hosts: dns_deployment_order
+  serial: 1
+  any_errors_fatal: true
+  gather_facts: false
+  tasks:
+    - name: Add only native DNS authorizations on existing FRONT and BACK zones
+      ansible.builtin.include_role:
+        name: bind9
+        tasks_from: tasks.d/deploy/firewall.yml

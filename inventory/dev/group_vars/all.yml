@@ -1,0 +1,3 @@
+---
+# Variables shared within this environment only.
+bind_environment: dev

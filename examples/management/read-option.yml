@@ -1,0 +1,6 @@
+---
+# Read on each targeted host before choosing its expected_checksum.
+bind_manage:
+  resource: option
+  action: read
+  name: minimal-responses

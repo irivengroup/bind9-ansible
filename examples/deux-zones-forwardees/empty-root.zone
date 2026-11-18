@@ -1,0 +1,12 @@
+$TTL 60
+@ IN SOA localhost. hostmaster.localhost. ( 1 3600 900 604800 60 )
+  IN NS localhost.
+localhost. IN A 127.0.0.1
+corp.example.test. IN NS bind-forwarder-1.corp.example.test.
+bind-forwarder-1.corp.example.test. IN A 10.11.0.53
+corp.example.test. IN NS bind-forwarder-2.corp.example.test.
+bind-forwarder-2.corp.example.test. IN A 10.11.0.54
+services.example.test. IN NS bind-forwarder-1.services.example.test.
+bind-forwarder-1.services.example.test. IN A 10.12.0.53
+services.example.test. IN NS bind-forwarder-2.services.example.test.
+bind-forwarder-2.services.example.test. IN A 10.12.0.54
