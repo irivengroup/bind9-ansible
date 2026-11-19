@@ -97,6 +97,34 @@ class AnsibleRouteSandbox:
 
 
 class TestAnsibleNativeFrontRoutes:
+    def test_docker_recipe_adds_its_own_route_then_rolls_back_only_that_route(self, tmp_path):
+        """Execute the recipe itself so invalid nested variable names cannot hide."""
+        sandbox = AnsibleRouteSandbox(tmp_path)
+        # Keep the recipe destination outside the directly connected FRONT LAN.
+        sandbox.data['addresses'][0]['addr_info'][0]['local'] = '198.51.101.2'
+        sandbox.data['runtime'][1]['dst'] = '198.51.101.0/24'
+        sandbox.data['runtime'][2]['gateway'] = '198.51.101.1'
+        sandbox.data['gateway'] = '198.51.101.1'
+        sandbox.save()
+        variables = {'bind_front_ip': '198.51.101.2'}
+        applied = sandbox.run(extra_vars=variables)
+        assert applied.returncode == 0, applied.stdout
+        before = sandbox.read()
+        recipe = yaml.safe_load((ROOT / 'tests/docker/rollback.yml').read_text())
+        task_file = tmp_path / 'roles/bind9/tasks/tests_docker_rollback.yml'
+        task_file.write_text(yaml.safe_dump(recipe[0]['tasks']))
+        result = sandbox.run('tests_docker_rollback.yml', extra_vars=variables)
+        assert result.returncode == 0, result.stdout
+        assert 'recipe-controlled-downstream-failure' in result.stdout
+        assert 'rescued=1' in result.stdout and 'failed=0' in result.stdout
+        after = sandbox.read()
+        assert after['runtime'] == before['runtime']
+        assert after['persistent'] == before['persistent']
+        added = after['operations'][len(before['operations']):]
+        assert len(added) == 4
+        assert all('198.51.100.128/26' in str(operation) for operation in added)
+        assert not (sandbox.state_root / 'front-routes.pending').exists()
+
     def test_two_empty_lists_fail_before_route_commands_even_with_routes_tag(self, tmp_path):
         sandbox = AnsibleRouteSandbox(tmp_path)
         result = sandbox.run(tags='routes', extra_vars={'bind_trusted_networks': {'cloud_clients': [], 'internal_clients': []}})
