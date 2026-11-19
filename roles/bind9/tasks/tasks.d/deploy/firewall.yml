@@ -10,7 +10,7 @@
 
 - name: Read local IPv4 addresses for DNS listener interfaces
   ansible.builtin.command:
-    argv: [ip, -j, -4, address, show]
+    argv: [ip, -o, -4, address, show]
   register: bind_dns_firewall_addresses
   changed_when: false
   check_mode: false
@@ -19,10 +19,8 @@
   ansible.builtin.assert:
     that:
       - bind_dns_firewall_addresses.stdout | trim | length > 0
-      - (bind_dns_firewall_addresses.stdout | from_json) is sequence
-      - (bind_dns_firewall_addresses.stdout | from_json) is not mapping
-      - (bind_dns_firewall_addresses.stdout | from_json) is not string
-    fail_msg: 'Cannot discover DNS firewalld interfaces: ip -j -4 address show must return an address list.'
+      - bind_dns_firewall_addresses.stdout | dns_ipv4_links | length > 0
+    fail_msg: 'Cannot discover DNS firewalld interfaces: ip -o -4 address show must return native address records.'
 
 - name: Reset discovered DNS firewall interfaces and targets
   ansible.builtin.set_fact:
@@ -33,7 +31,7 @@
   ansible.builtin.set_fact:
     bind_dns_firewall_listener_addresses: >-
       {{ bind_dns_firewall_listener_addresses + [{'address': item.1.local, 'device': item.0.ifname}] }}
-  loop: '{{ bind_dns_firewall_addresses.stdout | from_json | subelements("addr_info", skip_missing=True) }}'
+  loop: '{{ bind_dns_firewall_addresses.stdout | dns_ipv4_links | subelements("addr_info", skip_missing=True) }}'
   loop_control:
     label: '{{ item.0.ifname }} {{ item.1.local }}'
   when:

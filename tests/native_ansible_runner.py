@@ -148,7 +148,7 @@ class NativeTaskRun:
         if ('become' in task or task.get('delegate_to') != '{{ item }}' or
                 task.get('loop') != '{{ [bind_primary_host, bind_secondary_host] }}'):
             return False
-        if task.get('ansible.builtin.command') == {'argv': ['ip', '-j', '-4', 'address', 'show', 'up']}:
+        if task.get('ansible.builtin.command') == {'argv': ['ip', '-o', '-4', 'address', 'show', 'up']}:
             return task.get('check_mode') is False and task.get('changed_when') is False
         return (task.get('delegate_facts') is True and task.get('ansible.builtin.set_fact') == {
             'bind_front_ip': '{{ _bind_peer_networks[item].front }}',
@@ -638,9 +638,9 @@ class NativeDirectoryRun(NativeContainerRun):
 class NativePackageRun(NativeContainerRun):
     """Execute the one literal dependency task only in a disposable package DB."""
 
-    SAFE_ACTIONS = NativeTaskRun.SAFE_ACTIONS | {'ansible.builtin.dnf'}
+    SAFE_ACTIONS = NativeTaskRun.SAFE_ACTIONS | {'ansible.builtin.package'}
     FILES = {'tasks.d/deploy/packages.yml'}
-    TARGETS = ('/var/lib/rpm', '/var/lib/dnf', '/var/cache/dnf', '/etc/yum.repos.d')
+    TARGETS = ('/var/lib/rpm', '/var/lib/dnf', '/var/cache/dnf', '/var/lib/yum', '/var/cache/yum', '/etc/yum.repos.d')
 
 
 class NativeCliRun(NativeContainerRun):

@@ -26,19 +26,64 @@ def links(suffix='11', names=('eth0', 'eth1', 'eth2', 'eth3')):
             names, ('192.0.2.', '198.51.100.', '203.0.113.', '10.0.0.'))]
 
 
+def ipv4_text(observations):
+    """Model the same ip -o format emitted by EL7 and newer kernels."""
+    return '\n'.join('{}: {} inet {}/{} scope {} {}'.format(
+        index, row['ifname'], address['local'], address.get('prefixlen', 24),
+        address.get('scope', 'global'), row['ifname'])
+        for index, row in enumerate(observations, 1) for address in row['addr_info'])
+
+
 def write_ip_probe(folder, observations, existing=False):
     """Expose only the exact read-only command to the native Ansible fixture."""
     binary = folder / 'ip'
     shebang, remaining = binary.read_text().split('\n', 1) if existing else ('#!' + sys.executable, 'sys.exit(91)\n')
     binary.write_text(shebang + '\nimport json, os, sys\n'
-                      'if sys.argv[1:] == ["-j", "-4", "address", "show", "up"]:\n'
-                      '    print(json.dumps(' + repr(observations) + '[os.environ.get("BIND_TEST_TARGET", "")]))\n'
+                      'if sys.argv[1:] == ["-o", "-4", "address", "show", "up"]:\n'
+                      '    print(' + repr({name: ipv4_text(rows) for name, rows in observations.items()}) + '[os.environ.get("BIND_TEST_TARGET", "")])\n'
                       '    sys.exit(0)\n' + remaining)
     binary.chmod(0o755)
 
 
 def resolve(rows, selection=None, front=None, back=None, admin='192.0.2.11'):
     return NETWORK.FilterModule().filters()['dns_network_resolve'](rows, selection, front, back, admin)
+
+
+def test_native_ipv4_text_preserves_aliases_peer_suffixes_scopes_and_duplicate_addresses():
+    rows = [link('lo', '127.0.0.1'), link('eth0', '192.0.2.11', '192.0.2.99'),
+            link('eth1', '192.0.2.11')]
+    parsed = NETWORK.DnsNetwork.ipv4_links(ipv4_text(rows).replace('eth0 inet', 'eth0@if123 inet'))
+    assert [row['ifname'] for row in parsed] == ['lo', 'eth0', 'eth1']
+    assert [entry['local'] for row in parsed for entry in row['addr_info']] == [
+        '127.0.0.1', '192.0.2.11', '192.0.2.99', '192.0.2.11']
+    assert parsed[0]['addr_info'][0] == dict(family='inet', local='127.0.0.1', prefixlen=24, scope='host')
+    with pytest.raises(ValueError, match='occurs more than once'):
+        NETWORK.DnsNetwork(parsed)
+    assert NETWORK.FilterModule().filters()['dns_ipv4_links']('') == []
+
+
+@pytest.mark.parametrize('output', [None, [], {}, 1, 'not an address', '\x00',
+    '1: bad/name inet 192.0.2.1/24 scope global bad/name',
+    '1: eth0 inet 192.0.2.1/33 scope global eth0',
+    '1: eth0 inet 999.0.2.1/24 scope global eth0',
+    '1: eth0 inet 192.0.2.1/024 scope global eth0',
+    '1: eth0 inet 192.0.2.1/01 scope global eth0',
+    '1: eth0 inet 192.0.2.1/24 scope global eth0\ninvalid'])
+def test_malformed_native_ipv4_text_never_becomes_a_partial_inventory(output):
+    with pytest.raises(ValueError):
+        NETWORK.DnsNetwork.ipv4_links(output)
+
+
+def test_native_ipv4_text_accepts_real_el7_and_current_iproute_attributes():
+    output = ('2: ens192 inet 192.0.2.11/24 brd 192.0.2.255 scope global dynamic ens192\\'
+              '       valid_lft 3600sec preferred_lft 3600sec\n'
+              '2: ens192 inet 192.0.2.99/32 scope global secondary noprefixroute ens192:1\\'
+              '       valid_lft forever preferred_lft forever\n'
+              '3: eth1 inet 169.254.0.1/16 scope link eth1')
+    parsed = NETWORK.DnsNetwork.ipv4_links(output)
+    assert parsed[0]['addr_info'][1]['prefixlen'] == 32
+    assert parsed[1]['addr_info'][0]['scope'] == 'link'
+    assert NETWORK.DnsNetwork(parsed).resolve(None, None, None, '192.0.2.11')['front'] == '192.0.2.11'
 
 
 def test_single_interface_shares_the_ssh_address_and_uses_existing_routing():

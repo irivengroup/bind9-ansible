@@ -20,7 +20,7 @@ class NativeDeploymentPlayRun(NativeContainerRun):
     CANONICAL_ROLE_SEARCH = True
     SAFE_ACTIONS = NativeTaskRun.SAFE_ACTIONS | {
         'ansible.builtin.command', 'ansible.builtin.stat', 'ansible.builtin.file',
-        'ansible.builtin.copy', 'ansible.builtin.template', 'ansible.builtin.dnf',
+        'ansible.builtin.copy', 'ansible.builtin.template', 'ansible.builtin.package',
         'ansible.builtin.find', 'ansible.builtin.systemd', 'ansible.builtin.script',
         'ansible.builtin.slurp', 'ansible.builtin.wait_for', 'ansible.builtin.fail',
         'ansible.builtin.include_tasks'}

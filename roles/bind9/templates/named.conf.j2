@@ -1,4 +1,4 @@
-{# Single canonical RHEL 8+ BIND configuration; zone data remains in /var/named. #}
+{# Single canonical RHEL 7+ BIND configuration; zone data remains in /var/named. #}
 {% set primary_role = (bind_primary_group | default("dns_primary")) in group_names %}
 {% set local_front_acl = "bind_primary_front_ip" if primary_role else "bind_secondary_front_ip" %}
 {% set local_back_acl = "bind_primary_back_ip" if primary_role else "bind_secondary_back_ip" %}
@@ -70,7 +70,7 @@ controls {
 
 options {
     directory "/var/named";
-    // Diagnostic paths follow the distribution's native EL8 named.conf.
+    // Diagnostic paths follow the distribution's native named.conf.
     dump-file "/var/named/data/cache_dump.db";
     statistics-file "/var/named/data/named_stats.txt";
     memstatistics-file "/var/named/data/named_mem_stats.txt";
@@ -132,7 +132,9 @@ options {
     // A queries category exists below; explicitly avoid per-query processing.
     querylog no;
     version "not disclosed";
+{% if ansible_distribution_major_version | default('8') | int >= 8 %}
     include "/etc/crypto-policies/back-ends/bind.config";
+{% endif %}
 };
 
 logging {
@@ -171,7 +173,7 @@ logging {
 };
 
 {% if dnssec_mode == 'yes' %}
-// Explicit vendor-managed trust anchors for manual validation mode on EL8.
+// Explicit vendor-managed trust anchors for manual validation mode.
 include "/etc/named.root.key";
 {% endif %}
 // Keep distribution-owned native definitions and data unchanged.

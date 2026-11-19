@@ -14,7 +14,7 @@ from native_ansible_runner import NativePackageRun
 pytestmark = pytest.mark.skipif(os.name != 'posix' or os.environ.get('BIND9_NATIVE_STATE_LAB') != '1',
                                reason='Requires an explicitly enabled disconnected clean Linux root')
 
-PACKAGES = ['bind', 'bind-utils', 'policycoreutils-python-utils']
+PACKAGES = ['bind', 'bind-utils', 'python3', 'policycoreutils-python-utils']
 
 
 def test_native_dependency_task_preserves_installed_packages_or_reports_unavailable_dnf_bindings():
@@ -28,8 +28,9 @@ def test_native_dependency_task_preserves_installed_packages_or_reports_unavaila
     status, result = NativePackageRun('tasks.d/deploy/packages.yml', {'ansible_pkg_mgr': 'dnf'}).run()
     if available:
         assert status == 0 and not result.failed
-        assert result.ok == ['Install BIND and SELinux tooling']
+        assert result.ok == ['Select the Python runtime required by the native package manager',
+                             'Install BIND and SELinux tooling']
         assert subprocess.check_output(['/usr/bin/rpm', '-q'] + PACKAGES, timeout=10) == before
     else:
         assert status == 2 and result.failed == ['Install BIND and SELinux tooling']
-        assert result.ok == []
+        assert result.ok == ['Select the Python runtime required by the native package manager']

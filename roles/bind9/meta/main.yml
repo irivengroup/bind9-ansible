@@ -3,7 +3,7 @@
 galaxy_info:
   author: Alfred TCHONDJO
   company: IRIVEN Group
-  description: BIND 9 configuration with native RHEL 8 loopback zones and lifecycle management.
+  description: BIND 9 configuration with native RHEL 7+ loopback zones and lifecycle management.
   license: proprietary
   min_ansible_version: '2.9'
   galaxy_tags:
@@ -14,5 +14,8 @@ galaxy_info:
   platforms:
     - name: EL
       versions:
+        - '7'
         - '8'
+        - '9'
+        - '10'
 dependencies: []

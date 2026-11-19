@@ -2,7 +2,7 @@
 - name: Validate the management platform and explicit request envelope
   ansible.builtin.assert:
     that:
-      - ansible_distribution == 'RedHat' and (ansible_distribution_major_version | int) >= 8
+      - ansible_distribution == 'RedHat' and (ansible_distribution_major_version | int) >= 7
       - bind_manage is defined and bind_manage is mapping
       - bind_manage.resource | default('') in ['option', 'zone', 'record', 'acl', 'logging', 'batch']
       - >-
@@ -12,7 +12,15 @@
       - bind_manage_plan_checksums | default({}) is mapping
       - bind_manage_show_values | default(false) | type_debug == 'bool'
       - bind_operation_lock_enabled | default(false) | type_debug == 'bool'
-    fail_msg: 'Supply a CRUD request or a batch read/apply envelope on an existing RHEL 8+ BIND host. Use read before writing.'
+    fail_msg: 'Supply a CRUD request or a batch read/apply envelope on an existing RHEL 7+ BIND host. Use read before writing.'
+
+- name: Select the Python runtime required by the private management module
+  # EL7 facts and yum may run under Python 2, while the private module uses 3.6+.
+  ansible.builtin.set_fact:
+    _bind_management_python: >-
+      {{ '/usr/bin/python3' if (ansible_distribution_major_version | int) == 7 and
+         (ansible_python_version | default('2.7')) is version('3.6', '<')
+         else ansible_python_interpreter | default('auto') }}
 
 - name: Require the primary batch phase before a secondary with record operations
   ansible.builtin.assert:
@@ -30,6 +38,8 @@
 - name: Execute only the requested targeted action on the appropriate host
   block:
     - name: Run the private management transaction
+      vars:
+        ansible_python_interpreter: '{{ _bind_management_python }}'
       bind9_manage:
         operation_lock: '{{ bind_operation_lock_enabled | default(false) }}'
         request: >-

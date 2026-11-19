@@ -60,6 +60,7 @@
     label: '{{ item.item }}'
 
 - name: Inspect native system crypto-policy include
+  # System-wide crypto-policies are supplied by EL8 and newer releases.
   ansible.builtin.stat:
     path: '{{ item }}'
     # crypto-policies can install a symlink to the selected vendor policy.
@@ -70,16 +71,18 @@
   loop:
     - /etc/crypto-policies/back-ends/bind.config
   register: bind_native_security_files
+  when: ansible_distribution_major_version | default('8') | int >= 8
 
 - name: Require native crypto-policy include
   ansible.builtin.assert:
     that:
       - item.stat.exists
       - item.stat.isreg | default(false)
-    fail_msg: 'Required RHEL 8 security include is missing: {{ item.item }}. Repair the vendor package or crypto-policy; the role does not generate a fallback.'
-  loop: '{{ bind_native_security_files.results }}'
+    fail_msg: 'Required system crypto-policy include is missing: {{ item.item }}. Repair the vendor package or crypto-policy; the role does not generate a fallback.'
+  loop: '{{ bind_native_security_files.results | default([]) }}'
   loop_control:
     label: '{{ item.item }}'
+  when: ansible_distribution_major_version | default('8') | int >= 8
 
 - name: Inspect the native trust anchor only when validation is enabled
   ansible.builtin.stat:

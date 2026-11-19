@@ -48,6 +48,30 @@ def test_vendor_prerequisites_respect_dnssec_mode_without_opening_contents(vendo
         result.skipped if mode in (False, 'false') else result.ok)
 
 
+@pytest.mark.parametrize('major', ['7', '8', '9', '10'])
+def test_crypto_policy_is_required_only_on_platforms_that_ship_it(vendor_tree, major):
+    vendor_tree[4].unlink()
+    status, result = NativeVendorRun('tasks.d/native_loopback.yml', {
+        'bind_dnssec_active': 'auto', 'ansible_distribution_major_version': major}).run()
+    assert status == (0 if major == '7' else 2)
+    assert result.failed == ([] if major == '7' else ['Require native crypto-policy include'])
+    assert not vendor_tree[4].exists()
+    if major == '7':
+        assert 'Require native crypto-policy include' in result.skipped
+        assert 'Require the native trust anchor for enabled DNSSEC modes' in result.ok
+
+
+@pytest.mark.parametrize('index', [0, 5])
+def test_el7_still_requires_native_loopback_and_dnssec_trust_anchor(vendor_tree, index):
+    vendor_tree[index].unlink()
+    status, result = NativeVendorRun('tasks.d/native_loopback.yml', {
+        'bind_dnssec_active': 'auto', 'ansible_distribution_major_version': '7'}).run()
+    assert status == 2
+    assert result.failed == [('Require native BIND files without replacing missing or unsafe files'
+                              if index == 0 else 'Require the native trust anchor for enabled DNSSEC modes')]
+    assert not vendor_tree[index].exists()
+
+
 @pytest.mark.parametrize('index,task', [(0, 'Require native BIND files without replacing missing or unsafe files'),
     (1, 'Require native BIND files without replacing missing or unsafe files'),
     (4, 'Require native crypto-policy include'), (5, 'Require the native trust anchor for enabled DNSSEC modes')])

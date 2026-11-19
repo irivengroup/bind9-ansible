@@ -64,7 +64,7 @@
   block:
     - name: Read active IPv4 interfaces from the kernel of each peer
       ansible.builtin.command:
-        argv: [ip, -j, '-4', address, show, up]
+        argv: [ip, -o, '-4', address, show, up]
       delegate_to: '{{ item }}'
       loop: '{{ [bind_primary_host, bind_secondary_host] }}'
       register: _bind_peer_links
@@ -78,7 +78,7 @@
     - name: Resolve the local DNS and SSH addresses of each peer
       ansible.builtin.set_fact:
         _bind_peer_networks: >-
-          {{ _bind_peer_networks | combine({item.item: (item.stdout | from_json |
+          {{ _bind_peer_networks | combine({item.item: (item.stdout | dns_ipv4_links |
              dns_network_resolve(hostvars[item.item].bind_listen_interfaces | default(none),
                                  hostvars[item.item].bind_front_ip | default(none),
                                  hostvars[item.item].bind_back_ip | default(none),

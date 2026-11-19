@@ -1,7 +1,8 @@
 #!/bin/bash
-# Additive FRONT routes on EL8. One process owns observation, writes and recovery.
+# Additive FRONT routes on RHEL 7+. One process owns observation, writes and recovery.
 # No interface reactivation, route replacement, shell evaluation, Python or jq.
 set -Eeuo pipefail
+# The guarded array expansions preserve zero arguments on EL7 Bash 4.2.
 export LC_ALL=C
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 umask 077
@@ -236,7 +237,7 @@ select_front_route_match() {
     local chosen_gw chosen_device chosen_attrs
     MATCH_KEY='' MATCH_DEVICE=''
     ip_number "$FRONT"; address=$NUMBER
-    for row in "${KERNEL[@]}"; do
+    for row in ${KERNEL[@]+"${KERNEL[@]}"}; do
         IFS='|' read -r net gw mt dev attrs <<< "$row"
         [[ $dev != lo ]] || continue
         network "$net"
@@ -266,7 +267,7 @@ discover_front_table_gateway() {
     # intentionally not consulted: they may be empty or stale on never-default
     # interfaces. A route's protocol/attributes do not change its next-hop.
     local row net gw metric dev attrs required=false
-    for net in "${CLIENTS[@]}"; do
+    for net in ${CLIENTS[@]+"${CLIENTS[@]}"}; do
         network "$net"
         connected_range "$LOW" "$HIGH"
         if ! $DIRECTLY; then required=true; break; fi
@@ -387,7 +388,7 @@ observe() {
         done
         $usable || die 'FRONT gateway is not a usable on-link address'
     fi
-    OBSERVED_PROFILE=$(rows "${PROFILE[@]}") || die 'Persistent route normalization failed'
+    OBSERVED_PROFILE=$(rows ${PROFILE[@]+"${PROFILE[@]}"}) || die 'Persistent route normalization failed'
     OBSERVED_KERNEL=$(rows "${KERNEL[@]}") || die 'Kernel route normalization failed'
 }
 coverage() {
@@ -396,8 +397,8 @@ coverage() {
     local store=$1 target=$2 tlo=$3 thi=$4 tp=$5 row net gw mt device attrs lo hi prefix acceptable
     COVERED=false COVER_METRIC='' EXACT_COUNT=0
     local -a selected=()
-    if [[ $store == P ]]; then selected=("${PROFILE[@]}"); else selected=("${KERNEL[@]}"); fi
-    for row in "${selected[@]}"; do
+    if [[ $store == P ]]; then selected=(${PROFILE[@]+"${PROFILE[@]}"}); else selected=("${KERNEL[@]}"); fi
+    for row in ${selected[@]+"${selected[@]}"}; do
         if [[ $store == P ]]; then IFS='|' read -r net gw mt attrs <<< "$row"; device=$DEVICE;
         else IFS='|' read -r net gw mt device attrs <<< "$row"; fi
         network "$net"; lo=$LOW hi=$HIGH prefix=$PREFIX
@@ -427,7 +428,7 @@ collapse_clients() {
     local -a input=() lows=() highs=() prefixes=()
     local -A authorized_rows=()
     WANTED=()
-    for client in "${CLIENTS[@]}"; do
+    for client in ${CLIENTS[@]+"${CLIENTS[@]}"}; do
         network "$client"
         [[ $client != */* || $client == "$CIDR" ]] || die "Noncanonical client subnet: $client"
         (( PREFIX > 0 )) || die 'A client default route is forbidden'
@@ -457,7 +458,7 @@ collapse_clients() {
             else break; fi
         done
     done <<< "$sorted"
-    for row in "${input[@]}"; do
+    for row in ${input[@]+"${input[@]}"}; do
         [[ ${authorized_rows[$row]} == 1 ]] || die 'Client normalization omitted an authorized subnet; no routes changed'
     done
     for ((last=0;last<${#lows[@]};last++)); do
@@ -468,12 +469,12 @@ build_plan() {
     local client target lo hi prefix range probe directly=false
     OPS=()
     PROTECTED+=("$BACK/32" "$ADM/32" "0.0.0.0/8" "127.0.0.0/8" "169.254.0.0/16" "224.0.0.0/4" "240.0.0.0/4")
-    for range in "${PEERS[@]}"; do PROTECTED+=("$range/32"); done
+    for range in ${PEERS[@]+"${PEERS[@]}"}; do PROTECTED+=("$range/32"); done
     normalize_ssh
     [[ -z $SSH_IPV4 ]] || PROTECTED+=("$SSH_IPV4/32")
     declare -A destinations=()
     collapse_clients
-    for client in "${WANTED[@]}"; do
+    for client in ${WANTED[@]+"${WANTED[@]}"}; do
         network "$client"; target=$CIDR lo=$LOW hi=$HIGH prefix=$PREFIX
         (( prefix > 0 )) || die 'A client default route is forbidden'
         # collapse_clients accepts only authorized canonical rows and merges
@@ -552,7 +553,7 @@ check_path() {
 verify() {
     local before_p=$BASE_PROFILE before_r=$BASE_KERNEL op store net gw mt expected_p expected_r
     expected_p=$before_p; expected_r=$before_r
-    for op in "${OPS[@]}"; do
+    for op in ${OPS[@]+"${OPS[@]}"}; do
         IFS='|' read -r store net gw mt <<< "$op"
         if [[ $store == P ]]; then expected_p+=$'\n'"$net|$gw|$mt|";
         else expected_r+=$'\n'"$net|$gw|$mt|$BASE_DEVICE|"; fi
@@ -570,7 +571,7 @@ verify() {
     [[ ${1:-true} == true ]] || return 0
     [[ $GATEWAY == "$BASE_GATEWAY" ]] || die 'FRONT gateway changed during operation'
     local client lo hi prefix
-    for client in "${CLIENTS[@]}"; do
+    for client in ${CLIENTS[@]+"${CLIENTS[@]}"}; do
         network "$client"; lo=$LOW hi=$HIGH prefix=$PREFIX
         ip_string "$(( prefix < 31 ? lo+1 : lo ))"; local probe=$REPLY
         connected_range "$lo" "$hi"
@@ -771,7 +772,7 @@ rollback() {
         # A predecessor could acknowledge only its persistent add before the
         # first runtime add. Exact stores above establish its unchanged kernel
         # baseline. Without an observed gateway, authorize only inverse P writes.
-        for op in "${owned[@]}"; do
+        for op in ${owned[@]+"${owned[@]}"}; do
             [[ $op == P'|'* ]] || die 'Unavailable FRONT gateway cannot authorize runtime rollback; journal preserved'
         done
     fi
@@ -867,7 +868,7 @@ done
 [[ $ACTION =~ ^(plan|apply|verify|commit|rollback|recover)$ ]] || die 'Unsupported route action'
 readonly ACTION
 for required in ip nmcli flock timeout stat mktemp sync sha256sum sort tr wc sed cat head chmod mv rm rmdir mkdir; do
-    command -v "$required" >/dev/null 2>&1 || die "Missing native prerequisite: $required; install the corresponding EL8 system package before retrying"
+    command -v "$required" >/dev/null 2>&1 || die "Missing native prerequisite: $required; install the corresponding RHEL system package before retrying"
 done
 secure_dir "$STATE"
 # Existence is never ownership. Kernel flock is released when the process exits.
@@ -900,13 +901,13 @@ fi
 [[ ! -e $PENDING && ! -L $PENDING ]] || die 'Pending FRONT journal: inspect it, then use routes-recover; it is not a stale process lock'
 ip_number "$FRONT"; ip_number "$BACK"; ip_number "$ADM"
 [[ $FRONT != "$BACK" && $FRONT != "$ADM" && $BACK != "$ADM" ]] || die 'FRONT/BACK/ADM addresses must differ'
-for peer in "${PEERS[@]}"; do ip_number "$peer"; done
+for peer in ${PEERS[@]+"${PEERS[@]}"}; do ip_number "$peer"; done
 if ! uint "$METRIC" || (( METRIC == 0 )); then die 'Metric must be an integer from 1 to 4294967295'; fi
 (( ${#CLIENTS[@]} <= 512 )) || die 'At most 512 client destinations per operation'
 observe
 build_plan
 printf 'FRONT device=%s profile=%s gateway=%s additions=%s\n' "$DEVICE" "$UUID" "${GATEWAY:-none}" "${#OPS[@]}"
-for op in "${OPS[@]}"; do printf '  %s\n' "$op"; done
+for op in ${OPS[@]+"${OPS[@]}"}; do printf '  %s\n' "$op"; done
 if [[ $ACTION == plan ]]; then (( ${#OPS[@]} == 0 )) && exit 0; changed_result; fi
 (( ${#OPS[@]} )) || { BASE_PROFILE=$OBSERVED_PROFILE BASE_KERNEL=$OBSERVED_KERNEL BASE_UUID=$UUID BASE_DEVICE=$DEVICE BASE_GATEWAY=$GATEWAY BASE_ADDRESSES=$ADDRESS_IDENTITY BASE_RULES=$RULES_TEXT; verify; exit 0; }
 BASE_PROFILE=$OBSERVED_PROFILE BASE_KERNEL=$OBSERVED_KERNEL BASE_UUID=$UUID BASE_DEVICE=$DEVICE BASE_GATEWAY=$GATEWAY BASE_ADDRESSES=$ADDRESS_IDENTITY BASE_RULES=$RULES_TEXT

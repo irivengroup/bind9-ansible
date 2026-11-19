@@ -9,6 +9,7 @@ import yaml
 pytest.importorskip('ansible')
 from route_task_expressions import TaskExpressions
 from test_ansible_canonical_predicates import CanonicalPredicates
+from test_dns_network import ipv4_text
 
 ROOT = Path(__file__).resolve().parents[1]
 TASKS = TaskExpressions.load('deploy/firewall.yml')
@@ -46,7 +47,7 @@ class TestDnsFirewall:
         else:
             interfaces.append({'ifname': 'back0', 'addr_info': [{'local': '10.0.0.10'}]})
         scope = {'bind_front_ip': '192.0.2.10', 'bind_back_ip': '10.0.0.10',
-                 'bind_dns_firewall_addresses': {'stdout': json.dumps(interfaces)}}
+                 'bind_dns_firewall_addresses': {'stdout': ipv4_text(interfaces)}}
         evaluator = TaskExpressions(scope)
         self.run_tasks(evaluator, TASKS[2:6])
         found = evaluator.variables['bind_dns_firewall_listener_addresses']
@@ -112,11 +113,11 @@ def test_native_firewall_state_guard_requires_status_and_output_to_agree(rc, std
         {'bind_dns_firewall_state': {'rc': rc, 'stdout': stdout}}, failed, 'failed_when')
 
 
-@pytest.mark.parametrize('output,accepted', [('[]', True), ('null', False), ('{}', False),
-                                          ('"scalar"', False), ('false', False), ('', False)])
-def test_native_firewall_address_contract_refuses_malformed_observation_types(output, accepted):
-    CanonicalPredicates('deploy/firewall.yml').check('Require nonempty IPv4 interface observations',
-        {'bind_dns_firewall_addresses': {'stdout': output}}, accepted)
+@pytest.mark.parametrize('output', ['[]', 'null', '{}', '"scalar"', 'false', '',
+                                  '2: eth0 inet 192.0.2.1/24 scope global eth0\ninvalid'])
+def test_native_firewall_address_contract_refuses_malformed_observation_types(output):
+    with pytest.raises(ValueError):
+        TaskExpressions({'bind_dns_firewall_addresses': {'stdout': output}}).run('', tasks=[TASKS[2]])
 
 
 @pytest.mark.parametrize('output,accepted', [('public', True), (' dns_front-1\n', True),

@@ -156,10 +156,10 @@ jobs:
             https://ftp.gnu.org/gnu/bash/bash-5.2.37.tar.gz -o "$GNU_SOURCE/bash-5.2.37.tar.gz"
           printf '%s  %s\n' 9599b22ecd1d5787ad7d3b7bf0c59f312b3396d1e281175dd1f8a4014da621ff \
             "$GNU_SOURCE/bash-5.2.37.tar.gz" | sha256sum --check --strict -
-      - name: Build the controller and the two isolated native-checker images
+      - name: Build the controller and the isolated native compatibility images
         run: |
           set -euo pipefail
-          for target in controller native-checker native-public; do
+          for target in controller native-checker native-public native-bash42; do
             docker build --progress plain --target "$target" \
               --build-context "gnu-bash=$RUNNER_TEMP/bind9-gnu-source" \
               -f tools/quality/Dockerfile.qa -t "bind9-private-qa:$target" .
@@ -198,10 +198,41 @@ jobs:
               fi
               unshare --mount --propagation private /bin/true
             '
-      - name: Execute every collected test and merge all native cohorts before checking thresholds
+      - name: Exercise routes and archives with the native EL7 Bash
         run: |
           set -euo pipefail
           mkdir -m 0700 "$RUNNER_TEMP/bind9-five-metrics"
+          docker run --rm --network none --cap-add SYS_ADMIN \
+            --security-opt no-new-privileges=true --env LIBMOUNT_FORCE_MOUNT2 \
+            --security-opt apparmor=bind9-qa-native --security-opt seccomp=unconfined \
+            -e BIND9_NATIVE_STATE_LAB=1 -e BIND9_CANONICAL_BASH_LAB=1 \
+            -e BIND_TEST_REQUIRE_MOUNT_NS=1 \
+            --mount "type=bind,src=$PWD,dst=/snapshot,readonly" \
+            --mount "type=bind,src=$RUNNER_TEMP/bind9-five-metrics,dst=/evidence" \
+            --entrypoint /bin/bash bind9-private-qa:native-bash42 -euc '
+              test "$BASH_VERSION" = "4.2.46(2)-release"
+              test "$(cat /proc/self/attr/current)" = "bind9-qa-native (enforce)"
+              grep -Eq "^NoNewPrivs:[[:space:]]+1$" /proc/self/status
+              test -z "$(find /src -mindepth 1 -maxdepth 1 -print -quit)"
+              cp -a /snapshot/. /src/
+              mount --bind /src /src
+              mount -o remount,bind,ro /src
+              python -c "import os; assert os.statvfs(\"/src\").f_flag & os.ST_RDONLY"
+              cd /src
+              python -m pytest -q --junitxml=/evidence/el7-bash42.xml \
+                tests/test_native_archive_cli.py tests/test_front_routes_ansible.py \
+                tests/test_front_kernel_gateway.py tests/test_archive_hardening.py
+              python - <<"PY"
+          import xml.etree.ElementTree as ET
+          cases = list(ET.parse('/evidence/el7-bash42.xml').getroot().iter('testcase'))
+          assert cases and all(case.find(tag) is None for case in cases
+                               for tag in ('failure', 'error', 'skipped'))
+          PY
+            '
+      - name: Execute every collected test and merge all native cohorts before checking thresholds
+        run: |
+          set -euo pipefail
+          test -d "$RUNNER_TEMP/bind9-five-metrics"
           campaign_step() {
             local image=$1 phase=$2 cohort=${3-} batch_size=${4-32}
             local -a native_environment=()

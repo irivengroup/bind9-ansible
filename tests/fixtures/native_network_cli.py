@@ -34,7 +34,7 @@ class NativeNetworkDouble:
         return '00000000-0000-4000-8000-{:012x}'.format(sequence)
 
     def ip(self, args):
-        if args == ['-o', '-4', 'address', 'show', 'up']:
+        if args in (['-o', '-4', 'address', 'show', 'up'], ['-o', '-4', 'address', 'show']):
             # Test a genuine context change between planning and publication,
             # without rewriting the role or intercepting its internal guards.
             drift = self.state.get('front_observation_update')
@@ -54,7 +54,7 @@ class NativeNetworkDouble:
             return '\n'.join(str(index + 1) + ': ' + row['ifname'] + ' inet ' + address['local'] +
                              '/' + str(address['prefixlen']) + ' scope global ' + row['ifname']
                              for index, row in enumerate(self.state['addresses'])
-                             if row.get('operstate') in ('UP', 'UNKNOWN')
+                             if args[-1] != 'up' or row.get('operstate') in ('UP', 'UNKNOWN')
                              for address in row['addr_info'] if address.get('family') == 'inet')
         if args[:4] == ['-o', 'link', 'show', 'dev'] and len(args) == 5:
             matches = [row for row in self.state['addresses'] if row['ifname'] == args[4]]

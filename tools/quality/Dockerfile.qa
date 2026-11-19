@@ -55,5 +55,13 @@ FROM native-checker AS native-public
 RUN test ! -e /usr/sbin/named-checkconf \
     && ln -s /usr/bin/named-checkconf /usr/sbin/named-checkconf
 
+# Keep the EL7 interpreter regression executable in CI without installing it
+# on the controller host or any managed DNS server.
+FROM centos@sha256:be65f488b7764ad3638f236b7b515b3678369a5124c47b8d32916d6487418ea4 AS el7-bash
+FROM controller AS native-bash42
+COPY --from=el7-bash /bin/bash /bin/bash
+COPY --from=el7-bash /usr/lib64/libtinfo.so.5.9 /usr/lib/x86_64-linux-gnu/libtinfo.so.5
+RUN /bin/bash -c 'test "$BASH_VERSION" = "4.2.46(2)-release"'
+
 # Preserve the original default build/runtime contract.
 FROM controller AS default

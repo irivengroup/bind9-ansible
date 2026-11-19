@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# The guarded array expansions preserve zero arguments on EL7 Bash 4.2.
 umask 077
 export LC_ALL=C
 # BEGIN ARCHIVE SAFETY HELPERS
@@ -204,7 +205,7 @@ shopt -s nullglob
 archives=("$root"/named-config-????????T??????Z-????????.tar.gz)
 # Lexicographic order matches UTC timestamps.
 # Check the producer before accepting a complete, possibly empty catalog.
-catalog=$(printf '%s\n' "${archives[@]}" | sed '/^$/d' | sort -r) || { echo 'Archive catalog read failed' >&2; exit 1; }
+catalog=$(printf '%s\n' ${archives[@]+"${archives[@]}"} | sed '/^$/d' | sort -r) || { echo 'Archive catalog read failed' >&2; exit 1; }
 sorted=()
 if [[ -n $catalog ]]; then mapfile -t sorted <<< "$catalog"; fi
 verify() {
@@ -344,10 +345,11 @@ native_package_link() {
 
 safe_sources() {
   # Reject unsafe extraction destinations as well as unsafe backup sources.
-  local -n exclusions=$1
-  local item unsafe link target_dir prefix=${2:-}
+  # Both callers own checked_exclusions in their dynamic scope. This preserves
+  # array elements exactly on the Bash 4.2 supplied by EL7.
+  local item unsafe link target_dir prefix=${1:-}
   local -a ignored=()
-  exclusions=()
+  checked_exclusions=()
   for item in /etc/named.conf /etc/named /var/named; do
     item=$prefix$item
     [[ ! -L $item ]] || { echo "Refusing source/destination symlink: $item" >&2; return 1; }
@@ -366,12 +368,12 @@ safe_sources() {
         [[ $link != /var/named/named.ca ]] || target_dir=/etc
         native_package_link "$link" "$target_dir" || { echo "Unsafe native BIND package link: $link" >&2; return 1; }
         ignored+=('!' -path "$link")
-        exclusions+=("--exclude=${link#/}")
+        checked_exclusions+=("--exclude=${link#/}")
       done
     fi
     unsafe=$(find "$item" -type f -links +1 -print -quit) || return 1
     [[ -z $unsafe ]] || { echo 'Hardlinked BIND source/destination file' >&2; return 1; }
-    unsafe=$(find "$item" ! -type f ! -type d "${ignored[@]}" -print -quit) || return 1
+    unsafe=$(find "$item" ! -type f ! -type d ${ignored[@]+"${ignored[@]}"} -print -quit) || return 1
     [[ -z $unsafe ]] || { echo 'Special BIND source/destination object' >&2; return 1; }
   done
 }
@@ -389,8 +391,9 @@ restore_labels() {
 # for compatibility but no longer changes the backup frequency.
 backup() {
   local stamp target partial item cutoff timestamp epoch catalog target_name checksum checksum_partial index cleanup_failed
-  local -a vendor_exclusions=()
-  safe_sources vendor_exclusions
+  local -a vendor_exclusions=() checked_exclusions=()
+  safe_sources
+  vendor_exclusions=(${checked_exclusions[@]+"${checked_exclusions[@]}"})
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   target="$root/named-config-$stamp-$(od -An -N4 -tx1 /dev/urandom | tr -d " \n").tar.gz"
   [[ ! -e $target && ! -L $target && ! -e $target.sha256 && ! -L $target.sha256 ]] || {
@@ -404,7 +407,7 @@ backup() {
   for item in etc/named.conf etc/named var/named; do [[ ! -e /$item ]] || members+=("$item"); done
   if ((${#members[@]})); then
     tar --create --gzip --acls --xattrs --selinux --numeric-owner --file "$partial" --directory / \
-      --anchored --no-wildcards "${vendor_exclusions[@]}" -- "${members[@]}" || { rm -f -- "$partial"; return 1; }
+      --anchored --no-wildcards ${vendor_exclusions[@]+"${vendor_exclusions[@]}"} -- "${members[@]}" || { rm -f -- "$partial"; return 1; }
   else
     tar --create --gzip --file "$partial" --files-from /dev/null || { rm -f -- "$partial"; return 1; }
   fi
@@ -472,9 +475,10 @@ restore() {
   # Staged checks share scratch space without changing the live exclusions.
   local -a vendor_exclusions=() checked_exclusions=()
   verify "$target"
-  safe_sources vendor_exclusions
+  safe_sources
+  vendor_exclusions=(${checked_exclusions[@]+"${checked_exclusions[@]}"})
   restore_sources_unchanged() {
-    safe_sources checked_exclusions && [[ "${checked_exclusions[*]}" == "${vendor_exclusions[*]}" ]]
+    safe_sources && [[ "${checked_exclusions[*]-}" == "${vendor_exclusions[*]-}" ]]
   }
   local service_state service_rc=0
   service_state=$(systemctl is-active named) || service_rc=$?
@@ -496,16 +500,18 @@ restore() {
   stage=$work/tree
   if ! mkdir -m 0700 -- "$stage" ||
      ! timeout --kill-after=5 60 tar --extract --ignore-zeros --gzip --acls --xattrs --selinux --numeric-owner --same-owner \
-         --anchored --no-wildcards "${vendor_exclusions[@]}" -f "$target" -C "$stage" ||
-     ! safe_sources checked_exclusions "$stage"; then
+         --anchored --no-wildcards ${vendor_exclusions[@]+"${vendor_exclusions[@]}"} -f "$target" -C "$stage" ||
+     ! safe_sources "$stage"; then
     echo "Restore preparation failed; private evidence retained: $work" >&2; return 1
   fi
   if ! (ulimit -f 32768; timeout --kill-after=5 60 find "$stage" -mindepth 1 -depth -print0) >"$work/paths"; then
     echo "Restore footprint read failed; private evidence retained: $work" >&2; return 1
   fi
-  mapfile -d '' -t staged_paths < "$work/paths"
+  while IFS= read -r -d '' entry; do
+    staged_paths+=("$entry")
+  done < "$work/paths"
   (( ${#staged_paths[@]} <= 65538 )) || { echo "Restore footprint exceeds its member budget: $work" >&2; return 1; }
-  for entry in "${staged_paths[@]}"; do
+  for entry in ${staged_paths[@]+"${staged_paths[@]}"}; do
     item=${entry#"$stage/"}
     case $item in
       etc|var) continue ;;
@@ -529,7 +535,7 @@ restore() {
   for item in etc/named.conf etc/named var/named; do [[ ! -e /$item ]] || members+=("$item"); done
   if ((${#members[@]})); then
     tar --create --gzip --acls --xattrs --selinux --numeric-owner \
-      --anchored --no-wildcards "${vendor_exclusions[@]}" -f "$safety" -C / -- "${members[@]}" || { rm -f -- "$safety"; return 1; }
+      --anchored --no-wildcards ${vendor_exclusions[@]+"${vendor_exclusions[@]}"} -f "$safety" -C / -- "${members[@]}" || { rm -f -- "$safety"; return 1; }
   else
     tar -czf "$safety" -T /dev/null
   fi
@@ -551,7 +557,7 @@ restore() {
       [[ -f "$existing" && ! -L "$existing" ]] || continue
       relative=${existing#/}
       preserved=false
-      for item in "${archived_files[@]}"; do
+      for item in ${archived_files[@]+"${archived_files[@]}"}; do
         if [[ $item == "$relative" ]]; then preserved=true; break; fi
       done
       if [[ $preserved == false ]]; then
@@ -570,7 +576,7 @@ restore() {
       fi
     done
     tar --extract --ignore-zeros --gzip --acls --xattrs --selinux --numeric-owner --same-owner \
-      --anchored --no-wildcards "${vendor_exclusions[@]}" -f "$target" -C / || return 1
+      --anchored --no-wildcards ${vendor_exclusions[@]+"${vendor_exclusions[@]}"} -f "$target" -C / || return 1
     named-checkconf -z /etc/named.conf || return 1
     restore_labels || return 1
   }
@@ -634,7 +640,7 @@ restore() {
     echo 'Restore failed; recovering pre-restore safety archive' >&2
     if ! restore_sources_unchanged ||
        ! tar --extract --ignore-zeros --gzip --acls --xattrs --selinux --numeric-owner --same-owner \
-         --anchored --no-wildcards "${vendor_exclusions[@]}" -f "$safety" -C / ||
+         --anchored --no-wildcards ${vendor_exclusions[@]+"${vendor_exclusions[@]}"} -f "$safety" -C / ||
        ! remove_introduced_paths ||
        ! named-checkconf -z /etc/named.conf || ! restore_labels; then
       echo "Safety recovery incomplete; preserved private archive: $safety; restore evidence: $work" >&2
@@ -650,7 +656,7 @@ restore() {
 if [[ $action == backup ]]; then
   backup
 elif [[ $action == list ]]; then
-  for item in "${sorted[@]}"; do verify "$item"; basename "$item"; done
+  for item in ${sorted[@]+"${sorted[@]}"}; do verify "$item"; basename "$item"; done
 else
   restore
 fi

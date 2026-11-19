@@ -76,9 +76,12 @@ def management(tmp_path):
     ('option', dict(name='minimal-responses')), ('zone', dict(name='example.test')),
     ('record', dict(name='www', zone='example.test', type='A'))])
 @pytest.mark.parametrize('show', [False, True])
-def test_native_management_reads_canonical_module_and_keeps_default_callback_censored(management, resource, fields, show):
+@pytest.mark.parametrize('major', ['7', '8', '9', '10'])
+def test_native_management_reads_canonical_module_and_keeps_default_callback_censored(management, resource, fields, show, major):
     status, result, calls = management.run(dict(resource=resource, action='read', **fields),
-        bind_manage_show_values=show, checks=['not bind_management_result.changed',
+        bind_manage_show_values=show, ansible_distribution_major_version=major,
+        ansible_python_version='2.7.5' if major == '7' else '3.6.8',
+        checks=['not bind_management_result.changed',
             'bind_management_result.checksum | length == 64', 'bind_management_result.found'])
     assert status == 0 and not result.failed and not calls
     assert 'Run the private management transaction' in result.ok

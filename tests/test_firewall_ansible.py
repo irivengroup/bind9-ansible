@@ -21,8 +21,10 @@ name, args = pathlib.Path(sys.argv[0]).name, sys.argv[1:]
 state['calls'].append([name] + args)
 rc = 0
 if name == 'ip':
-    assert args == ['-j', '-4', 'address', 'show'], args
-    print('' if state['scenario'] == 'empty_addresses' else json.dumps(state['addresses']))
+    assert args == ['-o', '-4', 'address', 'show'], args
+    print('' if state['scenario'] == 'empty_addresses' else '\\n'.join(
+        '{}: {} inet {}/24 scope global {}'.format(index, row['ifname'], address['local'], row['ifname'])
+        for index, row in enumerate(state['addresses'], 1) for address in row['addr_info']))
 elif args == ['--state']:
     print('not running' if state['scenario'] == 'inactive' else 'running')
     rc = 252 if state['scenario'] == 'inactive' else 0
@@ -103,6 +105,7 @@ class FirewallRunner:
         playbook.write_text(yaml.safe_dump(plays, sort_keys=False))
         environment = dict(os.environ, PATH=str(binaries) + os.pathsep + os.environ['PATH'],
                            BIND_FIREWALL_TEST_STATE=str(path), ANSIBLE_CONFIG=str(ROOT / 'ansible.cfg'),
+                           ANSIBLE_FILTER_PLUGINS=str(ROOT / 'roles/bind9/filter_plugins'),
                            ANSIBLE_JINJA2_NATIVE=str(native).lower())
         result = self.execute(playbook, environment)
         after = json.loads(path.read_text())

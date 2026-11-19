@@ -6,6 +6,33 @@ import re
 class DnsNetwork:
     """Select exactly one IPv4 per listening interface and compare peer roles."""
 
+    IPV4_ROW = re.compile(
+        r'[1-9][0-9]*: ([A-Za-z0-9_.:-]{1,15})(?:@[A-Za-z0-9_.:-]+)? +inet '
+        r'([0-9.]+/[0-9]{1,2}) (?:.* )?scope (global|host|link)(?: .*)?', re.ASCII)
+
+    @classmethod
+    def ipv4_links(cls, output):
+        """Parse native ip -o output, shared by EL7 and newer iproute releases.
+
+        Keep secondary addresses and duplicate records visible to the existing
+        ownership checks. A malformed row fails the whole observation.
+        """
+        if not isinstance(output, str):
+            raise ValueError('Expected native IPv4 address text')
+        links = {}
+        for line in output.splitlines():
+            match = cls.IPV4_ROW.fullmatch(line)
+            if match is None:
+                raise ValueError('Malformed native IPv4 address record')
+            device, cidr, scope = match.groups()
+            address = ipaddress.IPv4Interface(cidr)
+            if str(address) != cidr:
+                raise ValueError('Noncanonical native IPv4 address record')
+            link = links.setdefault(device, {'ifname': device, 'addr_info': []})
+            link['addr_info'].append({'family': 'inet', 'local': str(address.ip),
+                                      'prefixlen': address.network.prefixlen, 'scope': scope})
+        return list(links.values())
+
     @staticmethod
     def requires_discovery(front, back, selected_interfaces, explicit_admin):
         """Keep the legacy explicit FRONT/BACK management path compatible."""
@@ -111,7 +138,7 @@ class FilterModule:
 
     def filters(self):
         return {'dns_network_resolve': self.resolve, 'dns_network_peer_valid': DnsNetwork.validate_pair,
-                'dns_network_required': DnsNetwork.requires_discovery}
+                'dns_network_required': DnsNetwork.requires_discovery, 'dns_ipv4_links': DnsNetwork.ipv4_links}
 
     @staticmethod
     def resolve(links, selection, front, back, admin):

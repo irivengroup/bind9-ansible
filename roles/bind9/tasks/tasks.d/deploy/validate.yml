@@ -26,7 +26,7 @@
   ansible.builtin.assert:
     that:
       - ansible_distribution == 'RedHat'
-      - (ansible_distribution_major_version | int) >= 8
+      - (ansible_distribution_major_version | int) >= 7
       - ((bind_primary_group in group_names) | int) + ((bind_secondary_group in group_names) | int) == 1
       - bind_front_ip is defined
       - bind_back_ip is defined
@@ -48,7 +48,7 @@
       - hostvars[bind_primary_host].bind_back_ip | valid_ip_address
       - hostvars[bind_secondary_host].bind_back_ip | valid_ip_address
       - (bind_forward_zones | map(attribute='domain') | list | unique | length) == (bind_forward_zones | length)
-    fail_msg: 'Invalid RHEL 8+ BIND settings, zone overlap or TSIG secret.'
+    fail_msg: 'Invalid RHEL 7+ BIND settings, zone overlap or TSIG secret.'
   no_log: true
 - name: Validate configured peer identity
   ansible.builtin.assert:

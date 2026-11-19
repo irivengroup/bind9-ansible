@@ -1,8 +1,20 @@
 ---
+- name: Select the Python runtime required by the native package manager
+  # EL7 yum bindings belong to its system Python 2 even when facts use Python 3.
+  ansible.builtin.set_fact:
+    _bind_package_python: >-
+      {{ '/usr/bin/python2' if (ansible_distribution_major_version | default('8') | int) == 7
+         else ansible_python_interpreter | default('auto') }}
+
 - name: Install BIND and SELinux tooling
-  ansible.builtin.dnf:
+  # The native package manager is yum on EL7 and dnf on newer releases.
+  vars:
+    ansible_python_interpreter: '{{ _bind_package_python }}'
+  ansible.builtin.package:
+    use: '{{ "yum" if (ansible_distribution_major_version | default("8") | int) == 7 else "dnf" }}'
     name:
       - bind
       - bind-utils
-      - policycoreutils-python-utils
+      - python3
+      - '{{ "policycoreutils-python" if (ansible_distribution_major_version | default("8") | int) == 7 else "policycoreutils-python-utils" }}'
     state: present

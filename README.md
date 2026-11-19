@@ -2,7 +2,7 @@
 
 > Déployer et exploiter une paire de serveurs DNS BIND 9 par site : zones privées autoritatives, forwarding conditionnel, réplication authentifiée et contrôles de santé.
 
-**Déploiement :** `playbooks/bind9-deploy.yml` · **Gestion ciblée :** `playbooks/bind9-management.yml` · **Rôle :** `roles/bind9` · **Cible de référence :** RHEL 8, Ansible 2.9 et Python cible 3.6.8.
+**Déploiement :** `playbooks/bind9-deploy.yml` · **Gestion ciblée :** `playbooks/bind9-management.yml` · **Rôle :** `roles/bind9` · **Cibles acceptées :** RHEL de version majeure ≥ 7, avec Python cible ≥ 3.6 pour les outils de gestion et DNSSEC.
 
 Le rôle produit une configuration unique `/etc/named.conf`, sans vues BIND. Il conserve les zones localhost officielles, écoute le DNS sur loopback et les interfaces IPv4 sélectionnées, et conserve les capacités IPv4/IPv6 sortantes. Les noms hors des zones déclarées reçoivent une réponse NXDOMAIN par la racine privée. La validation DNSSEC est activée en mode `auto` par défaut. Les routes de retour FRONT et le moniteur périodique restent optionnels et désactivés par défaut.
 
@@ -41,9 +41,9 @@ Ce guide s’adresse aux équipes d’exploitation. Les commandes du contrôleur
 
 | Composant | Contrat et preuve disponible |
 |---|---|
-| OS cible | **Red Hat Enterprise Linux 8**. Déploiement système réel : **NON EXÉCUTÉ**. Le garde accepte `RedHat` de version majeure ≥ 8 ; cela ne qualifie pas les versions supérieures. Rocky Linux, AlmaLinux et Ubuntu sont refusés par ce garde. |
+| OS cible | **Red Hat Enterprise Linux de version majeure ≥ 7**, sans plafond de version dans les deux points d'entrée. Les prérequis natifs restent obligatoires. Les essais de compatibilité EL7 utilisent CentOS 7.9, Bash 4.2.46, BIND 9.11.4 et NetworkManager 1.18.8. Les distributions dérivées restent des laboratoires et conservent leur identité réelle. La qualification des serveurs de destination dépend des preuves de la livraison courante. |
 | Ansible minimal déclaré | **2.9**, dans les métadonnées du rôle. Version des contrôles locaux enregistrés : **2.9.27**. Les autres correctifs 2.9 n’ont pas tous été exécutés. |
-| Python requis sur les cibles | **3.6.8** dans le contexte retenu. Compilation, composants et transports locaux sur le véritable Python 3.6.8 EL8 : **EXÉCUTÉ**. Modules Ansible/DNF sur votre serveur : **NON EXÉCUTÉ**. |
+| Python requis sur les cibles | **3.6 ou supérieur** pour le module privé de management et les outils DNSSEC. Sur EL7, les facts et YUM peuvent utiliser Python 2.7, puis la transaction privée sélectionne `/usr/bin/python3`. Un interpréteur Python 3 explicitement choisi reste utilisé. Les bindings requis par le gestionnaire natif doivent être disponibles. |
 | Contrôleurs de cette passe | QA courant en cours de vérification : Linux, Python **3.11.15**, Ansible Core **2.16.19**, Jinja2 **3.1.6**, pytest **9.0.3**. Les mesures historiques Core **2.16.14** restent identifiées avec leur environnement d’origine. Compatibilité des changements et matrice DNS native : Python **3.6.8**, Ansible **2.9.27**, Jinja2 **2.10.3**. L’observateur QA exige Python 3.11 ; il n’est pas déployé sur les cibles. |
 | BIND de laboratoire de la livraison source | **9.11.36-16.el8_10.16**, paquets EL8 installés dans un conteneur Rocky Linux 8.9 avec paquets EL8.10. Ce n’est pas une recette système RHEL. Les essais BIND 9.18.24 restent historiques. |
 | NetworkManager de laboratoire de la livraison source | **1.40.16-21.el8_10**, moteur natif et noyau Linux dans un espace réseau jetable, avec route par défaut BACK et passerelle propre à FRONT. La version de vos serveurs reste à recetter. |
@@ -86,16 +86,16 @@ Le rôle ne configure pas les adresses des interfaces, `/etc/resolv.conf`, le ro
 ### Serveurs cibles
 
 - `findutils`, `tar`, `gzip`, GNU coreutils et `util-linux` (`flock`) sont nécessaires aux opérations de sauvegarde/gestion. GNU coreutils, notamment `/usr/bin/sync`, est requis pour synchroniser les sauvegardes avant publication du management. Le contrôleur doit utiliser `ansible.cfg` livré (doublons YAML refusés). Voir [limites et compatibilité](docs/FIABILITE_DONNEES_ET_IO.md).
-- Python accessible à Ansible, DNF et ses bindings Python, systemd, dépôts RHEL accessibles. Le rôle installe **`bind`**, **`bind-utils`**, **`policycoreutils-python-utils`**.
+- Python accessible à Ansible, systemd et dépôts RHEL accessibles avec leurs paquets à jour. Le rôle utilise **YUM sur EL7**, **DNF à partir d'EL8**, et installe `bind`, `bind-utils`, `python3` et l'outillage SELinux natif (`policycoreutils-python` sur EL7, `policycoreutils-python-utils` sur EL8+). Les dépôts doivent fournir Python ≥ 3.6 sous `/usr/bin/python3`. RHEL 7.7 a introduit le paquet Python 3.6 dans les dépôts natifs. [Notes de version Red Hat 7.7](https://docs.redhat.com/en-us/documentation/red_hat_enterprise_linux/7/pdf/7.7_release_notes/Red_Hat_Enterprise_Linux-7-7.7_Release_Notes-en-US.pdf).
 - **Firewalld installé et déjà actif**, avec `firewall-cmd` et `ip` (`iproute`). Le rôle autorise DNS immédiatement et de façon permanente dans les zones existantes des interfaces d’écoute.
 - Adresses IPv4 DNS et SSH déjà configurées. Chaque adresse d’écoute doit apparaître une seule fois. Avec plusieurs adresses IPv4 sur une interface d’écoute, sélectionner l’adresse voulue explicitement.
-- Fichiers natifs présents : `/etc/named.rfc1912.zones`, `/var/named/named.localhost`, `/var/named/named.loopback`, `/var/named/named.empty`, `/etc/crypto-policies/back-ends/bind.config`. L’include de politique cryptographique doit résoudre vers un fichier régulier.
+- Fichiers natifs présents, `/etc/named.rfc1912.zones`, `/var/named/named.localhost`, `/var/named/named.loopback`, `/var/named/named.empty`. Sur EL8 et versions suivantes, `/etc/crypto-policies/back-ends/bind.config` doit aussi résoudre vers un fichier régulier. Sur EL7, BIND utilise sa politique native. La vérification de l'ancre DNSSEC reste obligatoire sur toutes les versions lorsque la validation est activée.
 - RNDC et `named-setup-rndc.service` natifs disponibles. Le rôle utilise ce générateur pour préparer `/etc/rndc.key` dans tous les modes DNSSEC.
 - Horloges synchronisées pour TSIG ; espace disque pour zones, archives et journaux.
 - **Routes FRONT activées seulement :** Bash, `iproute`, NetworkManager actif/`nmcli`, `util-linux` (`flock`), GNU coreutils et `sed`. Interface portant l’IP FRONT et UUID actif vérifiés ; prochain saut unique lu uniquement dans les routes IPv4 main de ce device, sans propriété de passerelle du profil. La route par défaut du système peut rester exclusivement sur BACK. FRONT/BACK/ADM doivent être distinctes ; table principale et trois règles standard, sans VRF ni politique personnalisée. Aucun `jq`, Python de routage ou dépendance Galaxy.
 - **DNSSEC activé seulement :** `/usr/bin/python3`, ancres officielles `/etc/named.root.key` à jour et accès aux données nécessaires à la validation. Le rôle ne remplace pas les ancres de distribution.
 
-`ansible.cfg` utilise la découverte `auto_silent`. Si nécessaire, définir `ansible_python_interpreter: /usr/bin/python3` dans l’inventaire après vérification de ce chemin et des bindings DNF. La contrainte Python 3.6.8 concerne le serveur, pas le contrôleur.
+`ansible.cfg` utilise la découverte `auto_silent`. Choisir un contrôleur Ansible compatible avec les runtimes de la cible, notamment Python 2.7 pour YUM EL7. Le module privé de management utilise Python 3.6+ même lorsque la collecte initiale des facts s'effectue avec Python 2.7. La découverte d'interfaces et le pare-feu partagent une lecture native `ip -o -4 address`, disponible sur EL7 et les versions suivantes.
 
 Les paquets sont demandés à l’état `present`, sans version figée dans le rôle. Pour reproduire une installation donnée, maîtriser les versions disponibles dans vos dépôts RHEL et conserver leur référence avec le dossier de changement.
 

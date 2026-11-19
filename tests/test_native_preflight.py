@@ -36,9 +36,11 @@ def run(hosts, groups):
 
 @pytest.mark.parametrize('secondary', [False, True])
 @pytest.mark.parametrize('populated', [False, True])
-def test_native_preflight_accepts_both_dns_roles_and_optional_empty_zone_lists(secondary, populated):
+@pytest.mark.parametrize('major', ['7', '8', '9', '10'])
+def test_native_preflight_accepts_both_dns_roles_and_optional_empty_zone_lists(secondary, populated, major):
     hosts, groups = scope()
     local = hosts['localhost']
+    local['ansible_distribution_major_version'] = major
     if secondary:
         groups = {'dns_primary': ['peer'], 'dns_secondary': ['localhost']}
         local.update(bind_primary_host='peer', bind_secondary_host='localhost')
@@ -78,7 +80,7 @@ def test_native_preflight_rejects_unsafe_literal_dns_identity(key, value):
 
 
 @pytest.mark.parametrize('key,value', [('ansible_distribution', 'Debian'),
-    ('ansible_distribution_major_version', '7'), ('bind_primary_host', 'unknown')])
+    ('ansible_distribution_major_version', '6'), ('bind_primary_host', 'unknown')])
 def test_native_preflight_rejects_unsupported_platform_or_peer(key, value):
     hosts, groups = scope()
     hosts['localhost'][key] = value
