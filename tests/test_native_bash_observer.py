@@ -368,7 +368,9 @@ name='roles/bind9/files/named-healthcheck.sh'
 profile,hits=NativeBashCollector.checked_pair(root,manifest,baseline,observed)[name]
 assert len(baseline['profiles'][name]['processes'])==len(observed['profiles'][name]['processes'])==1
 assert 'rows' not in baseline['profiles'][name]['processes'][0]
-assert {key:len(value)for key,value in hits.items()}==dict(statements=6,branches=1,functions=0,lines=3,conditions=1)
+assert {key:len(value)for key,value in hits.items()}==dict(statements=7,branches=1,functions=0,lines=4,conditions=1)
+assert ('6','4','d3627ff5abc8be01e02652b54042b165ec2c1b0978b849b55ad7958f73c0a29c') in hits['statements']
+assert 6 in hits['lines']
 print('independent baseline and partial native facts verified')
 '''
     result = subprocess.run([sys.executable, '-c', worker, str(ROOT), MANIFEST, str(tmp_path)],
@@ -413,14 +415,15 @@ assert len(front.units['functions'])==40 and len(hits['functions'])==2
 assert len(front.units['statements'])==1247 and len(front.units['lines'])==690
 assert hits['statements'] and hits['statements']<front.units['statements']
 assert hits['lines'] and hits['lines']<front.units['lines']
-assert len(front.units['branches'])==919 and len(front.units['conditions'])==902
+# EL7 empty-array guards remain real parameter choices in both inventories.
+assert len(front.units['branches'])==947 and len(front.units['conditions'])==930
 assert all(hits[key] and hits[key]<front.units[key]for key in ('branches','conditions'))
 tool,hits=profiles['roles/bind9/files/bind-configtool.sh']
 assert len(tool.units['functions'])==18 and len(hits['functions'])==1
-assert len(tool.units['statements'])==903 and len(tool.units['lines'])==432
+assert len(tool.units['statements'])==907 and len(tool.units['lines'])==435
 assert hits['statements'] and hits['statements']<tool.units['statements']
 assert hits['lines'] and hits['lines']<tool.units['lines']
-assert len(tool.units['branches'])==614 and len(tool.units['conditions'])==622
+assert len(tool.units['branches'])==644 and len(tool.units['conditions'])==652
 assert all(hits[key] and hits[key]<tool.units[key]for key in ('branches','conditions'))
 path,hits=profiles['roles/bind9/files/bind9-sbin-path.sh']
 assert {key:len(value)for key,value in path.units.items()}==dict(statements=3,branches=6,functions=0,lines=2,conditions=6)
@@ -565,11 +568,11 @@ def test_native_health_argument_refusal():
     assert len(good.runs) == 1 and not good.errors
     report = good.report()
     health = report['components']['roles/bind9/files/named-healthcheck.sh']['metrics']
-    assert (health['statements']['hit'], health['statements']['total']) == (6 if execute_health else 0, 71)
+    assert (health['statements']['hit'], health['statements']['total']) == (7 if execute_health else 0, 72)
     assert (health['functions']['hit'], health['functions']['total']) == (0, 3)
     assert report['accepted'] is False
-    for name, functions, statements, lines, branches, conditions in [('bind-front-routes.sh', 40, 1247, 690, 919, 902),
-                                               ('bind-configtool.sh', 18, 903, 432, 614, 622)]:
+    for name, functions, statements, lines, branches, conditions in [('bind-front-routes.sh', 40, 1247, 690, 947, 930),
+                                               ('bind-configtool.sh', 18, 907, 435, 644, 652)]:
         metrics = report['components']['roles/bind9/files/' + name]['metrics']
         assert metrics['functions']['hit'] == 0 and metrics['functions']['total'] == functions
         assert metrics['functions']['status'] == 'ÉCHOUÉ'

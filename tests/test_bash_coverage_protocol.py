@@ -169,8 +169,12 @@ def test_terminal_process_receipt_refuses_forged_incomplete_or_replayed_pairs(fa
 
 def test_native_health_profile_file_keeps_every_reviewed_unit_and_syntax_never_covers_execution():
     profile = NativeHealthProfile(ROOT)
+    # The EL7-compatible HOME isolation is an executable statement. Retain it
+    # in both denominators; parsing its declaration must still earn no hits.
     assert {name: len(units) for name, units in profile.units.items()} == {
-        'statements': 71, 'branches': 46, 'functions': 3, 'lines': 39, 'conditions': 44}
+        'statements': 72, 'branches': 46, 'functions': 3, 'lines': 40, 'conditions': 44}
+    assert (ROOT / profile.COMPONENT).read_text().splitlines()[5] == 'export HOME=/dev/null'
+    assert ('6', '4', 'd3627ff5abc8be01e02652b54042b165ec2c1b0978b849b55ad7958f73c0a29c') in profile.units['statements']
     assert all(not values for values in profile.check_process(static_rows(profile), 123, 0, syntax=True).values())
 
 
