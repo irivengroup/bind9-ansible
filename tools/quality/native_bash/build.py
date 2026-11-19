@@ -19,7 +19,7 @@ class NativeBashBuild:
     """Own a fresh private build directory and retain all failed build evidence."""
 
     ARCHIVE_SHA256 = '9599b22ecd1d5787ad7d3b7bf0c59f312b3396d1e281175dd1f8a4014da621ff'
-    PATCH_SHA256 = 'e116c5335671903d495c03d57af69b3318e2bd5a0a8cd3ea74afc6f9f28e857e'
+    PATCH_SHA256 = 'c39fb9354039d588b7bbc8e7ee5ec14c5779c04fc3e426408a7c595f541dc480'
     VERSION = '5.2.37(1)-release'
     CONFIGURE = ('--without-bash-malloc', '--disable-nls', '--disable-readline')
 

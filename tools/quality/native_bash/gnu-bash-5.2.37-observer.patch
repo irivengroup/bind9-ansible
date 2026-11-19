@@ -3535,7 +3535,7 @@
 +    "$directly", "$PARTIAL", "$COVERED", "$profile_covered", "$via",
 +    "$inverse", "$CHANGED_RESULT", "$MUTATING", "$PREPARED", "$DEFER"
 +  };
-+  if (strcmp(source_digest,"9325f406c3a87306db78ed6957da2b25844d04149d39c7723642ddbc5e8a9c61") ||
++  if (strcmp(source_digest,"ea9f507faf409996a33915908e7a18e8247d09d66b365b18e32398ffe2c396a1") ||
 +      command->type != cm_simple) return 0;
 +  words = command->value.Simple->words;
 +  if (!words || words->next) return 0;
@@ -3989,7 +3989,7 @@
 +static int qa_closed_traps(void)
 +{
 +  return qa_entries_mode &&
-+    (!strcmp(source_digest, "9325f406c3a87306db78ed6957da2b25844d04149d39c7723642ddbc5e8a9c61") ||
++    (!strcmp(source_digest, "ea9f507faf409996a33915908e7a18e8247d09d66b365b18e32398ffe2c396a1") ||
 +     !strcmp(source_digest, "92f2fbcafb6c61fbe97df9d6eb9b5d0b62c93a99c56d6c40ee3bd7c9e01d91f2"));
 +}
 +

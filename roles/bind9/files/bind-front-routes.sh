@@ -364,7 +364,8 @@ observe() {
     capture nmcli -g ipv4.route-table connection show uuid "$UUID"; TABLE=$REPLY
     [[ $TABLE == 0 || $TABLE == 254 ]] || die 'Only main-table FRONT profiles are supported'
     capture ip -o -4 rule show; RULES_TEXT=$REPLY
-    [[ $RULES_TEXT =~ ^0:[[:space:]]+from[[:space:]]all[[:space:]]lookup[[:space:]]local$'\n'32766:[[:space:]]+from[[:space:]]all[[:space:]]lookup[[:space:]]main$'\n'32767:[[:space:]]+from[[:space:]]all[[:space:]]lookup[[:space:]]default$ ]] || die 'Custom IPv4 policy rules require operator-managed routing'
+    # EL7 iproute pads lines; accept horizontal padding, never extra rules/selectors.
+    [[ $RULES_TEXT =~ ^0:[[:blank:]]+from[[:blank:]]all[[:blank:]]lookup[[:blank:]]local[[:blank:]]*$'\n'32766:[[:blank:]]+from[[:blank:]]all[[:blank:]]lookup[[:blank:]]main[[:blank:]]*$'\n'32767:[[:blank:]]+from[[:blank:]]all[[:blank:]]lookup[[:blank:]]default[[:blank:]]*$ ]] || die 'Custom IPv4 policy rules require operator-managed routing'
     capture ip -o -4 route show table main; KERNEL_TEXT=$REPLY
     [[ -n $KERNEL_TEXT ]] || die 'Empty main routing table observation; no route plan accepted'
     canonical_profile "$PROFILE_TEXT"
