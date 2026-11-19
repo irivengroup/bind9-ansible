@@ -101,9 +101,10 @@ class NativeCommand:
     @classmethod
     def run(cls, argv):
         # All callers select internal tools and supply argv, never shell source.
+        # /dev/null cannot contain personal BIND profiles, including EL7 .digrc.
         process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT, start_new_session=True,
-                                   close_fds=True, shell=False)  # nosec B603
+                                   close_fds=True, shell=False, env=dict(os.environ, HOME='/dev/null'))  # nosec B603
         deadline, result = time.monotonic() + cls.TIMEOUT, bytearray()
         try:
             with selectors.DefaultSelector() as selector:
@@ -1953,7 +1954,7 @@ class Manager:
             for name, kind, serial in probes:
                 attempts = 10 if serial == '*' and not self.context.get('primary') else 5
                 for attempt in range(attempts):
-                    output = self.runner(['/usr/bin/dig', '-r', '-4', '@127.0.0.1', '+tcp' if tcp else '+notcp',
+                    output = self.runner(['/usr/bin/dig', '-4', '@127.0.0.1', '+tcp' if tcp else '+notcp',
                                           '+time=2', '+tries=1', '+ignore', '+recurse' if serial is None else '+norecurse', '+noall', '+comments', '+answer', name, kind])
                     valid = DnsReply(output).matches(name, kind, serial)
                     if valid:

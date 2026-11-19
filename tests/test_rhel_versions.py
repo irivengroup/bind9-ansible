@@ -1,6 +1,12 @@
 """Exercise the real version gates, package choices and native template profiles."""
 
+import ast
+import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 
 from ansible.parsing.dataloader import DataLoader
 from ansible.template import Templar
@@ -14,6 +20,37 @@ from test_validation_guard_contracts import settings
 
 ROOT = Path(__file__).resolve().parents[1]
 TASKS = ROOT / 'roles/bind9/tasks/tasks.d'
+
+
+@pytest.mark.skipif(os.name != 'posix' or not shutil.which('bash'), reason='Requires native Bash argument serialization')
+def test_el7_workflow_report_check_survives_shell_argument_serialization(tmp_path):
+    """An outer shell quote must never remove Python literals in the CI check."""
+    workflow = yaml.safe_load((ROOT / '.github/workflows/ci.yml').read_text())
+    step = next(item for item in workflow['jobs']['five-metric-coverage']['steps']
+                if item.get('name') == 'Exercise routes and archives with the native EL7 Bash')
+    binaries = tmp_path / 'bin'
+    binaries.mkdir()
+    capture = tmp_path / 'arguments.json'
+    command = binaries / 'docker'
+    command.write_text('#!' + sys.executable + '\nimport json, os, sys\n'
+                       'with open(os.environ["ARGUMENT_CAPTURE"], "w") as stream:\n'
+                       '    json.dump(sys.argv[1:], stream)\n')
+    command.chmod(0o755)
+    runner = tmp_path / 'runner'
+    runner.mkdir()
+    result = subprocess.run(['bash', '-c', step['run']], cwd=str(ROOT),
+        env=dict(os.environ, PATH=str(binaries) + os.pathsep + os.environ['PATH'],
+                 RUNNER_TEMP=str(runner), ARGUMENT_CAPTURE=str(capture)),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    arguments = json.loads(capture.read_text())
+    assert arguments[-3:-1] == ['bind9-private-qa:native-bash42', '-euc']
+    payload = arguments[-1]
+    check = payload.split('python - <<"PY"\n', 1)[1].split('\nPY', 1)[0]
+    tree = ast.parse(check)
+    literals = [getattr(node, 'value', getattr(node, 's', None)) for node in ast.walk(tree)]
+    values = {value for value in literals if isinstance(value, str)}
+    assert {'/evidence/el7-bash42.xml', 'testcase', 'failure', 'error', 'skipped'} <= values
 
 
 @pytest.mark.parametrize('major', ['7', '8', '9', '10', '11', '99'])

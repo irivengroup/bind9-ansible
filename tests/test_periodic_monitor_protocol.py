@@ -31,11 +31,11 @@ def protocol(zones):
     for transport in ('+notcp', '+tcp'):
         for owner, kind, rdata in [('localhost', 'A', '127.0.0.1'),
                                    ('1.0.0.127.in-addr.arpa', 'PTR', 'localhost.')]:
-            put('loopback_' + transport + kind, ['dig', '-r', '-4', '-b', '127.0.0.1', '@127.0.0.1',
+            put('loopback_' + transport + kind, ['dig', '-4', '-b', '127.0.0.1', '@127.0.0.1',
                 transport, '+ignore', '+time=3', '+tries=1', '+norecurse', '+noall', '+comments', '+answer',
                 owner, kind], answer(owner, kind, rdata))
     for zone in zones:
-        put(zone, ['dig', '-r', '-4', '-b', BACK, '@' + BACK, '+tcp', '+time=3', '+tries=1',
+        put(zone, ['dig', '-4', '-b', BACK, '@' + BACK, '+tcp', '+time=3', '+tries=1',
             '+norecurse', '+noall', '+comments', '+answer', zone, 'SOA'],
             answer(zone, 'SOA', 'ns1.example.test. hostmaster.example.test. 7 3600 900 1209600 300'))
     return replies, keys
@@ -57,7 +57,7 @@ def test_periodic_monitor_checks_all_transports_and_every_requested_authority(tm
     assert result.returncode == 0 and result.stderr == ''
     assert result.stdout == 'OK named active, native loopback UDP/TCP, ' + str(len(zones)) + ' authoritative zone(s)\n'
     assert len(calls) == 5 + len(zones)
-    assert {call[6] for call in calls if call[0] == 'dig' and call[5] == '@127.0.0.1'} == {'+notcp', '+tcp'}
+    assert {call[5] for call in calls if call[0] == 'dig' and call[4] == '@127.0.0.1'} == {'+notcp', '+tcp'}
 
 
 def test_periodic_monitor_refuses_missing_address_before_any_external_command(tmp_path):

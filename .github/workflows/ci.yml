@@ -224,9 +224,9 @@ jobs:
                 tests/test_front_kernel_gateway.py tests/test_archive_hardening.py
               python - <<"PY"
           import xml.etree.ElementTree as ET
-          cases = list(ET.parse('/evidence/el7-bash42.xml').getroot().iter('testcase'))
+          cases = list(ET.parse("/evidence/el7-bash42.xml").getroot().iter("testcase"))
           assert cases and all(case.find(tag) is None for case in cases
-                               for tag in ('failure', 'error', 'skipped'))
+                               for tag in ("failure", "error", "skipped"))
           PY
             '
       - name: Execute every collected test and merge all native cohorts before checking thresholds

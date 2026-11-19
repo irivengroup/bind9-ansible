@@ -33,17 +33,17 @@ def replies(populated=True):
     for transport in ('+notcp', '+tcp'):
         for name, kind, value in [('localhost', 'A', '127.0.0.1'),
                                  ('1.0.0.127.in-addr.arpa', 'PTR', 'localhost.')]:
-            put('loopback_' + transport + kind, ['dig', '-r', '-4', '+ignore', transport, '+time=3',
+            put('loopback_' + transport + kind, ['dig', '-4', '+ignore', transport, '+time=3',
                 '+tries=1', '+norecurse', '+noall', '+comments', '+answer', '-b', '127.0.0.1', '@127.0.0.1',
                 name, kind], answer(name, kind, value))
     if populated:
         soa = 'ns1.example.test. hostmaster.example.test. 7 3600 900 1209600 300'
         put('checker', ['named-checkzone', 'example.test', '/var/named/zones/example.test.zone'],
             'zone example.test/IN: loaded serial 7\nOK\n')
-        put('soa', ['dig', '-r', '-4', '+tcp', '+time=3', '+tries=2', '+norecurse', '+noall', '+comments',
+        put('soa', ['dig', '-4', '+tcp', '+time=3', '+tries=2', '+norecurse', '+noall', '+comments',
             '+answer', '-b', '192.0.2.2', '@192.0.2.2', 'example.test', 'SOA'], answer('example.test', 'SOA', soa))
         for transport in ('+notcp', '+tcp'):
-            put('forward_' + transport, ['dig', '-r', '-4', '+ignore', transport, '+time=3', '+tries=1',
+            put('forward_' + transport, ['dig', '-4', '+ignore', transport, '+time=3', '+tries=1',
                 '+noall', '+comments', '+answer', '-b', '127.0.0.1', '@127.0.0.1', 'upstream.test', 'SOA'],
                 answer('upstream.test', 'SOA', soa, False))
     return data, keys
@@ -99,7 +99,7 @@ def test_native_health_empty_zone_lists_preserve_loopback_checks_and_reset_stale
 def test_native_listener_probes_require_both_transports_for_each_dns_address(tmp_path, fault):
     data, _ = replies(False)
     listeners = ['192.0.2.2', '198.51.100.2']
-    probes = [['dig', '-r', '-4', '+ignore', transport, '+time=3', '+tries=1', '+norecurse',
+    probes = [['dig', '-4', '+ignore', transport, '+time=3', '+tries=1', '+norecurse',
                '+noall', '+comments', '+answer', '-b', '192.0.2.2', '@' + address, 'localhost', 'A']
               for address in listeners for transport in ('+notcp', '+tcp')]
     for command in probes:

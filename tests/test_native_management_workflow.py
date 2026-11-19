@@ -19,7 +19,7 @@ MANAGE = 'tasks.d/manage/main.yml'
 READ = dict(resource='option', action='read', name='minimal-responses')
 BATCH = dict(resource='batch', action='read', operations=[
     dict(resource='option', action='update', name='minimal-responses', value='yes')])
-SECONDARY_ARGV = ['dig', '-r', '-4', '@127.0.0.1', '+tcp', '+time=2', '+tries=1',
+SECONDARY_ARGV = ['dig', '-4', '@127.0.0.1', '+tcp', '+time=2', '+tries=1',
                   '+norecurse', '+noall', '+comments', '+answer', 'example.test.', 'SOA']
 SECONDARY_ANSWER = (';; status: NOERROR\n;; flags: qr aa; QUERY: 1, ANSWER: 1\n'
                     'example.test. 300 IN SOA ns. host. 41 3600 900 604800 60\n')
@@ -152,7 +152,7 @@ def test_native_management_secondary_refuses_missing_or_skipped_primary(manageme
 
 
 @pytest.mark.parametrize('variables', [
-    dict(ansible_distribution='Debian'), dict(ansible_distribution_major_version='7'),
+    dict(ansible_distribution='Debian'), dict(ansible_distribution_major_version='6'),
     dict(bind_manage=None), dict(bind_manage=[]), dict(bind_manage={}),
     dict(bind_manage=dict(READ, resource='unknown')), dict(bind_manage=dict(READ, action='apply')),
     dict(bind_manage=dict(BATCH, action='update')), dict(bind_manage_checksums=[]),

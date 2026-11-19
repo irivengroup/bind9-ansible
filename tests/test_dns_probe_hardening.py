@@ -78,15 +78,16 @@ def test_all_ansible_dns_probes_ignore_digrc_and_select_ipv4():
         def commands(value):
             if isinstance(value, dict):
                 if 'ansible.builtin.command' in value:
-                    yield value['ansible.builtin.command'].get('argv', [])
+                    yield value, value['ansible.builtin.command'].get('argv', [])
                 for child in value.values():
                     yield from commands(child)
             elif isinstance(value, list):
                 for child in value:
                     yield from commands(child)
-        for argv in commands(yaml.safe_load(path.read_text())):
+        for task, argv in commands(yaml.safe_load(path.read_text())):
             if argv and isinstance(argv, list) and Path(argv[0]).name == 'dig':
-                assert '-r' in argv and '-4' in argv, path
+                assert task['environment']['HOME'] == '/dev/null', path
+                assert '-4' in argv and '-r' not in argv, path
 
 
 @pytest.mark.skipif(not shutil.which('bash'), reason='Requires Linux shell')
@@ -98,7 +99,7 @@ def test_periodic_monitor_rejects_corrupt_replies_and_preserves_transport(tmp_pa
     dig = tmp_path / 'dig'
     # Fail on options influenced by .digrc unless production explicitly ignores it.
     dig.write_text('''#!/bin/bash
-[[ $1 == -r && $2 == -4 ]] || exit 91
+[[ $HOME == /dev/null && $1 == -4 ]] || exit 91
 name=${@: -2:1}; kind=${@: -1}
 flags="qr aa"; [[ $PROBE_SCENARIO != tc ]] || flags="qr aa tc"
 printf ';; status: NOERROR\\n;; flags: %s; QUERY: 1, ANSWER: 1\\n' "$flags"

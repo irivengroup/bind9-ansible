@@ -98,8 +98,10 @@
   when: bind_manage.resource == 'record' and bind_secondary_group in group_names
 
 - name: Verify the secondary received changed primary zone SOAs
+  environment:
+    HOME: /dev/null
   ansible.builtin.command:
-    argv: [/usr/bin/dig, -r, '-4', '@127.0.0.1', '+tcp', '+time=2', '+tries=1', '+norecurse', '+noall', '+comments', '+answer', '{{ item.key }}', SOA]
+    argv: [/usr/bin/dig, '-4', '@127.0.0.1', '+tcp', '+time=2', '+tries=1', '+norecurse', '+noall', '+comments', '+answer', '{{ item.key }}', SOA]
   loop: '{{ hostvars[bind_primary_host].bind_management_result.serials | default({}) | dict2items | rejectattr("key", "equalto", ".") | list }}'
   register: bind_management_secondary_check
   changed_when: false

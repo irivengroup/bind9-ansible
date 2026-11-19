@@ -12,10 +12,11 @@
   changed_when: false
 
 - name: Verify primary SOA from secondary over back network
+  environment:
+    HOME: /dev/null
   ansible.builtin.command:
     argv:
       - dig
-      - -r
       - '-4'
       - +tcp
       - +time=3

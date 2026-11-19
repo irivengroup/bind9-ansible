@@ -27,6 +27,8 @@ class RecordedCli:
         self.data = json.loads(self.path.read_text(encoding='utf-8'))
 
     def run(self):
+        if self.arguments[:1] == ['dig'] and os.environ.get('HOME') != '/dev/null':
+            raise ValueError('DNS probes must isolate personal resolver profiles')
         self.data['calls'].append(self.arguments)
         self.path.write_text(json.dumps(self.data), encoding='utf-8')
         reply = self.data['replies'].get(json.dumps(self.arguments))

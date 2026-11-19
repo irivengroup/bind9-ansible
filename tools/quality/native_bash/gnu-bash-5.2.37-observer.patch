@@ -3990,7 +3990,7 @@
 +{
 +  return qa_entries_mode &&
 +    (!strcmp(source_digest, "9325f406c3a87306db78ed6957da2b25844d04149d39c7723642ddbc5e8a9c61") ||
-+     !strcmp(source_digest, "083694f9d983ed83c285694b55af14a57c29cd338379c9a39ca218ca62bbaaae"));
++     !strcmp(source_digest, "92f2fbcafb6c61fbe97df9d6eb9b5d0b62c93a99c56d6c40ee3bd7c9e01d91f2"));
 +}
 +
 +static int qa_closed_trap_command(const COMMAND *command, const char *parent)

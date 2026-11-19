@@ -3,6 +3,8 @@ set -Eeuo pipefail
 # The guarded array expansions preserve zero arguments on EL7 Bash 4.2.
 umask 077
 export LC_ALL=C
+# EL7 dig lacks -r. A character-device HOME cannot contain operator dotfiles.
+export HOME=/dev/null
 # BEGIN ARCHIVE SAFETY HELPERS
 valid_octal_mode() {
   # stat output is data: reject expressions before Bash arithmetic can expand it.
@@ -123,7 +125,7 @@ check_front_axfr() {
   # Never echo the key or use dig -y: the secret must not appear in process arguments.
   for label in unsigned signed; do
     # Explicit -q/-t keep a zone beginning with @, + or - in the question field.
-    local -a args=(-r -4 +time=3 +tries=1 -b "$source" "@$server" -q "$zone" -t AXFR)
+    local -a args=(-4 +time=3 +tries=1 -b "$source" "@$server" -q "$zone" -t AXFR)
     # Common text output retains native TSIG verification diagnostics, including
     # unsigned responses to a signed question; +yaml suppresses that warning.
     args+=(+noall +comments +answer)

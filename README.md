@@ -97,6 +97,8 @@ Le rôle ne configure pas les adresses des interfaces, `/etc/resolv.conf`, le ro
 
 `ansible.cfg` utilise la découverte `auto_silent`. Choisir un contrôleur Ansible compatible avec les runtimes de la cible, notamment Python 2.7 pour YUM EL7. Le module privé de management utilise Python 3.6+ même lorsque la collecte initiale des facts s'effectue avec Python 2.7. La découverte d'interfaces et le pare-feu partagent une lecture native `ip -o -4 address`, disponible sur EL7 et les versions suivantes.
 
+Les sondes DNS utilisent un `HOME=/dev/null` propre à leurs processus. Ce chemin de périphérique empêche la lecture d'un `.digrc` opérateur, y compris avec le `dig` EL7 qui ne reconnaît pas `-r`. Les contrôles de réponses complètes, de transport, de source et de signature restent obligatoires.
+
 Les paquets sont demandés à l’état `present`, sans version figée dans le rôle. Pour reproduire une installation donnée, maîtriser les versions disponibles dans vos dépôts RHEL et conserver leur référence avec le dossier de changement.
 
 ### Flux réseau

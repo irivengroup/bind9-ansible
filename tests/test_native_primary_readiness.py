@@ -51,7 +51,7 @@ def listener():
 
 
 def command(domain):
-    return ['dig', '-r', '-4', '+tcp', '+time=3', '+tries=1', '+norecurse', '-b',
+    return ['dig', '-4', '+tcp', '+time=3', '+tries=1', '+norecurse', '-b',
             '127.0.0.1', '+noall', '+comments', '+answer', '@127.0.0.1', domain, 'SOA']
 
 

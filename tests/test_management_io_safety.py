@@ -274,13 +274,32 @@ def test_ambiguous_yaml_is_rejected_before_ansible_can_run_tasks(tmp_path, mappi
     assert 'duplicate' in result.stdout.lower()
 
 
-def test_health_probe_disables_personal_digrc_before_other_options(lab):
+def test_health_probe_keeps_explicit_ipv4_and_udp_transport_control(lab):
     def verify(argv):
         if Path(argv[0]).name == 'dig':
-            assert argv[1] == '-r'
+            assert argv[1] == '-4'
             assert '+ignore' in argv
     lab.fail = verify
     assert lab.write(value='no')['status'] == 'committed'
+
+
+def test_native_command_cannot_read_operator_dotfiles_and_preserves_parent_home(tmp_path, monkeypatch):
+    """The native process uses a non-directory HOME even with a poisoned parent."""
+    home = tmp_path / 'operator-home'
+    home.mkdir()
+    profile = home / '.digrc'
+    profile.write_text('synthetic operator override\n')
+    os.utime(str(profile), ns=(1, 2))
+    monkeypatch.setenv('HOME', str(home))
+    program = ('import os\n'
+               'try:\n'
+               '    with open(os.path.join(os.environ["HOME"], ".digrc")) as stream:\n'
+               '        print(stream.read())\n'
+               'except NotADirectoryError:\n'
+               '    print("profile path is not a directory")\n')
+    assert M.NativeCommand.run([sys.executable, '-c', program]) == 'profile path is not a directory\n'
+    assert os.environ['HOME'] == str(home)
+    assert profile.stat().st_atime_ns == 1
 
 
 @pytest.mark.parametrize('code,symbol', [(28, 'ENOSPC'), (5, 'EIO')])

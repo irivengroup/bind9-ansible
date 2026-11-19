@@ -2,6 +2,8 @@
 set -Eeuo pipefail
 # Protocol tokens and DNS case folding use ASCII, independent of the caller.
 export LC_ALL=C
+# EL7 dig lacks -r. A character-device HOME cannot contain operator dotfiles.
+export HOME=/dev/null
 [[ $# -ge 1 ]] || { echo 'usage: named-healthcheck LOCAL_BACK_IP [ZONE...]' >&2; exit 2; }
 ip=$1; shift
 systemctl is-active --quiet named || { echo 'CRITICAL named inactive'; exit 2; }
@@ -31,7 +33,7 @@ answer_identity_matches() {
 # Check the package-owned loopback data through the IPv4 local listener.
 check_loopback() {
   local transport=$1 name=$2 type=$3 expected=$4 result
-  result=$(dig -r -4 -b 127.0.0.1 @127.0.0.1 "$transport" +ignore +time=3 +tries=1 +norecurse +noall +comments +answer "$name" "$type") || {
+  result=$(dig -4 -b 127.0.0.1 @127.0.0.1 "$transport" +ignore +time=3 +tries=1 +norecurse +noall +comments +answer "$name" "$type") || {
     echo "CRITICAL loopback query failed: $name $type $transport"; exit 2;
   }
   if ! complete_answer "$result" ||
@@ -46,7 +48,7 @@ for transport in +notcp +tcp; do
   check_loopback "$transport" 1.0.0.127.in-addr.arpa PTR 'localhost[.]'
 done
 for zone in "$@"; do
-  result=$(dig -r -4 -b "$ip" @"$ip" +tcp +time=3 +tries=1 +norecurse +noall +comments +answer "$zone" SOA) || { echo "CRITICAL DNS query failed: $zone"; exit 2; }
+  result=$(dig -4 -b "$ip" @"$ip" +tcp +time=3 +tries=1 +norecurse +noall +comments +answer "$zone" SOA) || { echo "CRITICAL DNS query failed: $zone"; exit 2; }
   complete_answer "$result" || { echo "CRITICAL DNS incomplete/status: $zone"; exit 2; }
   grep -Eq '^;; flags: ([a-z]+ )*aa([[:space:]]|;)' <<<"$result" || { echo "CRITICAL non-authoritative: $zone"; exit 2; }
   answer_identity_matches "$result" "$zone" SOA || {
