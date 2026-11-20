@@ -156,8 +156,8 @@ class NativeBashProfile:
 
     COMPONENT = 'roles/bind9/files/named-healthcheck.sh'
     SOURCE_SHA256 = '2cb985a0144e8bd796c6a2167e6fbe4c2aa44693ad8945868a252445cb2f0474'
-    INVENTORY_SHA256 = 'bd7a47ec463c31842ee86981606e928777d6221c35e14255e598e2d75a7d0a04'
-    PATCH_SHA256 = 'c39fb9354039d588b7bbc8e7ee5ec14c5779c04fc3e426408a7c595f541dc480'
+    INVENTORY_SHA256 = '723c5d40189291ad44c91204c359e75e73cee4ab4315797e06dc34dff659824f'
+    PATCH_SHA256 = '7fe6500029a0a34f04673079acccb5c51618baf62a4337dc98c9ae8afd777e14'
     METRICS = ('statements', 'branches', 'functions', 'lines', 'conditions')
     EVENT_MODE = 'sets'
     INVENTORY_NAME = 'health-profile.json'
@@ -333,7 +333,7 @@ class NativeLoginPathProfile(NativeBashProfile):
     COMPONENT = 'roles/bind9/files/bind9-sbin-path.sh'
     SOURCE_SHA256 = '4d84bfdd178e157c6f5dded101b06f9a13f534fbac700b42908fd33195911e7c'
     INVENTORY_NAME = 'login-path-profile.json'
-    INVENTORY_SHA256 = 'c0e1b953c9b2cb683572d46566c4369c16d958a30ce79d27b65f01d4a32fb726'
+    INVENTORY_SHA256 = '0fbfb4ae6fa98fa606c4139e11ed955b5ee4f046e5dc6ba89afc0cec296779ed'
     DECLARATION_EVENTS = NativeBashProfile.DECLARATION_EVENTS + (('B6', 'P'),)
 
     def build_units(self):
@@ -411,7 +411,7 @@ class NativeCompleteRoleProfile(NativeLoginPathProfile):
     Legacy root facts validate provenance without duplicating arithmetic hits.
     """
 
-    PATCH_SHA256 = 'c39fb9354039d588b7bbc8e7ee5ec14c5779c04fc3e426408a7c595f541dc480'
+    PATCH_SHA256 = '7fe6500029a0a34f04673079acccb5c51618baf62a4337dc98c9ae8afd777e14'
     EVENT_MODE = 'decision_sets'
     MAX_INVENTORY_BYTES = 1048576
     STATIC_EVENTS = frozenset((('B2', 'I'), ('B3', 'I'), ('B4', 'I'),
@@ -523,7 +523,7 @@ class NativeFrontProfile(NativeCompleteRoleProfile):
     SOURCE_SHA256 = 'ea9f507faf409996a33915908e7a18e8247d09d66b365b18e32398ffe2c396a1'
     ENTRY_CENSUS_SHA256 = '0302a0c706c59eb8ee8d2ee09c1ea74c602298a7eefae117401349c230206659'
     INVENTORY_NAME = 'bind-front-routes-profile.json'
-    INVENTORY_SHA256 = 'fbeed2aac30f1225ad1d382b704f466e3eb4fc1f45e5939e96c85527e28afd7b'
+    INVENTORY_SHA256 = 'bb848011856458349e64772a14ffd1a5689caa3a14d26b3f1155b091023f074a'
 
 
 class NativeConfigtoolProfile(NativeCompleteRoleProfile):
@@ -533,7 +533,7 @@ class NativeConfigtoolProfile(NativeCompleteRoleProfile):
     SOURCE_SHA256 = '92f2fbcafb6c61fbe97df9d6eb9b5d0b62c93a99c56d6c40ee3bd7c9e01d91f2'
     ENTRY_CENSUS_SHA256 = '18e091bd45615d3920c554e31b280b8f111d6e5ed39958a1a3ac553a254f593e'
     INVENTORY_NAME = 'bind-configtool-profile.json'
-    INVENTORY_SHA256 = '652b186608373897a8964dc7a45c9f6205923c63910ab398286d436260f23daf'
+    INVENTORY_SHA256 = '1805335bb2eac105a0b86dc790c88ba11c2d6500e22dd501474139d15f06e487'
 
 
 def native_profiles(root):

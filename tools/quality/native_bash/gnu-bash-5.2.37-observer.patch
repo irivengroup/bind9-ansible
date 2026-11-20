@@ -1504,7 +1504,7 @@
    if (quoted)
 --- /dev/null
 +++ b/qa_probe.c
-@@ -0,0 +1,2701 @@
+@@ -0,0 +1,2705 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later
 + * QA-only native GNU Bash 5.2.37 conditional observer prototype.
 + * This records parsed [[ unary/binary ]] sites and their ORIGINAL results.
@@ -1684,7 +1684,7 @@
 +  struct pollfd ready;
 +  struct timespec before, after;
 +  uint64_t elapsed, remaining;
-+  int result, milliseconds;
++  int result, milliseconds, wait_errno;
 +  if (++events > 1000000) { dropped = 1; return; }
 +  if (qa_sets_mode) {
 +    result = qa_event_duplicate(event);
@@ -1703,11 +1703,15 @@
 +    ready.fd = output_fd; ready.events = POLLOUT; ready.revents = 0;
 +    if (clock_gettime(CLOCK_MONOTONIC, &before) != 0) { dropped = 1; return; }
 +    result = poll(&ready, 1, milliseconds);
++    wait_errno = errno;
 +    if (clock_gettime(CLOCK_MONOTONIC, &after) != 0) { dropped = 1; return; }
 +    elapsed = (uint64_t)(after.tv_sec - before.tv_sec) * UINT64_C(1000000000);
 +    if (after.tv_nsec >= before.tv_nsec) elapsed += (uint64_t)(after.tv_nsec - before.tv_nsec);
 +    else elapsed -= (uint64_t)(before.tv_nsec - after.tv_nsec);
 +    blocked_nanoseconds += elapsed;
++    /* A handled signal loses no datagram. Charge its elapsed wait
++     * before retrying, so interruption cannot renew the budget. */
++    if (result < 0 && wait_errno == EINTR) continue;
 +    if (result < 0 || (ready.revents & (POLLERR | POLLHUP | POLLNVAL))) { dropped = 1; return; }
 +  }
 +}

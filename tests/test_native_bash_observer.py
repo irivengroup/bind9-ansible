@@ -8,10 +8,14 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import select
 import shutil
+import signal
 import socket
 import subprocess
 import sys
+import threading
+import time
 
 import pytest
 
@@ -95,6 +99,104 @@ def test_native_bash_profile_refuses_unreviewed_initialization_without_executing
 def test_native_bash_profile_refuses_exported_shell_functions():
     with pytest.raises(InstrumentationError, match='initialization'):
         NativeBashToolchain.environment({'BASH_FUNC_injected%%': '() { false; }'})
+
+
+class TestNativeBashInterruptedTransport:
+    """A real handled signal must preserve facts without renewing wait budgets."""
+
+    @staticmethod
+    def switches(pid):
+        for line in Path('/proc/{}/status'.format(pid)).read_text().splitlines():
+            if line.startswith('voluntary_ctxt_switches:'):
+                return int(line.split()[1])
+        raise AssertionError('Missing kernel scheduling witness')
+
+    @classmethod
+    def wait_for_poll(cls, pid, previous=None):
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            waiter = Path('/proc/{}/wchan'.format(pid)).read_text().strip()
+            switches = cls.switches(pid)
+            if 'poll' in waiter and (previous is None or switches > previous):
+                return switches
+            time.sleep(0.001)
+        raise AssertionError('Native sender did not enter its bounded poll wait')
+
+    def observe(self, tmp_path, monkeypatch, signals, exhaust=False):
+        chain = NativeBashToolchain(ROOT, MANIFEST)
+        source = tmp_path / 'interrupted-native-send.sh'
+        source.write_text("printf 'ready\\n'\n" + 'if :; then :; fi\n' * 500, encoding='ascii')
+        source.chmod(0o400)
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        profile = predicate_profile(chain, source, digest)
+        release = threading.Event()
+        original = NativeBashChannel.read
+
+        def gated_reader(channel):
+            assert release.wait(timeout=12), 'Native transport diagnostic gate expired'
+            return original(channel)
+
+        # Only this fresh consumer is held. Its original credential/schema
+        # checks resume unchanged once the real native poll has been witnessed.
+        with monkeypatch.context() as scope:
+            scope.setattr(NativeBashChannel, 'read', gated_reader)
+            channel = NativeBashChannel(digest)
+        environment = chain.environment(os.environ)
+        environment.update(BIND9_NATIVE_BASH_FD=str(channel.descriptor),
+            BIND9_NATIVE_BASH_SHA256=digest, BIND9_NATIVE_BASH_EVENT_MODE='sets')
+        child = None
+        errors = []
+        try:
+            child = subprocess.Popen([str(chain.binaries['observed']), str(source)],
+                env=environment, pass_fds=(channel.descriptor,),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            assert select.select([child.stdout], [], [], 2)[0], 'Missing script readiness witness'
+            ready = child.stdout.readline()
+            assert ready == b'ready\n'
+            self.wait_for_poll(child.pid)
+            started = time.monotonic()
+            if exhaust:
+                # Interrupt after part of the original cumulative budget has
+                # elapsed; restarting a fresh five seconds would exceed seven.
+                time.sleep(3)
+            for _ in range(signals):
+                previous = self.switches(child.pid)
+                os.kill(child.pid, signal.SIGCHLD)
+                self.wait_for_poll(child.pid, previous)
+            if exhaust:
+                child.wait(timeout=max(0.01, 7 - (time.monotonic() - started)))
+                assert time.monotonic() - started >= 4
+        finally:
+            release.set()
+            try:
+                if child is not None:
+                    try:
+                        stdout, stderr = child.communicate(timeout=10)
+                    except BaseException:
+                        child.kill()
+                        child.wait(timeout=3)
+                        raise
+            finally:
+                try:
+                    channel.close()
+                except InstrumentationError as error:
+                    errors.append(error)
+        assert child.returncode == 0 and not stdout and not stderr
+        if not errors:
+            try:
+                profile.check_process(list(channel.rows), child.pid, child.returncode)
+            except InstrumentationError as error:
+                errors.append(error)
+        assert not channel.thread.is_alive()
+        return errors
+
+    @pytest.mark.parametrize('signals', [0, 1, 3])
+    def test_handled_signal_preserves_every_authenticated_native_fact(self, tmp_path, monkeypatch, signals):
+        assert self.observe(tmp_path, monkeypatch, signals) == []
+
+    def test_interruption_never_renews_the_cumulative_backpressure_budget(self, tmp_path, monkeypatch):
+        errors = self.observe(tmp_path, monkeypatch, 1, exhaust=True)
+        assert errors, 'An exhausted or incomplete native stream must remain refused'
 
 
 @pytest.mark.parametrize('digest', [None, '', 'a' * 63, 'A' * 64])

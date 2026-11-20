@@ -130,6 +130,11 @@ behavior remain intact.
 
 The collector uses private Unix datagram sockets with dynamically allocated
 close-on-exec descriptors and verifies kernel-supplied process credentials.
+An interrupted native `poll` is retried only for `EINTR`, after charging its
+elapsed time to the same five-second cumulative backpressure budget. A signal
+neither drops a fact nor starts a fresh budget. Native process tests deliver
+real `SIGCHLD` signals during a witnessed poll wait; a permanently stalled
+consumer must still leave an inadmissible stream within the original budget.
 
 Declarative `Popen(user=...)` identities are resolved before launch and included
 in the paired process signature with the exact arguments. Only root may assign
