@@ -1,7 +1,11 @@
 """Pure contracts for the native boot/static transition, preserving all refusals."""
 import copy
 import importlib.util
+import hashlib
+import json
+import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 
@@ -12,6 +16,75 @@ SPEC = importlib.util.spec_from_file_location('bind9_docker_recipe_contract',
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 Expectation = MODULE.RestartRouteExpectation
+
+
+class TestDockerCommandTransport:
+    """SSH warnings remain evidence, never input to the strict JSON decoder."""
+
+    @staticmethod
+    def recipe(tmp_path):
+        recipe = MODULE.DockerComponentRecipe.__new__(MODULE.DockerComponentRecipe)
+        recipe.out, recipe.events, recipe.env = tmp_path, [], dict(os.environ)
+        recipe.hosts = {'primary': '192.0.2.11'}
+        recipe.ssh_args = ['ssh', '-o', 'StrictHostKeyChecking=yes']
+        return recipe
+
+    @staticmethod
+    def local_process(monkeypatch, tmp_path):
+        native = subprocess.run
+
+        def execute(argv, **options):
+            # Only relocate the controller's fixed cwd; pipes and exit statuses
+            # are exercised by an actual child process on every CI platform.
+            assert options['cwd'] == '/lab'
+            options['cwd'] = str(tmp_path)
+            return native(argv, **options)
+
+        monkeypatch.setattr(MODULE.subprocess, 'run', execute)
+
+    def test_machine_json_keeps_real_stderr_separate_and_records_both(self, monkeypatch, tmp_path):
+        self.local_process(monkeypatch, tmp_path)
+        recipe = self.recipe(tmp_path)
+        warning = b'/etc/bashrc: line 12: BASHRCSOURCED: unbound variable\n'
+        data = b'[{"dst":"default","dev":"eth2"}]\n'
+        output = recipe.run('route-json', [sys.executable, '-c',
+            'import sys; sys.stdout.buffer.write(' + repr(data) + '); '
+            'sys.stderr.buffer.write(' + repr(warning) + ')'])
+        assert json.loads(output) == [{'dst': 'default', 'dev': 'eth2'}]
+        assert (tmp_path / 'route-json.log').read_bytes() == data
+        assert (tmp_path / 'route-json.stderr.log').read_bytes() == warning
+        event = json.loads((tmp_path / 'events.json').read_text())[0]
+        assert event['actual_exitcode'] == event['expected_exitcode'] == 0
+        assert event['log_sha256'] == hashlib.sha256(data).hexdigest()
+        assert event['stderr_log_sha256'] == hashlib.sha256(warning).hexdigest()
+
+    def test_nonzero_process_keeps_both_streams_and_is_still_refused(self, monkeypatch, tmp_path):
+        self.local_process(monkeypatch, tmp_path)
+        recipe = self.recipe(tmp_path)
+        with pytest.raises(AssertionError, match='native-command-refused'):
+            recipe.run('denied', [sys.executable, '-c',
+                'import sys; print("partial-data"); '
+                'print("native-command-refused", file=sys.stderr); sys.exit(17)'])
+        assert (tmp_path / 'denied.log').read_bytes().strip() == b'partial-data'
+        assert (tmp_path / 'denied.stderr.log').read_bytes().strip() == b'native-command-refused'
+        assert recipe.events[0]['actual_exitcode'] == 17
+        assert recipe.events[0]['expected_exitcode'] == 0
+
+    def test_machine_ssh_skips_startup_files_and_preserves_strict_shell(self, monkeypatch, tmp_path):
+        recipe = self.recipe(tmp_path)
+        calls = []
+
+        def execute(label, argv, **options):
+            calls.append((label, argv, options))
+            return '[]'
+
+        monkeypatch.setattr(recipe, 'run', execute)
+        assert recipe.ssh('route', 'primary', 'ip -j -4 route show table main') == '[]'
+        label, argv, options = calls.pop()
+        assert label == 'route' and options == {'timeout': 90}
+        assert argv[:-1] == recipe.ssh_args + ['root@192.0.2.11']
+        assert shlex.split(argv[-1]) == ['bash', '--noprofile', '--norc', '-euc',
+            'export SYSTEMD_LOG_LEVEL=warning; ip -j -4 route show table main']
 
 
 class TestDockerRestartExpectation:

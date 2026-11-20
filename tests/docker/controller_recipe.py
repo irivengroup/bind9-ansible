@@ -83,25 +83,33 @@ class DockerComponentRecipe:
                         ANSIBLE_NOCOLOR='1', SYSTEMD_LOG_LEVEL='warning')
 
     def run(self, label, argv, expected=0, timeout=900):
+        """Return only command data; retain diagnostics independently for audit."""
         start = time.monotonic()
         result = subprocess.run(argv, env=self.env, cwd='/lab', stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, timeout=timeout)
+                                stderr=subprocess.PIPE, timeout=timeout)
         log = self.out / (label + '.log')
+        error_log = self.out / (label + '.stderr.log')
         with log.open('xb') as stream:
             stream.write(result.stdout)
+        with error_log.open('xb') as stream:
+            stream.write(result.stderr)
         self.events.append(dict(label=label, argv=argv, actual_exitcode=result.returncode,
                                 expected_exitcode=expected, seconds=time.monotonic()-start,
-                                log=log.name, log_sha256=hashlib.sha256(result.stdout).hexdigest()))
+                                log=log.name, log_sha256=hashlib.sha256(result.stdout).hexdigest(),
+                                stderr_log=error_log.name,
+                                stderr_log_sha256=hashlib.sha256(result.stderr).hexdigest()))
         self.save()
-        assert result.returncode == expected, (label, result.returncode, result.stdout[-1800:])
+        assert result.returncode == expected, (label, result.returncode,
+                                               result.stdout[-1800:], result.stderr[-1800:])
         return result.stdout.decode('utf-8')
 
     def save(self):
         (self.out / 'events.json').write_text(json.dumps(self.events, indent=2))
 
     def ssh(self, label, node, command, **options):
+        # Machine protocols must not load an interactive RC file under nounset.
         return self.run(label, self.ssh_args + ['root@' + self.hosts[node],
-                        'bash -euc ' + shlex.quote('export SYSTEMD_LOG_LEVEL=warning; ' + command)], timeout=90, **options)
+                        'bash --noprofile --norc -euc ' + shlex.quote('export SYSTEMD_LOG_LEVEL=warning; ' + command)], timeout=90, **options)
 
     def play(self, label, path, extra=None, expected=0, tags=None):
         argv = ['ansible-playbook', '-i', '/lab/inventory.yml', path]

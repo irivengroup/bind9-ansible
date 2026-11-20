@@ -57,6 +57,13 @@ les routes, profils actifs, octets de configuration, UUID, MAC, permissions,
 services et filtres avant/après. Les tests de refus ADM utilisent un véritable
 listener local témoin. Le rollback aval est éprouvé avant et après redémarrage.
 
+Le contrôleur conserve séparément les données de commande dans `<label>.log`
+et les diagnostics dans `<label>.stderr.log`, avec leurs empreintes dans
+`events.json`. Un diagnostic SSH ne peut donc pas être interprété comme une
+route JSON. Les commandes distantes désactivent les fichiers de démarrage
+interactifs avec `--noprofile --norc` et conservent `-e` et `-u` ; un code de
+sortie inattendu reste bloquant et ses deux flux sont conservés.
+
 Les deux routes nouvellement créées passent du protocole d'origine `boot`
 (implicite dans la sortie iproute2) au protocole `static` quand NetworkManager
 réinstalle son profil. Cette seule transition est attendue explicitement :
