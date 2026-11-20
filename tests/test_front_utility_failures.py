@@ -99,6 +99,28 @@ class UtilityFaultLab:
         assert self.lab.data['persistent'] == [] and self.lab.data['operations'] == []
 
 
+@pytest.mark.parametrize('shape', ['file', 'standard-input', 'missing'])
+def test_healthy_network_cat_retains_native_behavior_without_python(tmp_path, shape):
+    """Healthy reads must not acquire the entropy double's Python dependency."""
+    import subprocess
+
+    folder = tmp_path / "fixture with space and ' quote"
+    folder.mkdir()
+    lab = NativeRouteLab(folder)
+    payload = bytes(range(256)) + b'\x00native input\n'
+    target = tmp_path / 'file with spaces'
+    if shape == 'file':
+        target.write_bytes(payload)
+    arguments = [] if shape == 'standard-input' else ['--', str(target)]
+    environment = dict(lab.env, PATH='')
+    expected = subprocess.run(['/usr/bin/cat'] + arguments, input=payload, env=environment,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+    observed = subprocess.run([str(folder / 'bin/cat')] + arguments, input=payload, env=environment,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+    assert (observed.returncode, observed.stdout, observed.stderr) == (
+        expected.returncode, expected.stdout, expected.stderr)
+
+
 @pytest.mark.parametrize('created', ['directory', 'symlink'])
 def test_failed_state_creation_revalidates_the_object_that_appeared(tmp_path, created):
     """A failing mkdir may leave a real directory, but never grants link ownership."""

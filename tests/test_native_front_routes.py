@@ -4,6 +4,7 @@ import json
 import hashlib
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -52,10 +53,11 @@ class NativeRouteLab:
         binaries = folder / 'bin'
         binaries.mkdir()
         (binaries / 'python3').symlink_to(sys.executable)
-        for name in ('ip', 'nmcli', 'cat'):
+        for name in ('ip', 'nmcli'):
             target = binaries / name
             shutil.copyfile(str(ROOT / 'tests/fixtures/native_network_cli.py'), str(target))
             target.chmod(0o755)
+        self._install_cat_boundary(binaries)
         self.env = dict(os.environ, BIND_NETWORK_DOUBLE_STATE=str(self.data_file))
         self.canonical = None
         self.script = folder / 'routes.sh'
@@ -69,6 +71,26 @@ class NativeRouteLab:
             source = source.replace('export PATH=/usr/sbin:/usr/bin:/sbin:/bin',
                                     'export PATH=' + str(binaries) + ':/usr/sbin:/usr/bin:/sbin:/bin')
             self.script.write_text(source)
+
+    def _install_cat_boundary(self, binaries):
+        """Reserve Python for entropy; healthy reads use the real native utility.
+
+        Journal validation performs many reads, including during rollback.
+        Starting Python for each healthy cat adds an unrelated runtime dependency
+        and can consume the unchanged action deadline under instrumentation.
+        """
+        directory = self.folder / 'network-entropy'
+        directory.mkdir(mode=0o700)
+        entropy = directory / 'cat'
+        shutil.copyfile(ROOT / 'tests/fixtures/native_network_cli.py', entropy)
+        entropy.chmod(0o755)
+        command = binaries / 'cat'
+        command.write_text('#!/bin/bash\n'
+            'if [[ $# == 1 && $1 == /proc/sys/kernel/random/uuid ]]; then\n'
+            '    exec ' + shlex.quote(str(entropy)) + ' "$@"\n'
+            'fi\n'
+            'exec /usr/bin/cat "$@"\n')
+        command.chmod(0o755)
 
     def run(self, action='apply', clients=None, more=None, peers=('10.0.0.3',)):
         self.data_file.write_text(json.dumps(self.data))
