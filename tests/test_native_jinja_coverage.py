@@ -67,7 +67,12 @@ def test_native_ansible_render_keeps_service_directives_and_never_reports_data(t
     from ansible.template import Templar
     path = Path(__file__).resolve().parents[1] / 'roles/bind9/templates/named-healthcheck.service.j2'
     source = path.read_text(encoding='utf-8')
-    template_file(tmp_path, source)
+    # Keep the real consumer identity: native Ansible trims block newlines,
+    # and this template now has a distinct, independently checked inventory.
+    # A generic example.j2 is deliberately not an approved native consumer.
+    fixture = tmp_path / 'roles/bind9/templates' / path.name
+    fixture.parent.mkdir(parents=True)
+    fixture.write_bytes(path.read_bytes())
     values = {'bind_back_ip': '192.0.2.11', 'bind_managed_zones': [{'domain': 'example.test'}]}
     with unobserved_parser():
         native = Templar(loader=DataLoader(), variables=values).template(source, convert_data=False)
