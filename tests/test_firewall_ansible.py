@@ -9,6 +9,8 @@ import sys
 import pytest
 import yaml
 
+from route_task_expressions import TaskExpressions
+
 ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.skipif(not shutil.which('ansible-playbook') or os.name != 'posix',
                                 reason='Requires a Linux Ansible controller')
@@ -135,3 +137,16 @@ class FirewallRunner:
                                           ('inactive', False), ('missing_back', False), ('query_error', False)])
 def test_firewalld_adds_only_missing_dns_rules_and_preserves_existing_bindings(tmp_path, scenario, native):
     FirewallRunner().run(tmp_path, scenario, native)
+
+
+def test_parsed_address_guard_independently_refuses_an_empty_native_observation():
+    """The first assert normally stops first; check the parsed invariant itself.
+
+    This is a canonical predicate contract, not a claim of task dispatch or
+    firewall mutation. Original loader positions are retained for attribution.
+    """
+    task = next(item for item in TaskExpressions.load('deploy/firewall.yml')
+                if item['name'] == 'Require nonempty IPv4 interface observations')
+    expression = task['ansible.builtin.assert']['that'][1]
+    values = {'bind_dns_firewall_addresses': {'stdout': ''}}
+    assert TaskExpressions(values).condition([expression], values) is False

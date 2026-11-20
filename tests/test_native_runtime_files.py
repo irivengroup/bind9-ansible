@@ -102,8 +102,10 @@ def test_dnssec_file_transitions_keep_actual_handler_and_retirement_order(runtim
 
 
 @pytest.mark.parametrize('zones', [[], ['example.test'], ['example.test', '113.0.203.in-addr.arpa']])
-def test_native_monitor_installation_preserves_source_and_renders_only_configured_zones(runtime, zones):
-    variables = {'bind_back_ip': '192.0.2.11', 'bind_managed_zones': [{'domain': name} for name in zones]}
+@pytest.mark.parametrize('major', ['7', '8'])
+def test_native_monitor_installation_preserves_source_and_renders_only_configured_zones(runtime, zones, major):
+    variables = {'bind_back_ip': '192.0.2.11', 'bind_managed_zones': [{'domain': name} for name in zones],
+                 'ansible_distribution_major_version': major}
     status, result = NativeProvisionRun('tasks.d/deploy/monitoring.yml', variables).run()
     assert status == 0 and result.failed == []
     executable = Path('/usr/local/sbin/named-healthcheck')
@@ -113,7 +115,10 @@ def test_native_monitor_installation_preserves_source_and_renders_only_configure
     command, = [line.split('=', 1)[1] for line in unit.splitlines() if line.startswith('ExecStart=')]
     assert shlex.split(command) == ['/usr/local/sbin/named-healthcheck', '192.0.2.11'] + zones
     assert 'User=root' in unit.splitlines()
-    assert 'ProtectSystem=strict' in unit and 'ProtectHome=yes' in unit
+    assert 'ProtectHome=yes' in unit
+    assert ('ProtectSystem=full' in unit.splitlines()) is (major == '7')
+    assert ('ReadOnlyDirectories=/' in unit.splitlines()) is (major == '7')
+    assert ('ProtectSystem=strict' in unit.splitlines()) is (major != '7')
     state = json.loads(runtime.read_text(encoding='utf-8'))
     assert state['units']['named-healthcheck.timer'] == {'active': True, 'enabled': True}
 

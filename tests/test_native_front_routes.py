@@ -70,10 +70,12 @@ class NativeRouteLab:
                                     'export PATH=' + str(binaries) + ':/usr/sbin:/usr/bin:/sbin:/bin')
             self.script.write_text(source)
 
-    def run(self, action='apply', clients=None, more=None):
+    def run(self, action='apply', clients=None, more=None, peers=('10.0.0.3',)):
         self.data_file.write_text(json.dumps(self.data))
         args = ['/bin/bash', str(self.script), '--action', action, '--front-ip', '198.51.100.2',
-                '--back-ip', '10.0.0.2', '--adm-ip', '192.0.2.2', '--peer-back-ip', '10.0.0.3']
+                '--back-ip', '10.0.0.2', '--adm-ip', '192.0.2.2']
+        for peer in peers:
+            args.extend(['--peer-back-ip', peer])
         for client in ['203.0.113.0/24'] if clients is None else clients:
             args.extend(['--client', client])
         args.extend(more or [])
@@ -97,6 +99,18 @@ class NativeRouteLab:
         checksums = ''.join(hashlib.sha256((journal / filename).read_bytes()).hexdigest() +
                             '  ' + filename + '\n' for filename in files)
         (journal / 'checksums').write_text(checksums)
+
+
+@pytest.mark.parametrize('action', ['plan', 'apply'])
+def test_native_optional_empty_clients_and_peers_leave_both_route_stores_untouched(tmp_path, action):
+    """An internal-only caller has no cloud route work or optional peer rows."""
+    lab = NativeRouteLab(tmp_path)
+    before = copy.deepcopy(lab.data)
+    result = lab.run(action, clients=[], peers=())
+    assert result.returncode == 0 and 'additions=0' in result.stdout, result.stdout
+    assert lab.data['runtime'] == before['runtime'] and lab.data['persistent'] == before['persistent']
+    assert lab.data['operations'] == []
+    assert not (lab.state / 'front-routes.pending').exists()
 
 
 def plan(**kwargs):

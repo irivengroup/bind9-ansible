@@ -47,6 +47,42 @@ def archive_for_restore(invoke, backup_root):
     return archive
 
 
+def test_native_empty_archive_catalog_has_no_entries_or_mutations(configtool_lab):
+    lab = configtool_lab
+    original = lab.configuration.read_bytes()
+    result = lab.invoke('list')
+    assert result.returncode == 0 and result.stdout == '' and result.stderr == ''
+    assert lab.configuration.read_bytes() == original
+    assert not list(lab.root.glob('named-config-*'))
+
+
+def test_native_empty_backup_pruning_rolls_back_when_validation_refuses(configtool_lab):
+    """Restore from a first-deployment backup must recover later managed zones."""
+    lab = configtool_lab
+    lab.configuration.unlink()
+    (lab.zones / 'original.zone').unlink()
+    lab.zones.rmdir()
+    lab.zones.parent.rmdir()
+    archive = archive_for_restore(lab.invoke, lab.root)
+    with tarfile.open(archive, mode='r:gz') as content:
+        assert content.getnames() == []
+    lab.configuration.write_text('later operator configuration\n', encoding='ascii')
+    lab.zones.mkdir(parents=True)
+    zone = lab.zones / 'later.zone'
+    zone.write_text('; Bind9-Ansible-MANAGED-ZONE\nowned later zone\n', encoding='ascii')
+    lab.command('named-checkconf',
+        'if [[ ! -e $BIND_ARCHIVE_CHECKED ]]; then\n'
+        '  [[ ! -e /var/named/zones/later.zone ]] || exit 92\n'
+        '  : > "$BIND_ARCHIVE_CHECKED"; exit 1\nfi\n'
+        '[[ -f /var/named/zones/later.zone ]] || exit 93\nexit 0\n')
+    result = lab.invoke('restore', '--archive', archive.name)
+    assert result.returncode == 1 and 'RESTORED ' not in result.stdout, result.stderr
+    assert (lab.folder / 'configuration-checked').is_file()
+    assert lab.configuration.read_text() == 'later operator configuration\n'
+    assert zone.read_text() == '; Bind9-Ansible-MANAGED-ZONE\nowned later zone\n'
+    assert not list(lab.root.glob('.restore-state.*')) and not list(lab.root.glob('.restore-safety.*'))
+
+
 def install_packaged_bind_links():
     """Install only the distro layout in the paths owned by the isolated fixture."""
     shared = Path('/usr/share/named')

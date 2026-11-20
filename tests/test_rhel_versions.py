@@ -76,7 +76,7 @@ def test_platform_expansion_preserves_unsupported_host_refusals(distribution, ma
     ('8', 'dnf', 'policycoreutils-python-utils'), ('9', 'dnf', 'policycoreutils-python-utils'),
     ('10', 'dnf', 'policycoreutils-python-utils'), ('11', 'dnf', 'policycoreutils-python-utils')])
 def test_dependencies_select_native_package_names_without_changing_security_requirements(major, backend, policy):
-    task = next(item for item in yaml.safe_load((TASKS / 'deploy/packages.yml').read_text())
+    task = next(item for item in TaskExpressions.load('deploy/packages.yml')
                 if 'ansible.builtin.package' in item)
     variables = {'ansible_distribution_major_version': major}
     args = Templar(loader=DataLoader(), variables=variables).template(task['ansible.builtin.package'])
@@ -90,7 +90,13 @@ def test_dependencies_select_native_package_names_without_changing_security_requ
 def test_package_manager_uses_its_own_bindings_and_preserves_modern_interpreters(major, interpreter, expected):
     task = TaskExpressions.load('deploy/packages.yml')[0]
     values = dict(ansible_distribution_major_version=major, ansible_python_interpreter=interpreter)
-    assert TaskExpressions(values).run('', tasks=[task])['_bind_package_python'] == expected
+    facts = TaskExpressions(values).run('', tasks=[task])
+    assert facts['_bind_package_python'] == expected
+    package = TaskExpressions.load('deploy/packages.yml')[1]
+    # Resolve the actual task-scoped transport handoff too. Extra-vars in the
+    # local worker fixture deliberately pin its controller and cannot prove it.
+    transport = Templar(loader=DataLoader(), variables=facts).template(package['vars'])
+    assert transport == {'ansible_python_interpreter': expected}
 
 
 @pytest.mark.parametrize('major,version,interpreter,expected', [
@@ -105,7 +111,32 @@ def test_management_uses_python_three_on_legacy_targets_and_preserves_selected_m
     task = next(item for item in tasks if item['name'] == 'Select the Python runtime required by the private management module')
     variables = dict(ansible_distribution_major_version=major, ansible_python_version=version,
                      ansible_python_interpreter=interpreter)
-    assert TaskExpressions(variables).run('manage/main.yml', tasks=[task])['_bind_management_python'] == expected
+    facts = TaskExpressions(variables).run('manage/main.yml', tasks=[task])
+    assert facts['_bind_management_python'] == expected
+    transaction = next(item for parent in tasks for item in parent.get('block', [])
+                       if item['name'] == 'Run the private management transaction')
+    transport = Templar(loader=DataLoader(), variables=facts).template(transaction['vars'])
+    assert transport == {'ansible_python_interpreter': expected}
+
+
+@pytest.mark.parametrize('major', ['7', '8', '9', '10', '11'])
+@pytest.mark.parametrize('controller', ['plain', 'ansible', 'ansible-native'])
+def test_health_unit_uses_effective_legacy_protection_and_keeps_modern_strict(monkeypatch, major, controller):
+    """systemd 219 silently ignores strict; EL7 must protect the entire tree."""
+    values = dict(ansible_distribution_major_version=major, bind_back_ip='192.0.2.11', bind_managed_zones=[])
+    source = (ROOT / 'roles/bind9/templates/named-healthcheck.service.j2').read_text()
+    if controller == 'plain':
+        output = Environment(undefined=StrictUndefined).from_string(source).render(**values)
+    else:
+        from ansible import constants
+        monkeypatch.setattr(constants, 'DEFAULT_JINJA2_NATIVE', controller == 'ansible-native')
+        output = Templar(loader=DataLoader(), variables=values).template(source, convert_data=False)
+    lines = output.splitlines()
+    assert ('ProtectSystem=full' in lines) is (major == '7')
+    assert ('ReadOnlyDirectories=/' in lines) is (major == '7')
+    assert ('ProtectSystem=strict' in lines) is (major != '7')
+    assert not any(line.startswith('ReadWriteDirectories=') for line in lines)
+    assert {'NoNewPrivileges=yes', 'PrivateTmp=yes', 'ProtectHome=yes'} <= set(lines)
 
 
 @pytest.mark.parametrize('major', ['7', '8', '9', '10', '11'])
