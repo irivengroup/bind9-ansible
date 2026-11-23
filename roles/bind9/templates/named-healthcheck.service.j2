@@ -1,0 +1,19 @@
+[Unit]
+Description=Bind9-Ansible authoritative DNS healthcheck
+After=named.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/named-healthcheck {{ bind_back_ip }} {{ (bind_managed_zones | default(bind_authoritative_zones | default([], true), true)) | map(attribute='domain') | join(' ') }}
+User=root
+NoNewPrivileges=yes
+PrivateTmp=yes
+{% if (ansible_distribution_major_version | default('8') | int) == 7 %}
+# EL7 systemd 219 ignores "strict". Its recursive directory control protects
+# the complete tree. This read-only probe needs no writable API filesystem;
+# PrivateTmp retains its isolated scratch space without reopening other paths.
+ProtectSystem=full
+ReadOnlyDirectories=/
+{% else %}
+ProtectSystem=strict
+{% endif %}
+ProtectHome=yes

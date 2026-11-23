@@ -1,0 +1,44 @@
+---
+- name: Reset deployment lease ownership for this role invocation
+  ansible.builtin.set_fact:
+    bind_deployment_lease_acquired: false
+    bind_deployment_invocation_failed: false
+  tags: [always]
+
+- name: Execute the existing deployment workflow under the host lease
+  block:
+    - name: Guard and acquire a lease before any modifying workflow
+      ansible.builtin.import_tasks: tasks.d/deploy/guard.yml
+      tags: [always]
+      when: (ansible_run_tags | intersect(['all', 'deploy', 'install', 'configure', 'zones', 'records', 'services', 'firewall', 'monitor', 'routes', 'routes-recover', 'backup', 'hibernate']) | length) > 0
+    - name: Hibernate only the existing deployment without provisioning
+      ansible.builtin.import_tasks: tasks.d/deploy/hibernate.yml
+      tags: [never, hibernate]
+      when: "'hibernate' in ansible_run_tags"
+    - name: Run deployment tasks with their original tags and order
+      ansible.builtin.import_tasks: tasks.d/deploy/main.yml
+      when: "'hibernate' not in ansible_run_tags"
+    - name: Optionally seal a successfully completed full deployment
+      ansible.builtin.import_tasks: tasks.d/deploy/seal.yml
+      tags: [deploy]
+      when: ('all' in ansible_run_tags or 'deploy' in ansible_run_tags) and not ansible_check_mode and (hibernate_deployment | bool)
+  rescue:
+    - name: Defer the deployment failure until owned cleanup has run
+      # any_errors_fatal can stop a play before an always-only block cleans up.
+      # Rescue temporarily keeps this host scheduled; the final task still fails.
+      ansible.builtin.set_fact:
+        bind_deployment_invocation_failed: true
+      tags: [always]
+  always:
+    - name: Release only the deployment lease acquired by this invocation
+      ansible.builtin.import_tasks: tasks.d/deploy/lease_release.yml
+      when: bind_deployment_lease_acquired | default(false) | bool
+      tags: [always]
+
+- name: Stop the failed deployment after controlled lease cleanup
+  ansible.builtin.fail:
+    # The original task already reports its controlled/censored error. Do not
+    # reprint private module results while keeping the collective stop policy.
+    msg: 'BIND deployment failed. Inspect the original failed task and any preserved DNS/FRONT recovery state before retrying.'
+  when: bind_deployment_invocation_failed | bool
+  tags: [always]

@@ -1,0 +1,21 @@
+---
+# Project URL: https://github.com/irivengroup
+galaxy_info:
+  author: Alfred TCHONDJO
+  company: IRIVEN Group
+  description: BIND 9 configuration with native RHEL 7+ loopback zones and lifecycle management.
+  license: proprietary
+  min_ansible_version: '2.9'
+  galaxy_tags:
+    - dns
+    - bind
+    - networking
+    - linux
+  platforms:
+    - name: EL
+      versions:
+        - '7'
+        - '8'
+        - '9'
+        - '10'
+dependencies: []

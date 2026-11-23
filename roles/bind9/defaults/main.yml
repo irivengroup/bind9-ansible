@@ -1,0 +1,25 @@
+---
+# Seal a successful full deployment or the explicit hibernate-only path.
+# An existing seal always blocks redeployment until an operator removes it.
+hibernate_deployment: no
+# The legacy deployment directory lease remains optional outside hibernation.
+# Routes and management always use an automatically released kernel process lock.
+bind_operation_lock_enabled: false
+bind_trusted_networks:
+  cloud_clients: []
+  internal_clients: []
+# Automatic validation by default; explicit false deploys no DNSSEC runtime assets.
+bind_dnssec_active: auto
+bind_forward_zones: []
+bind_authoritative_zones: []
+bind_backup_root: /var/backups/Bind9-Ansible/bind
+bind_monitoring_enabled: false
+
+# Metric for newly added specific FRONT routes; existing routes keep theirs.
+bind_front_route_metric: 100
+# Keep routing disabled until explicitly enabled in the isolated environment.
+bind_front_routes_enabled: false
+
+# Inventory role group names are configurable for reuse across projects.
+bind_primary_group: dns_primary
+bind_secondary_group: dns_secondary

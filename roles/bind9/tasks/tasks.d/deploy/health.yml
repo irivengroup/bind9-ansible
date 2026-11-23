@@ -1,0 +1,146 @@
+---
+- name: Verify native localhost forward and reverse answers over UDP and TCP
+  environment:
+    HOME: /dev/null
+  ansible.builtin.command:
+    argv:
+      - dig
+      - '-4'
+      - +ignore
+      - '{{ item.transport }}'
+      - +time=3
+      - +tries=1
+      - +norecurse
+      - +noall
+      - +comments
+      - +answer
+      - -b
+      - 127.0.0.1
+      - '@127.0.0.1'
+      - '{{ item.name }}'
+      - '{{ item.type }}'
+  loop:
+    - {transport: '+notcp', name: localhost, type: A, answer: '127[.]0[.]0[.]1'}
+    - {transport: '+tcp', name: localhost, type: A, answer: '127[.]0[.]0[.]1'}
+    - {transport: '+notcp', name: 1.0.0.127.in-addr.arpa, type: PTR, answer: 'localhost[.]'}
+    - {transport: '+tcp', name: 1.0.0.127.in-addr.arpa, type: PTR, answer: 'localhost[.]'}
+  loop_control:
+    label: '{{ item.transport }} {{ item.name }} {{ item.type }}'
+  register: bind_loopback_check
+  changed_when: false
+  retries: 3
+  delay: 2
+  # Avoid \b: Jinja interprets it as backspace in an Ansible 2.9 condition.
+  # Match the AA token only inside dig's header flags, never in answer data.
+  until: >-
+    bind_loopback_check.rc == 0 and
+    (bind_loopback_check.stdout | dns_response_complete) and
+    bind_loopback_check.stdout is search('(?m)^;; flags: (?:[a-z]+ )*aa(?: |;)') and
+    bind_loopback_check.stdout is search('(?m)^' ~ (item.name | regex_escape) ~ '[.]?\s+\d+\s+IN\s+' ~ item.type ~ '\s+' ~ item.answer ~ '\s*$')
+  failed_when: >-
+    bind_loopback_check.rc != 0 or
+    not (bind_loopback_check.stdout | dns_response_complete) or
+    bind_loopback_check.stdout is not search('(?m)^;; flags: (?:[a-z]+ )*aa(?: |;)') or
+    bind_loopback_check.stdout is not search('(?m)^' ~ (item.name | regex_escape) ~ '[.]?\s+\d+\s+IN\s+' ~ item.type ~ '\s+' ~ item.answer ~ '\s*$')
+
+- name: Verify every configured DNS listener over UDP and TCP
+  environment:
+    HOME: /dev/null
+  ansible.builtin.command:
+    argv: [dig, '-4', +ignore, '{{ item.1 }}', +time=3, +tries=1, +norecurse, +noall, +comments, +answer,
+           -b, '{{ bind_back_ip }}', '@{{ item.0 }}', localhost, A]
+  loop: '{{ bind_dns_listen_addresses | default([]) | product(["+notcp", "+tcp"]) | list }}'
+  loop_control:
+    label: '{{ item.1 }} {{ item.0 }}'
+  register: bind_listener_check
+  changed_when: false
+  retries: 3
+  delay: 2
+  until: >-
+    bind_listener_check.rc == 0 and
+    (bind_listener_check.stdout | dns_response_complete) and
+    bind_listener_check.stdout is search('(?m)^localhost[.]\s+\d+\s+IN\s+A\s+127[.]0[.]0[.]1\s*$')
+
+- name: Read actual reconciled SOA serials from primary zone files
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/named-checkzone
+      - '{{ item.domain }}'
+      - '/var/named/zones/{{ item.domain }}.zone'
+  loop: '{{ bind_managed_zones }}'
+  delegate_to: '{{ bind_primary_host }}'
+  register: bind_checked_primary_serials
+  changed_when: false
+
+- name: Reset expected SOA serial mapping for this health check
+  ansible.builtin.set_fact:
+    bind_expected_soa_serials: {}
+
+- name: Derive expected SOA serials after reverse reconciliation
+  ansible.builtin.set_fact:
+    bind_expected_soa_serials: >-
+      {{ bind_expected_soa_serials | combine({item.item.domain:
+      (item.stdout | checked_soa_serial(item.item.domain))}) }}
+  loop: '{{ bind_checked_primary_serials.results }}'
+  loop_control:
+    label: '{{ item.item.domain }}'
+
+- name: Check authoritative SOA on the back interface
+  environment:
+    HOME: /dev/null
+  ansible.builtin.command:
+    argv:
+      - dig
+      - '-4'
+      - +tcp
+      - +time=3
+      - +tries=2
+      - +norecurse
+      - +noall
+      - +comments
+      - +answer
+      - -b
+      - "{{ bind_back_ip }}"
+      - "@{{ bind_back_ip }}"
+      - "{{ item.domain }}"
+      - SOA
+  loop: "{{ bind_managed_zones }}"
+  loop_control:
+    label: "{{ item.domain }}"
+  register: bind_soa_checks
+  changed_when: false
+  retries: 12
+  delay: 5
+  until: >-
+    bind_soa_checks.rc == 0 and
+    (bind_soa_checks.stdout | soa_matches(item.domain, bind_expected_soa_serials[item.domain]))
+  failed_when: >-
+    bind_soa_checks.rc != 0 or
+    not (bind_soa_checks.stdout | soa_matches(item.domain, bind_expected_soa_serials[item.domain]))
+
+- name: Verify each conditional forward zone through IPv4 loopback
+  environment:
+    HOME: /dev/null
+  ansible.builtin.command:
+    argv: [dig, '-4', +ignore, '{{ item.1 }}', +time=3, +tries=1, +noall, +comments, +answer,
+           -b, 127.0.0.1, '@127.0.0.1', '{{ item.0.domain }}', SOA]
+  loop: '{{ bind_forward_zones | product(["+notcp", "+tcp"]) | list }}'
+  loop_control:
+    label: '{{ item.1 }} {{ item.0.domain }} SOA'
+  register: bind_forward_health
+  changed_when: false
+  retries: 3
+  delay: 2
+  until: >-
+    bind_forward_health.rc == 0 and
+    (bind_forward_health.stdout | dns_response_complete) and
+    bind_forward_health.stdout is search('(?mi)^' ~ (item.0.domain | regex_escape) ~ '[.]?\s+\d+\s+IN\s+SOA\s+')
+  failed_when: >-
+    bind_forward_health.rc != 0 or
+    not (bind_forward_health.stdout | dns_response_complete) or
+    bind_forward_health.stdout is not search('(?mi)^' ~ (item.0.domain | regex_escape) ~ '[.]?\s+\d+\s+IN\s+SOA\s+')
+
+- name: Record that all selected deployment health checks completed
+  ansible.builtin.set_fact:
+    bind_deployment_health_completed: true
+

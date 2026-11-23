@@ -1,0 +1,13 @@
+# Shell interpreters must receive LF, including checkouts edited on Windows.
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.j2 text eol=lf
+*.ini text eol=lf
+*.cfg text eol=lf
+*.json text eol=lf
+# Native observer patches are verified byte-for-byte before compilation.
+*.patch text eol=lf
+tests/fixtures/PYTHON36_LICENSE.txt text eol=lf

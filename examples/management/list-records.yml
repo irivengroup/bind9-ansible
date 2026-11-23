@@ -1,0 +1,8 @@
+---
+# Replace this zone with the existing authoritative zone of your site.
+bind_manage:
+  resource: record
+  action: list
+  zone: site1.prod.example.test
+  offset: 0
+  limit: 100

@@ -1,0 +1,42 @@
+---
+- name: Prove deferred FRONT rollback after a controlled downstream failure
+  hosts: dns_deployment_order
+  serial: 1
+  any_errors_fatal: true
+  gather_facts: false
+  tasks:
+    - name: Simulate a failed enclosing operation after real additions
+      block:
+        - name: Apply new routes under the canonical deferred journal
+          ansible.builtin.include_role:
+            name: bind9
+            tasks_from: tasks.d/deploy/front_return_routes.yml
+          vars:
+            bind_front_routes_defer_commit: true
+            bind_trusted_networks:
+              cloud_clients: ['198.51.100.128/26']
+              internal_clients: []
+        - name: Require a real pending transaction before injecting failure
+          ansible.builtin.assert:
+            that:
+              - bind_front_route_transaction_pending
+              - bind_front_transaction_token | length == 36
+        - name: Controlled failure of the enclosing recipe
+          ansible.builtin.fail:
+            msg: recipe-controlled-downstream-failure
+      rescue:
+        - name: Reject any failure other than the explicit downstream fault
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_result.msg == 'recipe-controlled-downstream-failure'
+        - name: Roll back only this operation using its actual receipt
+          ansible.builtin.include_role:
+            name: bind9
+            tasks_from: tasks.d/deploy/front_return_routes.yml
+          vars:
+            bind_front_requested_action: rollback
+        - name: Require completed rollback ownership cleanup
+          ansible.builtin.assert:
+            that:
+              - bind_front_route_rollback_attempted
+              - not bind_front_route_transaction_pending

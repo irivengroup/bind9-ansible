@@ -1,0 +1,1674 @@
+{
+  "schema": 1,
+  "threshold": 98,
+  "accepted": false,
+  "components": {
+    "roles/bind9/defaults/main.yml": {
+      "sha256": "c3399e0f8a575fea1a0d95e38248d8de32539003ee6e7d5f5ccbd53af681f505",
+      "metrics": {
+        "statements": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "Parsed literal role defaults or Galaxy metadata; no task, template or predicate"
+        },
+        "branches": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "Parsed literal role defaults or Galaxy metadata; no task, template or predicate"
+        },
+        "functions": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "Parsed literal role defaults or Galaxy metadata; no task, template or predicate"
+        },
+        "lines": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "Parsed literal role defaults or Galaxy metadata; no task, template or predicate"
+        },
+        "conditions": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "Parsed literal role defaults or Galaxy metadata; no task, template or predicate"
+        }
+      }
+    },
+    "roles/bind9/files/bind-configtool.sh": {
+      "sha256": "8eeb13d5d256a4bdac04f63aba1ebc0fab43ee63e19f9377a14095bf2d96b5bc",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/files/bind-front-routes.sh": {
+      "sha256": "77de32bd542d442001e862edcce9267e5026f23d4ad448a275c9b9604020c711",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/files/bind-private-dnssec.py": {
+      "sha256": "76d9f990c1943195b2a82120ebaa4f6d212e914fac50c07319586392f87edffc",
+      "metrics": {
+        "statements": {
+          "hit": 148,
+          "total": 149,
+          "percent": "99.32885906040268456375838926174496644295",
+          "status": "EXÉCUTÉ"
+        },
+        "branches": {
+          "hit": 55,
+          "total": 56,
+          "percent": "98.21428571428571428571428571428571428571",
+          "status": "EXÉCUTÉ"
+        },
+        "functions": {
+          "hit": 12,
+          "total": 12,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "lines": {
+          "hit": 154,
+          "total": 155,
+          "percent": "99.35483870967741935483870967741935483871",
+          "status": "EXÉCUTÉ"
+        },
+        "conditions": {
+          "hit": 89,
+          "total": 90,
+          "percent": "98.88888888888888888888888888888888888889",
+          "status": "EXÉCUTÉ"
+        }
+      }
+    },
+    "roles/bind9/files/named-healthcheck.sh": {
+      "sha256": "eb3a8f925af47c2a114b4d05a3fe1b23b3341fbfce302e4a2669eb6519d3118e",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/files/reverse-serial.py": {
+      "sha256": "1ef8b3ca6c65a252e85281885c58357a0629ffe4e569a9eed774a2fb63ec7085",
+      "metrics": {
+        "statements": {
+          "hit": 175,
+          "total": 175,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "branches": {
+          "hit": 98,
+          "total": 98,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "functions": {
+          "hit": 15,
+          "total": 15,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "lines": {
+          "hit": 181,
+          "total": 181,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "conditions": {
+          "hit": 126,
+          "total": 126,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        }
+      }
+    },
+    "roles/bind9/files/tsig-secret.py": {
+      "sha256": "bbf958e48bdc86b2d317ec353aa71628b61ff81153ae99c89b89d0742d068a2e",
+      "metrics": {
+        "statements": {
+          "hit": 110,
+          "total": 110,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "branches": {
+          "hit": 32,
+          "total": 32,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "functions": {
+          "hit": 8,
+          "total": 8,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "lines": {
+          "hit": 118,
+          "total": 118,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "conditions": {
+          "hit": 51,
+          "total": 52,
+          "percent": "98.07692307692307692307692307692307692308",
+          "status": "EXÉCUTÉ"
+        }
+      }
+    },
+    "roles/bind9/filter_plugins/client_acl.py": {
+      "sha256": "31c303d482ea1d9682d4219e88846f2c6332709974edaf18b8d79c16e1d1567c",
+      "metrics": {
+        "statements": {
+          "hit": 34,
+          "total": 34,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "branches": {
+          "hit": 15,
+          "total": 15,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "functions": {
+          "hit": 4,
+          "total": 4,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "lines": {
+          "hit": 37,
+          "total": 37,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "conditions": {
+          "hit": 30,
+          "total": 30,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        }
+      }
+    },
+    "roles/bind9/filter_plugins/dns_topology.py": {
+      "sha256": "dca54592ecb1b27edcca7b9acbda7560d43dbc9a41af9a3015fb37689aab082d",
+      "metrics": {
+        "statements": {
+          "hit": 96,
+          "total": 97,
+          "percent": "98.96907216494845360824742268041237113402",
+          "status": "EXÉCUTÉ"
+        },
+        "branches": {
+          "hit": 81,
+          "total": 82,
+          "percent": "98.78048780487804878048780487804878048780",
+          "status": "EXÉCUTÉ"
+        },
+        "functions": {
+          "hit": 10,
+          "total": 10,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "lines": {
+          "hit": 106,
+          "total": 107,
+          "percent": "99.06542056074766355140186915887850467290",
+          "status": "EXÉCUTÉ"
+        },
+        "conditions": {
+          "hit": 109,
+          "total": 110,
+          "percent": "99.09090909090909090909090909090909090909",
+          "status": "EXÉCUTÉ"
+        }
+      }
+    },
+    "roles/bind9/filter_plugins/reverse_dns.py": {
+      "sha256": "693d7f49a74428f9b8e7aa1d200e1d174b0d34b9ee2e1e7b9326e9c61ef7c9c2",
+      "metrics": {
+        "statements": {
+          "hit": 52,
+          "total": 52,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "branches": {
+          "hit": 35,
+          "total": 35,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "functions": {
+          "hit": 3,
+          "total": 3,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "lines": {
+          "hit": 52,
+          "total": 52,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "conditions": {
+          "hit": 42,
+          "total": 42,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        }
+      }
+    },
+    "roles/bind9/filter_plugins/soa_health.py": {
+      "sha256": "a72e6be63ecae7ab0466d4d52cef5dc0fc6200dc2dcee68f559d241d73f96c9e",
+      "metrics": {
+        "statements": {
+          "hit": 27,
+          "total": 27,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "branches": {
+          "hit": 16,
+          "total": 16,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "functions": {
+          "hit": 4,
+          "total": 4,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "lines": {
+          "hit": 30,
+          "total": 30,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "conditions": {
+          "hit": 32,
+          "total": 32,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        }
+      }
+    },
+    "roles/bind9/handlers/main.yml": {
+      "sha256": "6077a5d4870f6b7267835061f65ed1c7f08736be7e1a7c830ea8c21c2e239127",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/library/bind9_manage.py": {
+      "sha256": "a2b291a5de5bb71e1485145ea7705b2d853ddef85930e3e2365569f7fcef20c3",
+      "metrics": {
+        "statements": {
+          "hit": 27,
+          "total": 27,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "branches": {
+          "hit": 12,
+          "total": 12,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "functions": {
+          "hit": 1,
+          "total": 1,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "lines": {
+          "hit": 30,
+          "total": 30,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "conditions": {
+          "hit": 6,
+          "total": 6,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        }
+      }
+    },
+    "roles/bind9/meta/main.yml": {
+      "sha256": "2d41d767e4da4eca36ba365e9c3c6942c8c306933ed74aa88116bd2ebb5e11fb",
+      "metrics": {
+        "statements": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "Parsed literal role defaults or Galaxy metadata; no task, template or predicate"
+        },
+        "branches": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "Parsed literal role defaults or Galaxy metadata; no task, template or predicate"
+        },
+        "functions": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "Parsed literal role defaults or Galaxy metadata; no task, template or predicate"
+        },
+        "lines": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "Parsed literal role defaults or Galaxy metadata; no task, template or predicate"
+        },
+        "conditions": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "Parsed literal role defaults or Galaxy metadata; no task, template or predicate"
+        }
+      }
+    },
+    "roles/bind9/module_utils/bind9_management.py": {
+      "sha256": "787569e167a17e8f128c28fe2e4a07fcc9ff265fd9004e33f48f6784f71475c4",
+      "metrics": {
+        "statements": {
+          "hit": 1491,
+          "total": 1496,
+          "percent": "99.66577540106951871657754010695187165775",
+          "status": "EXÉCUTÉ"
+        },
+        "branches": {
+          "hit": 903,
+          "total": 911,
+          "percent": "99.12184412733260153677277716794731064764",
+          "status": "EXÉCUTÉ"
+        },
+        "functions": {
+          "hit": 91,
+          "total": 91,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "lines": {
+          "hit": 1532,
+          "total": 1537,
+          "percent": "99.67469095640858815875081327260897852960",
+          "status": "EXÉCUTÉ"
+        },
+        "conditions": {
+          "hit": 1299,
+          "total": 1324,
+          "percent": "98.11178247734138972809667673716012084592",
+          "status": "EXÉCUTÉ"
+        }
+      }
+    },
+    "roles/bind9/tasks/main.yml": {
+      "sha256": "81a7bb3771ca9cf6ce83d93072fa0859d23ce78c3cc5285bd05d9fa4ed566c40",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/manage.yml": {
+      "sha256": "b1705f0bdfc026d263ecf202225290066d52a4295d6ebfdd94bf557cc0890be7",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/clients.yml": {
+      "sha256": "7433855305f84ede2c65d61b160857e0f08b69c9cf37d0bff052abb9a5d1a3b4",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/configuration.yml": {
+      "sha256": "88d030cfa0f407cb38fb6449374708660c9d1cce6f6bb783cb515d9a74764387",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/directories.yml": {
+      "sha256": "06b19318e70b603d82961a60048a478c3974a630819ab13161c6dae403e1a0b0",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/firewall.yml": {
+      "sha256": "ca32a70fda607b94affd77cb0b77bbbe44aa233c1e8d5b17025e49248ff85be8",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/front_return_routes.yml": {
+      "sha256": "7349b152f4f89c60ef09680fa196764bc230a0b7f99f84a8277c1eed92c70018",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/guard.yml": {
+      "sha256": "0ece897b72f940d2c24de5c7177e1225d8c2389bded3ffa37bf75d67ab941d3b",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/health.yml": {
+      "sha256": "1be54eac6ce1ebb90e73bd44697e36c435dbfc82714cd554ec93ea31c55a21c7",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/hibernate.yml": {
+      "sha256": "87e77971b9125420dabea04a435186231ce94528852c27c13b00d04841c8f0be",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/lease_release.yml": {
+      "sha256": "e1af19b8a4576c547786d1b5f9c3024ee30e6ff4196fac7cb8221f43b3a6b642",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/main.yml": {
+      "sha256": "9cbcda3048673dddfe577074c65b5ea2cb900d5dbc2fd3d87e9ee870ef1cce47",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/migration.yml": {
+      "sha256": "5bc5a959efd43a833ad10575a4d38fd90353e18beef41d3f4b227e4c3552b6de",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/monitoring.yml": {
+      "sha256": "f93bffcf9af74bffc2594419fcf44c66e1266bf155371f121dbc26c1dea2775c",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/packages.yml": {
+      "sha256": "8582dcc705e38b6dc9c06754a78544927527f7a5cd1d7d77f822ea4206024ca1",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/primary_readiness.yml": {
+      "sha256": "30a4c64cc55bc0e85166b51f961b01ca2c6574530899bad52440acc711d4417e",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/seal.yml": {
+      "sha256": "29510573d12db1bba5438c7d12ec88ba25ea940ed6d6e143dc003b21e0a8071d",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/security.yml": {
+      "sha256": "31c55d17ebf3d47e04a496aead4c3123a4af13269f06cf7ec95fd91dae8dc3ed",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/service.yml": {
+      "sha256": "ef069020bf91c1959e1f428bfa24d340bc4f9257a7a136626b9c72dad77d0d37",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/tsig.yml": {
+      "sha256": "1ce0ac4271fb6784b5a7e047a64b12c8255aae5fc4b1a2f555d50aa3f728607d",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/validate.yml": {
+      "sha256": "fa5208ab2268587cde94806ff5d63f57e691533ceda41da1ae0c81708ed05098",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/verify.yml": {
+      "sha256": "91fd10c9e98e3c8a25bf842fd1ad486b8f660147f408b99a6090ccc95f2db8fb",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/deploy/zones.yml": {
+      "sha256": "cfb217a3dc7fc6bc47a83e442f05867e044226685fe5b5112528b4e8ae339abd",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/dnssec_activate.yml": {
+      "sha256": "9efc895a810e89b3e742fbf4b6ec8e5404bdce2ad10aefd298cb19fbbeb3969a",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/dnssec_prepare.yml": {
+      "sha256": "48501e2065b527b718403754f62216b3d241bec58474da14e56834de9178046f",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/dnssec_settings.yml": {
+      "sha256": "d3e20d58c973def9bce02bf95e1b8691bf2733b2bd4299956f94f6d55cd3cb8c",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/manage/main.yml": {
+      "sha256": "4c6106c9e05f70571868eeb619402876d47d3189c82967c904f8f4193c36bc2e",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/named_runtime.yml": {
+      "sha256": "fe83a1860619ae53933e8b3ba0071dfcb0f2bd3496b91c9eef0298ed4ff218e8",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/native_loopback.yml": {
+      "sha256": "816c5e4f4d036e555b7d491f84e94ca99ad6eeb6ab5165482ee43ce0a320367d",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/path_safety.yml": {
+      "sha256": "e38443f0e085425db1c284d4091a5bbe5b35fba26b0f5e50fdf6d8441114b5aa",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/runtime_restore.yml": {
+      "sha256": "b630008725f188471b809f83ced9e9eb5761d57c2312d262de5daa4e04c345d0",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/runtime_snapshot.yml": {
+      "sha256": "a303e9b77b140b19d10d5ccf1fd8f6bc7cbb88107d49f91508a714a310bf0234",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/tasks/tasks.d/site_peers.yml": {
+      "sha256": "1836dce109c7f6cfd875896787758ebfddad0bc203000bdf9cefa3fd7b2b59ff",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "roles/bind9/templates/authoritative.zone.j2": {
+      "sha256": "eb8c7147c6afeb44ae53340b2d14591b39d9bc06399bbde589f9daefa91f9bce",
+      "metrics": {
+        "statements": {
+          "hit": 42,
+          "total": 42,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "branches": {
+          "hit": 6,
+          "total": 6,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "functions": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "No such executable unit in this parsed component"
+        },
+        "lines": {
+          "hit": 16,
+          "total": 16,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "conditions": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "No such executable unit in this parsed component"
+        }
+      }
+    },
+    "roles/bind9/templates/empty-root.zone.j2": {
+      "sha256": "536fc454cb050fd131325d7e57401f5a3015ace209a48917fcf34b195a9a6f44",
+      "metrics": {
+        "statements": {
+          "hit": 17,
+          "total": 17,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "branches": {
+          "hit": 4,
+          "total": 4,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "functions": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "No such executable unit in this parsed component"
+        },
+        "lines": {
+          "hit": 10,
+          "total": 10,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "conditions": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "No such executable unit in this parsed component"
+        }
+      }
+    },
+    "roles/bind9/templates/named-healthcheck.service.j2": {
+      "sha256": "fdfff9de4a1ce28acf6df695244ac7722462b8c0ea5dd414baff8fe7135bf000",
+      "metrics": {
+        "statements": {
+          "hit": 6,
+          "total": 6,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "branches": {
+          "hit": 2,
+          "total": 2,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "functions": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "No such executable unit in this parsed component"
+        },
+        "lines": {
+          "hit": 11,
+          "total": 11,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "conditions": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "No such executable unit in this parsed component"
+        }
+      }
+    },
+    "roles/bind9/templates/named-runtime-override.j2": {
+      "sha256": "fb57a972b89c309dbed32873f9f5194a3eaad8df36341e8471c93130cda73244",
+      "metrics": {
+        "statements": {
+          "hit": 1,
+          "total": 1,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "branches": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "No such executable unit in this parsed component"
+        },
+        "functions": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "No such executable unit in this parsed component"
+        },
+        "lines": {
+          "hit": 5,
+          "total": 5,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "conditions": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "No such executable unit in this parsed component"
+        }
+      }
+    },
+    "roles/bind9/templates/named.conf.j2": {
+      "sha256": "8fb934f03c4cb18741c35c2c2ca7ee7511fef0ab42573a3cfd9ee362b3a33545",
+      "metrics": {
+        "statements": {
+          "hit": 131,
+          "total": 131,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "branches": {
+          "hit": 40,
+          "total": 40,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "functions": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "No such executable unit in this parsed component"
+        },
+        "lines": {
+          "hit": 207,
+          "total": 207,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "conditions": {
+          "hit": 36,
+          "total": 36,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        }
+      }
+    },
+    "roles/bind9/templates/reverse.zone.j2": {
+      "sha256": "6dc38fbceb1697e98ef27d0bdd03450589b8e20bd49d906d51e5bc05a2d028f4",
+      "metrics": {
+        "statements": {
+          "hit": 36,
+          "total": 36,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "branches": {
+          "hit": 6,
+          "total": 6,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "functions": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "No such executable unit in this parsed component"
+        },
+        "lines": {
+          "hit": 15,
+          "total": 15,
+          "percent": "100",
+          "status": "EXÉCUTÉ"
+        },
+        "conditions": {
+          "hit": 0,
+          "total": 0,
+          "percent": null,
+          "status": "NON APPLICABLE",
+          "reason": "No such executable unit in this parsed component"
+        }
+      }
+    },
+    "playbooks/bind9-deploy.yml": {
+      "sha256": "b873df1e370ecb09ddd93696b25142d16865b975c3607c8af0dbd80502894279",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    },
+    "playbooks/bind9-management.yml": {
+      "sha256": "ddaf60d3d6aa495652c66e1fee7d95ef3c6a66c80e194c199af2d946943b795e",
+      "metrics": {
+        "statements": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "branches": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "functions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "lines": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        },
+        "conditions": {
+          "status": "NON EXÉCUTÉ",
+          "reason": "No source-matched executable observer/result for this component"
+        }
+      }
+    }
+  },
+  "python_totals": {
+    "statements": {
+      "hit": 2160,
+      "total": 2167,
+      "percent": "99.67697277341947392708814028610982925704",
+      "status": "EXÉCUTÉ"
+    },
+    "branches": {
+      "hit": 1247,
+      "total": 1257,
+      "percent": "99.20445505171042163882259347653142402546",
+      "status": "EXÉCUTÉ"
+    },
+    "functions": {
+      "hit": 148,
+      "total": 148,
+      "percent": "100",
+      "status": "EXÉCUTÉ"
+    },
+    "lines": {
+      "hit": 2240,
+      "total": 2247,
+      "percent": "99.68847352024922118380062305295950155763",
+      "status": "EXÉCUTÉ"
+    },
+    "conditions": {
+      "hit": 1784,
+      "total": 1812,
+      "percent": "98.45474613686534216335540838852097130243",
+      "status": "EXÉCUTÉ"
+    }
+  },
+  "project_totals": {
+    "statements": {
+      "status": "NON EXÉCUTÉ",
+      "reason": "At least one role component is unmeasured"
+    },
+    "branches": {
+      "status": "NON EXÉCUTÉ",
+      "reason": "At least one role component is unmeasured"
+    },
+    "functions": {
+      "status": "NON EXÉCUTÉ",
+      "reason": "At least one role component is unmeasured"
+    },
+    "lines": {
+      "status": "NON EXÉCUTÉ",
+      "reason": "At least one role component is unmeasured"
+    },
+    "conditions": {
+      "status": "NON EXÉCUTÉ",
+      "reason": "At least one role component is unmeasured"
+    }
+  },
+  "ansible_predicate_observations": [
+    {
+      "status": "NON EXÉCUTÉ",
+      "complete": false,
+      "artifact": "/evidence/candidate-paired/observations/ansible-183657.json",
+      "observed_predicate_statements": 22,
+      "observed_elementary_outcomes": 82,
+      "elementary_outcomes_inventory": 858,
+      "reason": "Predicate observations do not measure task dispatch, block recovery, loops or templated data fields"
+    }
+  ],
+  "runs": [
+    {
+      "receipt": "/evidence/candidate-paired/run.json",
+      "native": "/evidence/candidate-paired/native.json",
+      "observations": "/evidence/candidate-paired/observations/conditions-183657.json",
+      "junit": "/evidence/candidate-paired/instrumented.xml",
+      "skipped": 0
+    }
+  ],
+  "errors": []
+}

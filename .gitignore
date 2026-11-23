@@ -1,0 +1,10 @@
+# Local test artifacts and credentials must not enter source deliveries.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage*
+.venv/
+*.retry
+secrets/
+*.key
+.env

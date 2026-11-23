@@ -1,0 +1,15 @@
+# Native EL8 compatibility laboratory; never identify Rocky Linux as RHEL.
+FROM rockylinux@sha256:9794037624aaa6212aeada1d28861ef5e0a935adaf93e4ef79837119f2a2d04c
+RUN dnf -y --setopt=timeout=30 --setopt=retries=1 upgrade \
+    && dnf -y --setopt=timeout=30 --setopt=retries=1 install \
+       systemd dbus NetworkManager firewalld bind bind-utils openssh-server openssh-clients \
+       python3 python3-libselinux python3-libsemanage policycoreutils-python-utils \
+       libselinux-utils iproute procps-ng util-linux logrotate sudo tar gzip findutils \
+    && dnf clean all \
+    && rpm -qa --qf '%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort > /opt/bind9-recipe-packages.txt \
+    && rm -f /etc/ssh/ssh_host_* \
+    && systemctl enable sshd NetworkManager firewalld \
+    && systemctl mask systemd-udev-trigger.service systemd-udevd.service \
+    && command -v find tar gzip flock timeout sort sync
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

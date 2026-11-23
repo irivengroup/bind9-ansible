@@ -1,0 +1,19 @@
+Bind9-Ansible — preuves locales 2026.10.17-management-io-safety.1
+
+EXÉCUTÉ: 367 tests, dont 45 nouveaux scénarios; moteur 1313/1337 lignes = 98.20%.
+Python 3.6.8; Ansible 2.9.27; Jinja2 2.10.3; BIND 9.11.36-16.el8_10.16.
+EXÉCUTÉ: BIND réel no/auto, 12 transactions par mode dont 2 lots mixtes, .digrc perturbateur.
+EXÉCUTÉ: Bandit 1.7.10 / Pyflakes 3.2.0 ciblés sans alerte (conteneur Python 3.11).
+ÉCHOUÉ: diagnostic court du refus de clés YAML dupliquées dans Ansible 2.9; refus avant tâches vérifié.
+NON EXÉCUTÉ: paire utilisateur, SELinux/systemd réels, panne physique et charge, CI distante.
+
+Empreintes des journaux hors archive:
+1f96282f75fe6dd5d4e5bda64c008c51e1d97fdcd5830b8a8e517c6f2bca9034  reliability-coverage.log  515 bytes
+4321daf90fedca1ed0594c82bac1435936af83ff35c08c64597b138903a44abf  reliability-native-auto.log  317 bytes
+6da1ac05cd6bb80457d09efa9c51ef8528e77c475fa01af9fe4ace7a30d73e06  reliability-native-no.log  315 bytes
+f909917db27a1ec30a0ae6513757bcbbf847810fb505894b1f10e85132b1d8e3  reliability-tests.log  1490 bytes
+
+Empreintes des sources de production testées:
+a0538f003ca04a4eb530c7cd6db9160dff1eeb95362a4610c98363cd645b16ed  roles/bind9/module_utils/bind9_management.py
+15f9b8155372d7e458a7fc762e150174e3c89cf01628fe1bee667dafe2b05f08  roles/bind9/library/bind9_manage.py
+5446b96a56c084f4c0f510b51fa05c70678a995c112bc8ea482c1dcd38ebc0cb  ansible.cfg
