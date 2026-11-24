@@ -17,7 +17,7 @@
     group: named
     mode: '0640'
     backup: true
-  loop: "{{ bind_authoritative_zones }}"
+  loop: "{{ _bind_deploy_authoritative_zones }}"
   loop_control:
     loop_var: auth_zone
     label: "{{ auth_zone.domain }}"

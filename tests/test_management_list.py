@@ -116,10 +116,10 @@ def test_listing_transport_masks_values_by_default_and_exposes_catalog(tmp_path,
     from test_management_ansible import Runner
     runner = Runner(tmp_path, native)
     request = dict(resource='option', action='list', limit=2)
-    output = runner.run([runner.role_task('tasks.d/manage/main.yml')], {'bind_manage': request})
+    output = runner.run([runner.role_task('tasks.d/manage/main.yml')], {'bind_resources_manage': request})
     assert 'catalog' in output and 'dnssec-validation' in output
     assert '"items"' not in output
     output = runner.run([runner.role_task('tasks.d/manage/main.yml')],
-                        {'bind_manage': request, 'bind_manage_show_values': True})
+                        {'bind_resources_manage': request, 'bind_manage_show_values': True})
     assert '"items"' in output and '"value"' in output
     assert (runner.lab.root / 'etc/named.conf').read_text() == CONF

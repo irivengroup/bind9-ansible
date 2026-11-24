@@ -3,21 +3,31 @@ bind_trusted_networks:
   cloud_clients:
   - 198.51.100.0/24
   internal_clients: []
-bind_authoritative_zones: []
-bind_forward_zones:
-- domain: corp.example.test
-  policy: only
-  dnssec_validate: false
-  forwarders:
-  - address: 10.11.0.53
-    port: 53
-  - address: 10.11.0.54
-    port: 53
-- domain: services.example.test
-  policy: only
-  dnssec_validate: false
-  forwarders:
-  - address: 10.12.0.53
-    port: 53
-  - address: 10.12.0.54
-    port: 53
+bind_resources_deploy:
+  resource: batch
+  action: create
+  operations:
+  - resource: zone
+    action: create
+    kind: forward
+    zone:
+      domain: corp.example.test
+      policy: only
+      dnssec_validate: false
+      forwarders:
+      - address: 10.11.0.53
+        port: 53
+      - address: 10.11.0.54
+        port: 53
+  - resource: zone
+    action: create
+    kind: forward
+    zone:
+      domain: services.example.test
+      policy: only
+      dnssec_validate: false
+      forwarders:
+      - address: 10.12.0.53
+        port: 53
+      - address: 10.12.0.54
+        port: 53

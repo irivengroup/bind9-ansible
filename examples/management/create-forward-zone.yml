@@ -1,6 +1,6 @@
 ---
 # Example addresses: adapt the suffix/upstreams and supply a current revision.
-bind_manage:
+bind_resources_manage:
   resource: zone
   action: create
   name: private.example.test

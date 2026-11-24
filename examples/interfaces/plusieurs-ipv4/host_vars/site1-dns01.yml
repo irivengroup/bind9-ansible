@@ -1,0 +1,8 @@
+---
+# Exemple fictif : remplacer ensemble les deux host_vars, puis adapter IP et interfaces.
+ansible_host: 10.10.1.11
+bind_listen_interfaces:
+  ens192: 192.0.2.111
+  ens224: 10.20.1.11
+bind_front_ip: 192.0.2.111
+bind_back_ip: 10.20.1.11

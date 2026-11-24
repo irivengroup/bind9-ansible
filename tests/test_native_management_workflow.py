@@ -41,7 +41,7 @@ class ManagementWorkflow:
 
     def run(self, request=None, secondary=False, peer_result=None, checks=(), replies=None,
             check=False, **variables):
-        values = dict(bind_manage=READ if request is None else request,
+        values = dict(bind_resources_manage=READ if request is None else request,
             ansible_distribution='RedHat', ansible_distribution_major_version='8',
             bind_primary_host='peer' if secondary else 'localhost',
             bind_secondary_host='localhost' if secondary else 'peer', bind_tsig_key_name='site-transfer')
@@ -153,9 +153,9 @@ def test_native_management_secondary_refuses_missing_or_skipped_primary(manageme
 
 @pytest.mark.parametrize('variables', [
     dict(ansible_distribution='Debian'), dict(ansible_distribution_major_version='6'),
-    dict(bind_manage=None), dict(bind_manage=[]), dict(bind_manage={}),
-    dict(bind_manage=dict(READ, resource='unknown')), dict(bind_manage=dict(READ, action='apply')),
-    dict(bind_manage=dict(BATCH, action='update')), dict(bind_manage_checksums=[]),
+    dict(bind_resources_manage=None), dict(bind_resources_manage=[]), dict(bind_resources_manage={}),
+    dict(bind_resources_manage=dict(READ, resource='unknown')), dict(bind_resources_manage=dict(READ, action='apply')),
+    dict(bind_resources_manage=dict(BATCH, action='update')), dict(bind_manage_checksums=[]),
     dict(bind_manage_plan_checksums=[]), dict(bind_manage_show_values='yes'),
     dict(bind_operation_lock_enabled='false')])
 def test_native_management_rejects_invalid_envelopes_before_module_dispatch(management, variables):
@@ -215,7 +215,7 @@ def test_native_management_real_wrapper_resolves_site_peers_before_reading(manag
     folder = management.folder / 'wrapper'
     folder.mkdir(mode=0o700)
     with NativeRecordedBoundary(folder, NativeManagementRun, {}):
-        status, result = NativeManagementRun('manage.yml', dict(bind_manage=READ,
+        status, result = NativeManagementRun('manage.yml', dict(bind_resources_manage=READ,
             ansible_distribution='RedHat', ansible_distribution_major_version='8',
             bind_environment='test', bind_site_name='site', bind_tsig_key_name='site-transfer'), inventory_hosts=hosts,
             inventory_groups=dict(site=['localhost', 'peer'], dns_primary=['localhost'], dns_secondary=['peer']),
@@ -255,7 +255,7 @@ def test_native_management_replication_guard_refuses_nonreplication_contexts(res
     """
     from test_ansible_canonical_predicates import CanonicalPredicates
     CanonicalPredicates('manage/main.yml').check('Verify the secondary received changed primary zone SOAs',
-        dict(ansible_check_mode=False, bind_manage=dict(resource=resource), group_names=groups,
+        dict(ansible_check_mode=False, bind_resources_manage=dict(resource=resource), group_names=groups,
              bind_secondary_group='dns_secondary'), False, key='when')
 
 

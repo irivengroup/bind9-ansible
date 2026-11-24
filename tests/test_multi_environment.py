@@ -12,7 +12,7 @@ def test_environment_inventories_and_isolation():
         assert site['bind_site_name'] == 'site1'
         assert env in site['bind_tsig_secret_file']
         assert site['bind_trusted_networks']['cloud_clients']
-        assert site['bind_authoritative_zones'][0]['domain'].endswith(f'{env}.example.test')
+        assert next(op['zone']['domain'] for op in site['bind_resources_deploy']['operations'] if op['kind'] == 'authoritative').endswith(f'{env}.example.test')
 
 def test_peer_validation_checks_environment():
     content = (ROOT / 'roles/bind9/tasks/tasks.d/site_peers.yml').read_text()

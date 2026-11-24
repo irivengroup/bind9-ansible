@@ -102,10 +102,10 @@ def test_read_and_check_hold_the_operation_lease(tmp_path, native):
         '        self.config = Configuration(self.files)'))
     request = dict(resource='option', action='read', name='minimal-responses')
     tasks = [runner.role_task('tasks.d/manage/main.yml'),
-        {'set_fact': {'bind_manage': dict(request, action='update', value='no',
+        {'set_fact': {'bind_resources_manage': dict(request, action='update', value='no',
                         expected_checksum='{{ bind_management_result.checksum }}')}},
         {'block': [runner.role_task('tasks.d/manage/main.yml')], 'check_mode': True}]
-    runner.run(tasks, {'bind_manage': request})
+    runner.run(tasks, {'bind_resources_manage': request})
     assert (runner.lab.root / 'etc/named.conf').read_text() == CONF
     assert not (runner.lab.root / 'var/lib/Bind9-Ansible/.operation.lock').exists()
 
@@ -157,6 +157,6 @@ def test_read_and_simulation_refuse_any_existing_lease(tmp_path, entry, check_mo
                        {'fail': {'msg': 'busy lease was accepted'}}],
               'rescue': [{'assert': {'that': ["'owns the host lease' in ansible_failed_result.msg"]}}],
               'check_mode': check_mode}]
-    runner.run(tasks, {'bind_manage': request})
+    runner.run(tasks, {'bind_resources_manage': request})
     assert lease.lstat()
     assert (runner.lab.root / 'etc/named.conf').read_text() == CONF

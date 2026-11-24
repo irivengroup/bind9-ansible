@@ -20,7 +20,7 @@ class TestReverseSerial:
         env.filters.update(topology.FilterModule().filters())
         zone = {'domain': '2.0.192.in-addr.arpa', 'serial': serial, 'records': [{'name': '10', 'value': value}]}
         return env.get_template('reverse.zone.j2').render(auth_zone=zone, bind_managed_zones=[zone],
-                    bind_authoritative_zones=[{'domain': 'example.test'}], bind_forward_zones=[])
+                    _bind_deploy_authoritative_zones=[{'domain': 'example.test'}], _bind_deploy_forward_zones=[])
 
     def test_canonical_two_marker_template_is_accepted(self, tmp_path):
         path = tmp_path / 'zone'

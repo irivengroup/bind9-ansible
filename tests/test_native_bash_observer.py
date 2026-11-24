@@ -285,6 +285,70 @@ def test_native_bash_writer_uid_refuses_nonliteral_or_out_of_range_identity(uid)
         NativeBashCollector.writer_uid(uid)
 
 
+@pytest.mark.parametrize('forged', [False, True], ids=['native-terminal', 'forged-sender'])
+def test_native_terminal_queued_after_timeout_is_drained_with_unchanged_authentication(tmp_path, monkeypatch, forged):
+    """Close must drain packets queued between an idle timeout and stop.
+
+    Hold the timed-out receiver until the real Bash child has exited. The
+    terminal datagram is then provably queued before close sets its stop flag.
+    This ordering reproduces the scheduler race without timing-based retries.
+    """
+    chain = NativeBashToolchain(ROOT, MANIFEST)
+    source = tmp_path / 'queued-terminal.sh'
+    source.write_text('printf "complete\\n"\n', encoding='ascii')
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    timed_out = threading.Event()
+    original = NativeBashChannel.read
+
+    class TimeoutBarrier:
+        def __init__(self, reader, stopped):
+            self.reader, self.stopped, self.delayed = reader, stopped, False
+
+        def recvmsg(self, *arguments):
+            try:
+                return self.reader.recvmsg(*arguments)
+            except socket.timeout:
+                if not self.delayed:
+                    self.delayed = True
+                    timed_out.set()
+                    assert self.stopped.wait(timeout=2), 'The deterministic close barrier expired'
+                raise
+
+        def close(self):
+            self.reader.close()
+
+    def delayed_timeout(channel):
+        channel.reader = TimeoutBarrier(channel.reader, channel.stopped)
+        return original(channel)
+
+    with monkeypatch.context() as scope:
+        scope.setattr(NativeBashChannel, 'read', delayed_timeout)
+        channel = NativeBashChannel(digest)
+    try:
+        assert timed_out.wait(timeout=2), 'The native socket never reached its idle timeout'
+        environment = chain.environment(os.environ)
+        environment.update(BIND9_NATIVE_BASH_FD=str(channel.descriptor),
+            BIND9_NATIVE_BASH_SHA256=digest, BIND9_NATIVE_BASH_EVENT_MODE='sets')
+        with subprocess.Popen([str(chain.binaries['observed']), str(source)],
+                env=environment, pass_fds=(channel.descriptor,), stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE) as process:
+            stdout, stderr = process.communicate(timeout=10)
+        assert process.returncode == 0 and stdout == b'complete\n' and stderr == b''
+        if forged:
+            packet = ['B1', 'E', str(os.getpid()+1), digest, '0', '0']
+            os.write(channel.descriptor, ('\t'.join(packet)+'\n').encode('ascii'))
+            with pytest.raises(InstrumentationError, match='kernel credentials'):
+                channel.close()
+        else:
+            channel.close()
+        assert not channel.thread.is_alive()
+        terminal = [tuple(row) for row in channel.rows if tuple(row[:2]) == ('B1', 'E')]
+        assert terminal == [('B1', 'E', str(process.pid), digest, '0', '0')]
+    finally:
+        if not channel.closed:
+            channel.close()
+
+
 @pytest.mark.parametrize('event', ['T', 'W'])
 @pytest.mark.parametrize('fault', ['pid', 'uid'])
 def test_terminal_facts_keep_kernel_pid_and_uid_authentication(event, fault):

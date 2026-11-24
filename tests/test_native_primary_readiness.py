@@ -4,6 +4,7 @@ The listener belongs exclusively to a disconnected container. The exact dig
 replies qualify orchestration, not a live DNS server or intersite reachability.
 """
 from contextlib import contextmanager
+import errno
 import json
 import os
 import socket
@@ -24,6 +25,10 @@ SOA = 'ns1.example.test. hostmaster.example.test. 7 3600 900 1209600 300'
 def listener():
     """Accept native wait_for connections; refuse an occupied loopback port."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        # A server-side close can leave port 53 in TIME_WAIT between cases.
+        # REUSEADDR admits that closed connection; without REUSEPORT a live
+        # listener still owns the endpoint exclusively.
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind(('127.0.0.1', 53))
         server.listen(8)
         server.settimeout(0.1)
@@ -48,6 +53,25 @@ def listener():
             stopped.set()
             worker.join(timeout=2)
             assert not worker.is_alive() and not failures
+
+
+def test_readiness_listener_rebinds_after_the_peer_observes_server_close():
+    with listener():
+        with socket.create_connection(('127.0.0.1', 53), timeout=2) as client:
+            assert client.recv(1) == b''
+    # The peer has observed the server's FIN before the next bind. There is
+    # no delay/retry that could conceal a stale listener or a TIME_WAIT race.
+    with listener():
+        with socket.create_connection(('127.0.0.1', 53), timeout=2) as client:
+            assert client.recv(1) == b''
+
+
+def test_readiness_listener_still_refuses_an_existing_live_listener():
+    with listener():
+        with pytest.raises(OSError) as caught:
+            with listener():
+                pytest.fail('A live listener must keep exclusive ownership of TCP port 53')
+        assert caught.value.errno == errno.EADDRINUSE
 
 
 def command(domain):

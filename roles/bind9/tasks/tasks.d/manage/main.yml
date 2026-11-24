@@ -3,16 +3,16 @@
   ansible.builtin.assert:
     that:
       - ansible_distribution == 'RedHat' and (ansible_distribution_major_version | int) >= 7
-      - bind_manage is defined and bind_manage is mapping
-      - bind_manage.resource | default('') in ['option', 'zone', 'record', 'acl', 'logging', 'batch']
+      - bind_resources_manage is defined and bind_resources_manage is mapping
+      - bind_resources_manage.resource | default('') in ['option', 'zone', 'record', 'acl', 'logging', 'batch']
       - >-
-        (bind_manage.resource | default('') == 'batch' and bind_manage.action | default('') in ['read', 'apply']) or
-        (bind_manage.resource | default('') != 'batch' and bind_manage.action | default('') in ['create', 'read', 'list', 'update', 'delete'])
+        (bind_resources_manage.resource | default('') == 'batch' and bind_resources_manage.action | default('') in ['read', 'apply']) or
+        (bind_resources_manage.resource | default('') != 'batch' and bind_resources_manage.action | default('') in ['create', 'read', 'list', 'update', 'delete'])
       - bind_manage_checksums | default({}) is mapping
       - bind_manage_plan_checksums | default({}) is mapping
       - bind_manage_show_values | default(false) | type_debug == 'bool'
       - bind_operation_lock_enabled | default(false) | type_debug == 'bool'
-    fail_msg: 'Supply a CRUD request or a batch read/apply envelope on an existing RHEL 7+ BIND host. Use read before writing.'
+    fail_msg: 'Supply bind_resources_manage as a CRUD request or a batch read/apply envelope on an existing RHEL 7+ BIND host. Use read before writing.'
 
 - name: Select the Python runtime required by the private management module
   # EL7 facts and yum may run under Python 2, while the private module uses 3.6+.
@@ -27,13 +27,13 @@
     that:
       - hostvars[bind_primary_host].bind_management_result is defined
       - hostvars[bind_primary_host].bind_management_result.resource | default('') == 'batch'
-      - hostvars[bind_primary_host].bind_management_result.action | default('') == bind_manage.action
-      - hostvars[bind_primary_host].bind_management_result.batch_digest | default('') == (bind_manage.operations | to_json(sort_keys=True) | hash('sha256'))
+      - hostvars[bind_primary_host].bind_management_result.action | default('') == bind_resources_manage.action
+      - hostvars[bind_primary_host].bind_management_result.batch_digest | default('') == (bind_resources_manage.operations | to_json(sort_keys=True) | hash('sha256'))
     fail_msg: 'A batch containing records must include its primary first, with the same batch and phase.'
   when:
-    - bind_manage.resource == 'batch'
+    - bind_resources_manage.resource == 'batch'
     - bind_secondary_group in group_names
-    - bind_manage.operations | default([]) | selectattr('resource', 'defined') | selectattr('resource', 'equalto', 'record') | list | length > 0
+    - bind_resources_manage.operations | default([]) | selectattr('resource', 'defined') | selectattr('resource', 'equalto', 'record') | list | length > 0
 
 - name: Execute only the requested targeted action on the appropriate host
   block:
@@ -43,10 +43,10 @@
       bind9_manage:
         operation_lock: '{{ bind_operation_lock_enabled | default(false) }}'
         request: >-
-          {{ bind_manage | combine({'expected_checksum':
-             (bind_manage_checksums | default({})).get(inventory_hostname, bind_manage.expected_checksum | default(''))}) |
+          {{ bind_resources_manage | combine({'expected_checksum':
+             (bind_manage_checksums | default({})).get(inventory_hostname, bind_resources_manage.expected_checksum | default(''))}) |
              combine(({'expected_plan_checksum': (bind_manage_plan_checksums | default({})).get(inventory_hostname,
-             bind_manage.expected_plan_checksum | default(''))}) if bind_manage.resource == 'batch' else {}) }}
+             bind_resources_manage.expected_plan_checksum | default(''))}) if bind_resources_manage.resource == 'batch' else {}) }}
         context:
           primary: '{{ bind_primary_group in group_names }}'
           primary_front: '{{ hostvars[bind_primary_host].bind_front_ip }}'
@@ -62,7 +62,7 @@
     - name: Report the controlled management refusal without configuration content
       ansible.builtin.fail:
         msg: '{{ bind_management_result.msg | default("Management transport failed; inspect the protected host state and Ansible connectivity.") }}'
-  when: bind_manage.resource != 'record' or bind_primary_group in group_names
+  when: bind_resources_manage.resource != 'record' or bind_primary_group in group_names
 
 - name: Report the safe management outcome and revision
   ansible.builtin.debug:
@@ -95,7 +95,7 @@
       - hostvars[bind_primary_host].bind_management_result is defined
       - not (hostvars[bind_primary_host].bind_management_result.skipped | default(false))
     fail_msg: 'Record maintenance targets the primary. Include it first, or limit this invocation to that primary.'
-  when: bind_manage.resource == 'record' and bind_secondary_group in group_names
+  when: bind_resources_manage.resource == 'record' and bind_secondary_group in group_names
 
 - name: Verify the secondary received changed primary zone SOAs
   environment:
@@ -114,5 +114,5 @@
   when:
     - not ansible_check_mode
     - not (_bind_manage_preflight | default(false) | bool)
-    - bind_manage.resource in ['record', 'zone', 'batch']
+    - bind_resources_manage.resource in ['record', 'zone', 'batch']
     - bind_secondary_group in group_names

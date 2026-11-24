@@ -25,6 +25,11 @@ refusals, and must match across parent and worker receipts.
 
 ## Units and observations
 
+The role's two private actions, `bind9_manage` and `bind9_deploy_resources`,
+are inventoried as executable task dispatches, just like native Ansible actions.
+Rendering their parameters alone cannot cover the action. Their Python bodies
+also remain separate production components with their own five metrics.
+
 - **Statements:** one native action dispatch per authored task, plus authored
   Jinja output/assignment/control entries inside task fields and predicates.
   A skipped task does not count as an action dispatch. Predicate wrapper output

@@ -1,5 +1,5 @@
 ---
-bind_manage:
+bind_resources_manage:
   resource: zone
   action: list
   offset: 0

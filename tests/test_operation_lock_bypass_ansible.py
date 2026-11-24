@@ -80,13 +80,13 @@ def test_unlocked_management_preserves_existing_lease_and_checksum_guards(tmp_pa
     lease = ExistingLease(runner.lab.root / 'var/lib/Bind9-Ansible')
     request = dict(resource='option', action='read', name='minimal-responses')
     tasks = [runner.role_task('tasks.d/manage/main.yml'),
-             {'set_fact': {'bind_manage': dict(request, action='update', value='no',
+             {'set_fact': {'bind_resources_manage': dict(request, action='update', value='no',
                                               expected_checksum='{{ bind_management_result.checksum }}')}},
              runner.role_task('tasks.d/manage/main.yml'),
              {'assert': {'that': ['bind_management_result.changed']}},
              {'block': [runner.role_task('tasks.d/manage/main.yml'),
                         {'fail': {'msg': 'stale checksum unexpectedly accepted'}}],
               'rescue': [{'assert': {'that': ["'Checksum missing or changed' in ansible_failed_result.msg"]}}]}]
-    runner.run(tasks, {'bind_operation_lock_enabled': False, 'bind_manage': request})
+    runner.run(tasks, {'bind_operation_lock_enabled': False, 'bind_resources_manage': request})
     assert 'minimal-responses no;' in (runner.lab.root / 'etc/named.conf').read_text()
     lease.assert_preserved()

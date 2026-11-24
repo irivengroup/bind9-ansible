@@ -179,7 +179,7 @@ include "/etc/named.root.key";
 // Keep distribution-owned native definitions and data unchanged.
 include "/etc/named.rfc1912.zones";
 
-{% for auth_zone in (bind_managed_zones | default(bind_authoritative_zones | default([], true), true)) %}
+{% for auth_zone in (bind_managed_zones | default(_bind_deploy_authoritative_zones | default([], true), true)) %}
 zone "{{ auth_zone.domain }}" IN {
 {% if primary_role %}
     type master;
@@ -203,7 +203,7 @@ zone "." IN {
     file "/var/named/empty-root.zone";
 };
 
-{% for zone in bind_forward_zones | default([], true) %}
+{% for zone in _bind_deploy_forward_zones | default([], true) %}
 {% if dnssec_mode != 'no' and not (zone.dnssec_validate | default(true)) %}
 // Bind9-Ansible DNSSEC-PRIVATE {{ zone.domain | lower }}
 {% endif %}

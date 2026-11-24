@@ -36,14 +36,14 @@ def test_native_configuration_publication_and_second_run_are_idempotent(configur
     values['bind_dnssec_active'] = dnssec
     # Exercise the native private-forwarding branch as well as the default
     # validated forwarder; the global validation policy remains unchanged.
-    values['bind_forward_zones'][0]['dnssec_validate'] = dnssec is not True
+    values['_bind_deploy_forward_zones'][0]['dnssec_validate'] = dnssec is not True
     if secondary:
         groups = {'dns_primary': ['peer'], 'dns_secondary': ['localhost']}
         values.update(bind_primary_host='peer', bind_secondary_host='localhost')
     if populated:
         values.update(bind_trusted_networks=dict(cloud_clients=['203.0.113.0/25'], internal_clients=['203.0.113.128/25']))
     else:
-        values.update(bind_allowed_clients=[], bind_authoritative_zones=[], bind_managed_zones=[], bind_forward_zones=[])
+        values.update(bind_allowed_clients=[], _bind_deploy_authoritative_zones=[], bind_managed_zones=[], _bind_deploy_forward_zones=[])
     retired = Path('/usr/local/sbin/named-transaction')
     retired.write_text('legacy fixture executable\n', encoding='utf-8')
     retired.chmod(0o700)

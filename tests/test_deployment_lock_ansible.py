@@ -73,7 +73,7 @@ def test_persisted_seal_blocks_even_disabled_setting_and_preserves_manual_data(t
     assert not (lab.state / '.operation.lock').exists()
     # Management reads remain available on the sealed host.
     lab.run([lab.role_task('tasks.d/manage/main.yml')],
-            {'bind_manage': {'resource': 'option', 'action': 'read', 'name': 'minimal-responses'}})
+            {'bind_resources_manage': {'resource': 'option', 'action': 'read', 'name': 'minimal-responses'}})
     assert (lab.state / '.deployment.lock').read_bytes() == seal
 
 

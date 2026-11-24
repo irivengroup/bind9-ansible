@@ -206,9 +206,10 @@ class CombinedDeployment:
             hibernate_deployment=False, bind_environment='lab', bind_site_name='lab', bind_primary_host='primary', bind_secondary_host='secondary',
             bind_trusted_networks=dict(cloud_clients=['203.0.113.0/24', '172.21.7.23'], internal_clients=['10.30.1.20']),
             bind_tsig_key_name='lab-transfer', bind_tsig_algorithm='hmac-sha256',
-            bind_tsig_secret_file=str(self.work / 'secrets/site.key'), bind_authoritative_zones=[],
-            bind_forward_zones=[{'domain': domain, 'dnssec_validate': False,
-                'forwarders': [{'address': '127.0.0.1', 'port': 1053}]} for domain in ('private.test', 'second.test')])
+            bind_tsig_secret_file=str(self.work / 'secrets/site.key'),
+            bind_resources_deploy=dict(resource='batch', action='create', operations=[dict(
+                resource='zone', action='create', kind='forward', zone={'domain': domain, 'dnssec_validate': False,
+                'forwarders': [{'address': '127.0.0.1', 'port': 1053}]}) for domain in ('private.test', 'second.test')]))
 
     def profile(self, name):
         return self.command(['nmcli', '-g', 'ipv4.addresses,ipv4.gateway,ipv4.routes,ipv4.dns,ipv4.route-metric', 'connection', 'show', name]).stdout

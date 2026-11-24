@@ -20,14 +20,15 @@
         - tasks.d/clients.yml
         - tasks.d/site_peers.yml
         - tasks.d/deploy/tsig.yml
+        - tasks.d/deploy/resources.yml
       loop_control:
         loop_var: component
     - name: Derive reverse data with the canonical filter
       ansible.builtin.set_fact:
-        bind_generated_reverse_zones: '{{ bind_authoritative_zones | automatic_reverse_zones }}'
+        bind_generated_reverse_zones: '{{ _bind_deploy_authoritative_zones | automatic_reverse_zones }}'
     - name: Combine all authoritative definitions
       ansible.builtin.set_fact:
-        bind_managed_zones: '{{ bind_authoritative_zones + bind_generated_reverse_zones }}'
+        bind_managed_zones: '{{ _bind_deploy_authoritative_zones + bind_generated_reverse_zones }}'
     - name: Run canonical components against genuine services
       ansible.builtin.include_role:
         name: bind9
@@ -41,6 +42,7 @@
         - tasks.d/dnssec_prepare.yml
         - tasks.d/deploy/configuration.yml
         - tasks.d/deploy/zones.yml
+        - tasks.d/deploy/customization.yml
         - tasks.d/deploy/security.yml
         - tasks.d/deploy/verify.yml
         - tasks.d/deploy/firewall.yml

@@ -80,12 +80,12 @@ def test_real_module_crud_transport_and_safe_conflict_message(tmp_path, native):
     request = dict(resource='option', action='read', name='minimal-responses')
     tasks = [runner.role_task('tasks.d/manage/main.yml'),
              {'assert': {'that': ["bind_management_result.checksum | length == 64", 'not bind_management_result.changed']}},
-             {'set_fact': {'test_previous_revision': '{{ bind_management_result.checksum }}', 'bind_manage': dict(request, action='update', value='no', expected_checksum='{{ bind_management_result.checksum }}')}},
+             {'set_fact': {'test_previous_revision': '{{ bind_management_result.checksum }}', 'bind_resources_manage': dict(request, action='update', value='no', expected_checksum='{{ bind_management_result.checksum }}')}},
              runner.role_task('tasks.d/manage/main.yml'),
              {'assert': {'that': ['bind_management_result.changed', 'bind_management_result.checksum != test_previous_revision']}},
              {'block': [runner.role_task('tasks.d/manage/main.yml'), {'fail': {'msg': 'stale checksum was accepted'}}],
               'rescue': [{'assert': {'that': ["'Checksum missing or changed' in ansible_failed_result.msg"]}}]}]
-    output = runner.run(tasks, {'bind_manage': request})
+    output = runner.run(tasks, {'bind_resources_manage': request})
     assert 'secret "' not in output
     assert 'minimal-responses no;' in (runner.lab.root / 'etc/named.conf').read_text()
 

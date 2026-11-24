@@ -1,6 +1,6 @@
 ---
 # Pass the host revision separately through bind_manage_checksums.
-bind_manage:
+bind_resources_manage:
   resource: option
   action: update
   name: minimal-responses

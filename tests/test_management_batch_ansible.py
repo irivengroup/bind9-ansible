@@ -55,7 +55,7 @@ class PairRunner(Runner):
         self.play.write_text(yaml.safe_dump(play, sort_keys=False))
 
     def invoke(self, request, approvals=None, check=False, limit=None, success=True):
-        variables = dict(bind_manage=request, ansible_distribution='RedHat', ansible_distribution_major_version='8',
+        variables = dict(bind_resources_manage=request, ansible_distribution='RedHat', ansible_distribution_major_version='8',
                          ansible_python_interpreter=str(self.python), bind_tsig_key_name='site-transfer', ansible_become=False)
         variables.update(approvals or {})
         extra = self.folder / 'variables.json'

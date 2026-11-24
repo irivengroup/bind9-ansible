@@ -23,7 +23,7 @@ class NativeDeploymentPlayRun(NativeContainerRun):
         'ansible.builtin.copy', 'ansible.builtin.template', 'ansible.builtin.package',
         'ansible.builtin.find', 'ansible.builtin.systemd', 'ansible.builtin.script',
         'ansible.builtin.slurp', 'ansible.builtin.wait_for', 'ansible.builtin.fail',
-        'ansible.builtin.include_tasks'}
+        'ansible.builtin.include_tasks', 'bind9_deploy_resources'}
     SAFE_META = NativeTaskRun.SAFE_META | {'flush_handlers'}
 
     def __init__(self, filename, variables, **options):

@@ -97,7 +97,7 @@ def test_native_truth_order_and_results_are_preserved(tmp_path, expression, valu
 
 def test_real_role_inventory_retains_all_yaml_and_unmeasured_surfaces():
     inventory = YamlInventory(ROOT)
-    assert len(inventory.files) == 38
+    assert len(inventory.files) == 40
     modules = {path.stem for path in (ROOT / 'roles/bind9/library').glob('*.py')}
 
     def scalar_conditions(node):
@@ -129,9 +129,12 @@ def test_real_role_inventory_retains_all_yaml_and_unmeasured_surfaces():
     raw = {path.relative_to(ROOT).as_posix(): census(yaml.compose(path.read_text(encoding='utf-8')))
         for folder in ('roles/bind9', 'playbooks') for path in (ROOT / folder).rglob('*.yml')}
     # Include both tasks and every predicate that protects packaged BIND data.
-    assert sum(row[0] for row in raw.values()) == 272
-    # The grouped input adds the mapping-type and allowed-key schema guards.
-    assert sum(row[1] for row in raw.values()) == 332
+    # The two resource files add seven actions; their two canonical imports
+    # add two more. No previously inventoried YAML surface is removed.
+    assert sum(row[0] for row in raw.values()) == 281
+    # Seven new resource guards and the ordinary-RDATA guard add eight
+    # predicates to the independently counted pre-change total of 332.
+    assert sum(row[1] for row in raw.values()) == 340
     assert {name: len(component['tasks']) for name, component in inventory.components.items()} == {
         name: row[0] for name, row in raw.items()}
     assert len(inventory.predicates) == sum(row[1] for row in raw.values())
@@ -260,6 +263,25 @@ def test_duplicate_yaml_keys_are_refused(tmp_path):
     file.write_text(file.read_text(encoding='utf-8') + '  when: c\n', encoding='utf-8')
     with pytest.raises(InstrumentationError, match='duplicate YAML key'):
         YamlInventory(tmp_path)
+
+
+def test_deployment_resource_module_is_an_executable_action_not_literal_data(tmp_path):
+    file = fixture_project(tmp_path)
+    file.write_text('''- name: Validate custom resources
+  bind9_deploy_resources:
+    operations: '{{ requested_operations }}'
+    context: '{{ site_context }}'
+''', encoding='utf-8')
+    inventory = YamlInventory(tmp_path)
+    name = 'roles/bind9/tasks/main.yml'
+    component = inventory.components[name]
+    assert component['data_only'] is False
+    assert [task['action'] for task in component['tasks'].values()] == ['bind9_deploy_resources']
+    identifier, = component['tasks']
+    units = inventory.executable_units(name)
+    assert name + '|' + identifier in units
+    assert units[name + '|' + identifier]['kind'] == 'statement'
+    assert len(component['templates']) == 2
 
 
 @pytest.mark.parametrize('budget', ['bytes', 'nodes', 'depth'])

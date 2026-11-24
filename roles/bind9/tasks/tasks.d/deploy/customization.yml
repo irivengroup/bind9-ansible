@@ -1,0 +1,37 @@
+---
+- name: Select the Python runtime for deployment customization
+  # Package installation already provides Python 3 on EL7 for private modules.
+  ansible.builtin.set_fact:
+    _bind_deploy_resources_python: >-
+      {{ '/usr/bin/python3' if (ansible_distribution_major_version | int) == 7 and
+         (ansible_python_version | default('2.7')) is version('3.6', '<')
+         else ansible_python_interpreter | default('auto') }}
+  when: _bind_deploy_extra_operations | length > 0
+
+- name: Validate custom resources against the generated baseline and native includes
+  vars:
+    ansible_python_interpreter: '{{ _bind_deploy_resources_python }}'
+  bind9_deploy_resources:
+    operations: '{{ _bind_deploy_extra_operations }}'
+    context:
+      primary: '{{ bind_primary_group in group_names }}'
+      primary_front: '{{ hostvars[bind_primary_host].bind_front_ip }}'
+      secondary_front: '{{ hostvars[bind_secondary_host].bind_front_ip }}'
+      primary_back: '{{ hostvars[bind_primary_host].bind_back_ip }}'
+      secondary_back: '{{ hostvars[bind_secondary_host].bind_back_ip }}'
+      service_addresses: '{{ bind_site_dns_addresses | default(omit) }}'
+      tsig_key_name: '{{ bind_tsig_key_name }}'
+  register: _bind_deploy_customization
+  when: _bind_deploy_extra_operations | length > 0
+  no_log: true
+
+- name: Publish validated custom resources within deployment rollback protection
+  ansible.builtin.copy:
+    content: '{{ _bind_deploy_customization.content }}'
+    dest: /etc/named.conf
+    owner: root
+    group: named
+    mode: '0640'
+  when: _bind_deploy_extra_operations | length > 0
+  no_log: true
+  notify: Reload named configuration

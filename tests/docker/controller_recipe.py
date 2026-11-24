@@ -157,9 +157,10 @@ class DockerComponentRecipe:
             bind_front_route_metric=100, bind_operation_lock_enabled=False,
             bind_front_routes_enabled=True, bind_dnssec_active='auto',
             bind_trusted_networks=dict(internal_clients=['192.0.2.101', '10.154.0.101'], cloud_clients=['198.51.100.0/25', '198.51.100.200', '198.51.100.200/32', '198.51.100.0/25']),
-            bind_forward_zones=[], bind_authoritative_zones=[dict(
-                domain='recipe.example.test', serial=2026110901, ttl=300,
-                records=[dict(name='app', type='A', value='198.51.100.50')])])
+            bind_resources_deploy=dict(resource='batch', action='create', operations=[dict(
+                resource='zone', action='create', kind='authoritative', zone=dict(
+                    domain='recipe.example.test', serial=2026110901, ttl=300,
+                    records=[dict(name='app', type='A', value='198.51.100.50')]))]))
         inventory = dict(all=dict(vars=variables, children={
             'dns_deployment_order': dict(hosts={
                 node: dict(ansible_host=self.hosts[node], bind_front_ip='192.0.2.' + suffix,
@@ -256,7 +257,7 @@ class DockerComponentRecipe:
                             expected=2, tags='preflight')
         assert 'Validate supported platform and mandatory inputs' in refusal
         refusal = self.play('public-management-rocky-refusal', '/snapshot/playbooks/bind9-management.yml',
-                            extra={'bind_manage': dict(resource='option', action='read', name='minimal-responses')}, expected=2)
+                            extra={'bind_resources_manage': dict(resource='option', action='read', name='minimal-responses')}, expected=2)
         assert 'Validate the management platform and explicit request envelope' in refusal
         initial = self.snapshot('before-routes')
         self.play('front-real-ssh-first-add', '/lab/routes.yml')

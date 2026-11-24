@@ -46,8 +46,8 @@ def test_named_conf_render_with_one_client_acl():
         'bind_primary_host': 'p', 'bind_secondary_host': 's',
         'hostvars': {'p': {'bind_back_ip': '10.10.0.10', 'bind_front_ip': '192.0.2.10'},
                      's': {'bind_back_ip': '10.10.0.11', 'bind_front_ip': '192.0.2.11'}},
-        'bind_authoritative_zones': [{'domain': 'prod.example.test'}],
-        'bind_forward_zones': [{'domain': 'corp.example.test', 'forwarders': [{'address': '10.20.0.53'}]}],
+        '_bind_deploy_authoritative_zones': [{'domain': 'prod.example.test'}],
+        '_bind_deploy_forward_zones': [{'domain': 'corp.example.test', 'forwarders': [{'address': '10.20.0.53'}]}],
     }
     out = Environment(undefined=StrictUndefined).from_string(TEMPLATE.read_text()).render(**context)
     assert 'acl "user_defined_clients"' in out
@@ -71,7 +71,7 @@ def test_named_conf_render_secondary_front_only():
         'group_names': ['dns_secondary'], 'bind_primary_host': 'p', 'bind_secondary_host': 's',
         'hostvars': {'p': {'bind_back_ip': '10.10.0.10', 'bind_front_ip': '192.0.2.10'},
                      's': {'bind_back_ip': '10.10.0.11', 'bind_front_ip': '192.0.2.11'}},
-        'bind_authoritative_zones': [{'domain': 'prod.example.test'}], 'bind_forward_zones': [],
+        '_bind_deploy_authoritative_zones': [{'domain': 'prod.example.test'}], '_bind_deploy_forward_zones': [],
     }
     out = Environment(undefined=StrictUndefined).from_string(TEMPLATE.read_text()).render(**context)
     assert 'type slave;' in out and 'masters { 10.10.0.10 key "site-transfer"; };' in out

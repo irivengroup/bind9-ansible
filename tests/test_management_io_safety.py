@@ -259,7 +259,7 @@ def test_total_configuration_tokens_are_bounded_across_includes(lab, monkeypatch
 def test_ambiguous_yaml_is_rejected_before_ansible_can_run_tasks(tmp_path, mapping):
     root = Path(__file__).resolve().parents[1]
     variables = tmp_path / 'request.yml'
-    variables.write_text('bind_manage:\n  ' + mapping + '\n')
+    variables.write_text('bind_resources_manage:\n  ' + mapping + '\n')
     playbook = tmp_path / 'read-only-syntax.yml'
     playbook.write_text('- hosts: all\n  gather_facts: false\n  tasks: []\n')
     env = dict(os.environ, ANSIBLE_CONFIG=str(root / 'ansible.cfg'))
@@ -315,6 +315,6 @@ def test_transport_reports_io_code_without_exposing_sensitive_os_details(tmp_pat
               'rescue': [{'assert': {'that': [
                   repr(symbol) + ' in ansible_failed_result.msg',
                   "'sensitive-runtime-details' not in ansible_failed_result.msg"]}}]}]
-    output = runner.run(tasks, {'bind_manage': dict(resource='option', action='read', name='minimal-responses')})
+    output = runner.run(tasks, {'bind_resources_manage': dict(resource='option', action='read', name='minimal-responses')})
     assert 'sensitive-runtime-details' not in output
     assert (runner.lab.root / 'etc/named.conf').read_text() == CONF

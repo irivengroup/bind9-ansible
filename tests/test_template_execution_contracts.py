@@ -6,6 +6,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from test_dns_topology import FilterModule
 from test_management import M
+from resource_inputs import materialize_zone
 
 ROLE = Path(__file__).resolve().parents[1] / 'roles/bind9'
 
@@ -22,8 +23,9 @@ def test_authoritative_records_are_rendered_and_keep_their_types_and_rdata():
         {'name': 'v6', 'type': 'AAAA', 'value': '2001:db8::80'},
         {'name': 'text', 'type': 'TXT', 'value': '"two words"'},
     ]}
+    zone = materialize_zone(zone)
     rendered = environment().get_template('authoritative.zone.j2').render(
-        auth_zone=zone, bind_authoritative_zones=[zone], bind_forward_zones=[],
+        auth_zone=zone, _bind_deploy_authoritative_zones=[zone], _bind_deploy_forward_zones=[],
         bind_primary_host='p', bind_secondary_host='s',
         hostvars={'p': {'bind_front_ip': '192.0.2.11'}, 's': {'bind_front_ip': '192.0.2.12'}})
     document = M.ZoneDocument(rendered, 'example.test.')
@@ -41,8 +43,8 @@ def test_reverse_delegation_renders_both_ipv4_and_ipv6_glue_without_hiding_ptrs(
     forwarded = {'domain': '0.113.0.203.in-addr.arpa', 'forwarders': [
         {'address': '198.51.100.53'}, {'address': '2001:db8::53'}]}
     rendered = environment().get_template('reverse.zone.j2').render(
-        auth_zone=reverse, bind_authoritative_zones=authorities, bind_managed_zones=authorities,
-        bind_forward_zones=[forwarded])
+        auth_zone=reverse, _bind_deploy_authoritative_zones=authorities, bind_managed_zones=authorities,
+        _bind_deploy_forward_zones=[forwarded])
     document = M.ZoneDocument(rendered, reverse['domain'] + '.')
     assert document.serial().text == '8'
     assert [token.text for token in document.rrset('5.' + reverse['domain'] + '.', 'PTR')[0]['tokens']] == ['app.example.test.']

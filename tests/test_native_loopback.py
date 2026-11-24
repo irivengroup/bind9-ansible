@@ -51,8 +51,8 @@ class TestNativeLoopback:
                        bind_primary_host='p', bind_secondary_host='s',
                        hostvars={'p': {'bind_back_ip': '10.0.0.11', 'bind_front_ip': '192.0.2.11'},
                                  's': {'bind_back_ip': '10.0.0.12', 'bind_front_ip': '192.0.2.12'}},
-                       bind_authoritative_zones=[{'domain': 'example.test'}],
-                       bind_forward_zones=[{'domain': 'corp.test', 'forwarders': [{'address': '10.0.0.53'}]}])
+                       _bind_deploy_authoritative_zones=[{'domain': 'example.test'}],
+                       _bind_deploy_forward_zones=[{'domain': 'corp.test', 'forwarders': [{'address': '10.0.0.53'}]}])
         rendered = Environment(undefined=StrictUndefined).from_string(
             (ROLE / 'templates/named.conf.j2').read_text()).render(**context)
         # Use an exact literal rather than BIND's built-in localhost ACL,

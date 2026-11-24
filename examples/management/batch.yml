@@ -1,7 +1,7 @@
 ---
 # One immutable operations list for preview, check and application.
 # These documentation addresses must be adapted to reachable upstreams.
-bind_manage:
+bind_resources_manage:
   resource: batch
   action: '{{ bind_manage_batch_action | default("read") }}'
   operations:

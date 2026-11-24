@@ -1,5 +1,9 @@
 ---
-# Example addresses: replace before deployment.
+# Exemple multi-écoute : ADMIN = ansible_host ; FRONT/BACK = IP locales.
+# Adapter les adresses avant déploiement ; leur interface est retrouvée par IP.
+# Ne pas imposer de noms d'interfaces si cette sélection par IP convient.
+# Pour une interface ou une écoute unique, remplacer la paire complète :
+# examples/interfaces/README.md et docs/wiki.d/configuration/reseau/INTERFACES_RESEAU.md
 ansible_host: 10.11.2.11
 bind_front_ip: 192.0.2.21
 bind_back_ip: 10.21.2.11

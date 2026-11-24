@@ -262,6 +262,8 @@ class SafeFiles:
     """Read bounded regular files, refusing links and writable/untrusted parents."""
 
     LIMIT = 16 * 1024 * 1024
+    NATIVE_ZONE_FILES = frozenset('/var/named/' + name for name in
+        ('named.localhost', 'named.loopback', 'named.empty'))
 
     def __init__(self, root='/'):
         self.root = Path(root)
@@ -293,6 +295,23 @@ class SafeFiles:
 
     def read(self, virtual):
         path = self.path(virtual)
+        native_link = None
+        if virtual in self.NATIVE_ZONE_FILES and path.is_symlink():
+            # Match the exact vendor links already accepted by native_loopback.
+            # Resolve no arbitrary link and keep /usr outside the general asset
+            # namespace: these three installed targets are read-only inputs.
+            link_info = path.lstat()
+            if (link_info.st_uid != 0 or link_info.st_nlink != 1 or
+                    os.readlink(str(path)) != '../../usr/share/named/' + path.name):
+                raise ManagementError('Unsafe native BIND zone link')
+            native_link = (path, self.stamp(link_info))
+            path = self.root / 'usr/share/named' / path.name
+            cursor = self.root
+            for part in ('usr', 'share', 'named'):
+                cursor = cursor / part
+                info = cursor.lstat()
+                if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                    raise ManagementError('Unsafe native BIND zone ancestor')
         if virtual == '/etc/crypto-policies/back-ends/bind.config' and path.is_symlink():
             # This one vendor-managed link is part of native RHEL crypto policy.
             target = path.resolve(strict=True)
@@ -327,6 +346,13 @@ class SafeFiles:
             observed = self.stamp(info)
             if observed != self.stamp(os.fstat(stream.fileno())) or observed != self.stamp(path.lstat()):
                 raise ManagementError('Configuration changed during a static file read')
+            if native_link is not None:
+                link, link_stamp = native_link
+                if self.stamp(link.lstat()) != link_stamp:
+                    raise ManagementError('Native BIND zone link changed during a static file read')
+                # Preserve the target's dev/inode prefix used by publication
+                # guards, and also observe replacement of an identical link.
+                observed += (link_stamp,)
             self.observations[virtual] = observed
         return data
 
@@ -453,6 +479,139 @@ def canonical_name(value, origin='.'):
     return name
 
 
+class RecordType:
+    """Compare textual and RFC 3597 numeric forms by their DNS wire type.
+
+    Identity normalization never changes the requested RDATA presentation, so
+    older BIND versions can still accept unknown types using numeric syntax.
+    Registry snapshot: IANA DNS RR TYPEs, consulted 2026-11-23.
+    https://www.iana.org/assignments/dns-parameters/dns-parameters-4.csv
+    """
+
+    CODES = {
+        'A': 1,
+        'NS': 2,
+        'MD': 3,
+        'MF': 4,
+        'CNAME': 5,
+        'SOA': 6,
+        'MB': 7,
+        'MG': 8,
+        'MR': 9,
+        'NULL': 10,
+        'WKS': 11,
+        'PTR': 12,
+        'HINFO': 13,
+        'MINFO': 14,
+        'MX': 15,
+        'TXT': 16,
+        'RP': 17,
+        'AFSDB': 18,
+        'X25': 19,
+        'ISDN': 20,
+        'RT': 21,
+        'NSAP': 22,
+        'NSAP-PTR': 23,
+        'SIG': 24,
+        'KEY': 25,
+        'PX': 26,
+        'GPOS': 27,
+        'AAAA': 28,
+        'LOC': 29,
+        'NXT': 30,
+        'EID': 31,
+        'NIMLOC': 32,
+        'SRV': 33,
+        'ATMA': 34,
+        'NAPTR': 35,
+        'KX': 36,
+        'CERT': 37,
+        'A6': 38,
+        'DNAME': 39,
+        'SINK': 40,
+        'OPT': 41,
+        'APL': 42,
+        'DS': 43,
+        'SSHFP': 44,
+        'IPSECKEY': 45,
+        'RRSIG': 46,
+        'NSEC': 47,
+        'DNSKEY': 48,
+        'DHCID': 49,
+        'NSEC3': 50,
+        'NSEC3PARAM': 51,
+        'TLSA': 52,
+        'SMIMEA': 53,
+        'DELEGPARAM': 54,
+        'HIP': 55,
+        'NINFO': 56,
+        'RKEY': 57,
+        'TALINK': 58,
+        'CDS': 59,
+        'CDNSKEY': 60,
+        'OPENPGPKEY': 61,
+        'CSYNC': 62,
+        'ZONEMD': 63,
+        'SVCB': 64,
+        'HTTPS': 65,
+        'DSYNC': 66,
+        'HHIT': 67,
+        'BRID': 68,
+        'UNECE': 69,
+        'ISO': 70,
+        'SPF': 99,
+        'UINFO': 100,
+        'UID': 101,
+        'GID': 102,
+        'UNSPEC': 103,
+        'NID': 104,
+        'L32': 105,
+        'L64': 106,
+        'LP': 107,
+        'EUI48': 108,
+        'EUI64': 109,
+        'NXNAME': 128,
+        'TKEY': 249,
+        'TSIG': 250,
+        'IXFR': 251,
+        'AXFR': 252,
+        'MAILB': 253,
+        'MAILA': 254,
+        'ANY': 255,
+        'URI': 256,
+        'CAA': 257,
+        'AVC': 258,
+        'DOA': 259,
+        'AMTRELAY': 260,
+        'RESINFO': 261,
+        'WALLET': 262,
+        'CLA': 263,
+        'IPN': 264,
+        'TA': 32768,
+        'DLV': 32769,
+        'DELEG': 61440,
+    }
+    PROTECTED = {'TYPE6', 'TYPE46', 'TYPE47', 'TYPE48', 'TYPE50', 'TYPE51', 'TYPE59', 'TYPE60'}
+    SIGNED = {'TYPE46', 'TYPE47', 'TYPE48', 'TYPE50', 'TYPE51'}
+
+    @classmethod
+    def identity(cls, value):
+        if not isinstance(value, str):
+            raise ManagementError('Record type must be a string')
+        name = value.upper()
+        match = re.fullmatch(r'TYPE([0-9]+)', name)
+        if match:
+            # Strip padding before integer conversion: an attacker-controlled
+            # digit string must not cause an unbounded big-integer operation.
+            digits = match[1].lstrip('0') or '0'
+            if len(digits) > 5 or not 1 <= int(digits) <= 65534:
+                raise ManagementError('Numeric record type must be between 1 and 65534')
+            code = int(digits)
+        else:
+            code = cls.CODES.get(name)
+        return 'TYPE' + str(code) if code is not None else name
+
+
 class ZoneDocument:
     """Retain static zone source, logical RR spans and inherited owner/origin."""
 
@@ -559,7 +718,8 @@ class ZoneDocument:
             yield start, len(text)
 
     def rrset(self, owner, kind):
-        return [record for record in self.records if record['name'] == owner and record['type'] == kind]
+        identity = RecordType.identity(kind)
+        return [record for record in self.records if record['name'] == owner and RecordType.identity(record['type']) == identity]
 
     def serial(self):
         records = self.rrset(self.domain, 'SOA')
@@ -605,7 +765,7 @@ class ZoneDocument:
         after = ZoneDocument(text, self.domain)
         def unaffected(records):
             return sorted((r['name'], r['type'], r['ttl'] or '', tuple(t.text for t in r['tokens']))
-                          for r in records if (r['name'], r['type']) != (owner, kind))
+                          for r in records if (r['name'], RecordType.identity(r['type'])) != (owner, RecordType.identity(kind)))
         if unaffected(self.records) != unaffected(after.records):
             raise ManagementError('This edit would change inherited owners/TTL of another record; make those owners explicit first')
         return after.bump() if bump_serial else after.text
@@ -845,8 +1005,8 @@ class Manager:
             if self.action in ('create', 'update'):
                 allowed |= {'values', 'ttl'}
         elif self.resource == 'zone':
-            allowed |= {'create': {'kind', 'forwarders', 'dnssec_validate', 'serial', 'ttl'},
-                        'update': {'forwarders', 'dnssec_validate', 'settings'},
+            allowed |= {'create': {'kind', 'policy', 'forwarders', 'dnssec_validate', 'serial', 'ttl'},
+                        'update': {'policy', 'forwarders', 'dnssec_validate', 'settings'},
                         'delete': {'purge_data'}, 'read': set()}[self.action]
         if set(request) - allowed:
             raise ManagementError('Unknown request fields: ' + ', '.join(sorted(set(request) - allowed)))
@@ -1018,7 +1178,7 @@ class Manager:
         if not isinstance(kind, str) or not re.fullmatch('[A-Za-z][A-Za-z0-9]*', kind):
             raise ManagementError('Invalid record type')
         kind = kind.upper()
-        if (self.action != 'read' and kind in ('SOA', 'RRSIG', 'NSEC', 'NSEC3', 'NSEC3PARAM', 'DNSKEY', 'CDS', 'CDNSKEY')) or not (owner == domain or owner.endswith('.' + domain)):
+        if (self.action != 'read' and RecordType.identity(kind) in RecordType.PROTECTED) or not (owner == domain or owner.endswith('.' + domain)):
             raise ManagementError('Record is outside the zone or owned by SOA/DNSSEC machinery')
         return owner, kind
 
@@ -1029,7 +1189,8 @@ class Manager:
             self.option()
         elif self.resource == 'record':
             zone = self.selected_zone()
-            if zone['kind'] not in ('master', 'primary') or zone['domain'] in self.PROTECTED_ZONES:
+            if (zone['kind'] not in ('master', 'primary') or zone['domain'] in self.PROTECTED_ZONES or
+                    str(Path(zone.get('file', ''))) in SafeFiles.NATIVE_ZONE_FILES):
                 raise ManagementError('Record writes require a non-native primary static zone')
             owner, kind = self.record_identity(zone['domain'])
             if any(z['kind'] == 'forward' and (owner == name or owner.endswith('.' + name))
@@ -1153,6 +1314,8 @@ class Manager:
         self.changes['/etc/named.conf'] = text.encode('utf-8')
 
     def zone(self):
+        if 'policy' in self.request and self.request['policy'] != 'only':
+            raise ManagementError('Conditional forwarding requires policy only')
         domain = canonical_name(self.request.get('name', ''))
         if '*' in domain or '_' in domain or any(
                 native != '.' and (domain == native or domain.endswith('.' + native) or native.endswith('.' + domain))
@@ -1179,7 +1342,7 @@ class Manager:
             if self.zone_declaration and (old['kind'] == 'forward') != (self.zone_declaration.kind == 'forward'):
                 raise ManagementError('A zone declaration update cannot change the existing zone kind')
             if old['kind'] != 'forward':
-                if {'forwarders', 'dnssec_validate'} & set(self.request):
+                if {'policy', 'forwarders', 'dnssec_validate'} & set(self.request):
                     raise ManagementError('Forwarding fields cannot be applied to an authoritative zone')
                 if self.zone_declaration:
                     if old['kind'] in ('master', 'primary'):
@@ -1215,7 +1378,7 @@ class Manager:
                 declaration = 'zone "' + domain.rstrip('.') + '" IN {\n    type forward;\n    forward only;\n    forwarders ' + self.forward_value(servers) + ';\n};\n'
                 new_zones[domain] = {'domain': domain, 'kind': 'forward'}
             elif kind == 'authoritative':
-                if {'forwarders', 'dnssec_validate'} & set(self.request):
+                if {'policy', 'forwarders', 'dnssec_validate'} & set(self.request):
                     raise ManagementError('Forwarding fields cannot be applied to an authoritative zone')
                 declaration, zone = self.authority(domain)
                 new_zones[domain] = zone
@@ -1299,30 +1462,13 @@ class Manager:
         keys = [c.header[1].value for syntax in self.config.configs.values() for c in syntax.clauses if c.name == 'key']
         if key not in keys:
             raise ManagementError('The site transfer key must already exist in the live configuration')
-        for name in ('primary_front', 'secondary_front', 'primary_back', 'secondary_back'):
-            try:
-                value = context.get(name, '')
-                if not isinstance(value, str):
-                    raise ValueError()
-                address = ipaddress.IPv4Address(value)
-                if (address.is_multicast or address.is_unspecified or address.is_loopback or
-                        address.is_link_local or str(address) == '255.255.255.255'):
-                    raise ValueError()
-            except ValueError:
-                raise ManagementError('Invalid peer identity for authoritative zone creation')
+        self.validate_peers()
         name = domain.rstrip('.')
         if context.get('primary'):
             filename = '/var/named/zones/' + name + '.zone'
             if self.files.path(filename).exists():
                 raise ManagementError('A pre-existing zone data file must not be overwritten by create')
-            serial, ttl = self.request.get('serial', 1), self.request.get('ttl', 300)
-            if self.zone_declaration is None and any(
-                    isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 4294967295 for v in (serial, ttl)):
-                raise ManagementError('Positive integer serial and ttl are required')
-            data = ('; Bind9-Ansible-MANAGED-ZONE\n$TTL ' + str(ttl) + '\n@ IN SOA ns1.' + domain +
-                    ' hostmaster.' + domain + ' ( ' + str(serial) + ' 3600 900 1209600 300 )\n' +
-                    '@ IN NS ns1.' + domain + '\n@ IN NS ns2.' + domain + '\nns1 IN A ' + context['primary_front'] +
-                    '\nns2 IN A ' + context['secondary_front'] + '\n')
+            data = self.authoritative_data(domain)
             if self.zone_declaration:
                 data = self.zone_declaration.apply_records(data, self.config.zones, context)
             self.changes[filename] = data.encode('utf-8')
@@ -1340,6 +1486,31 @@ class Manager:
             kind = 'slave'
         return ('zone "' + name + '" IN {\n    ' + body + '\n};\n',
                 {'domain': domain, 'kind': kind, 'file': filename})
+
+    def validate_peers(self):
+        """Refuse unsafe identities before rendering either resource workflow."""
+        for name in ('primary_front', 'secondary_front', 'primary_back', 'secondary_back'):
+            try:
+                value = self.context.get(name, '')
+                if not isinstance(value, str):
+                    raise ValueError()
+                address = ipaddress.IPv4Address(value)
+                if (address.is_multicast or address.is_unspecified or address.is_loopback or
+                        address.is_link_local or str(address) == '255.255.255.255'):
+                    raise ValueError()
+            except ValueError:
+                raise ManagementError('Invalid peer identity for authoritative zone creation')
+
+    def authoritative_data(self, domain):
+        """Build the same initial primary data for deployment and maintenance."""
+        serial, ttl = self.request.get('serial', 1), self.request.get('ttl', 300)
+        if self.zone_declaration is None and any(
+                isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 4294967295 for v in (serial, ttl)):
+            raise ManagementError('Positive integer serial and ttl are required')
+        return ('; Bind9-Ansible-MANAGED-ZONE\n$TTL ' + str(ttl) + '\n@ IN SOA ns1.' + domain +
+                ' hostmaster.' + domain + ' ( ' + str(serial) + ' 3600 900 1209600 300 )\n' +
+                '@ IN NS ns1.' + domain + '\n@ IN NS ns2.' + domain + '\nns1 IN A ' + self.context['primary_front'] +
+                '\nns2 IN A ' + self.context['secondary_front'] + '\n')
 
     def cuts(self, zones, syntax):
         auth = {name: z for name, z in zones.items() if z['kind'] in ('master', 'primary', 'slave', 'secondary')}
@@ -1423,7 +1594,7 @@ class Manager:
             if path not in self.changes or self.changes[path] is None or self.changes[path] == self.config.contents.get(path):
                 continue
             original = ZoneDocument(self.config.contents[path].decode('utf-8'), domain)
-            if any(record['type'] in ('RRSIG', 'DNSKEY', 'NSEC', 'NSEC3', 'NSEC3PARAM') for record in original.records):
+            if any(RecordType.identity(record['type']) in RecordType.SIGNED for record in original.records):
                 raise ManagementError('Signed primary data requires its signing workflow; static edits would invalidate signatures')
             before = original.serial()
             text = self.changes[path].decode('utf-8')
@@ -2065,7 +2236,7 @@ class BatchManager(Manager):
             if planner.resource == 'record':
                 domain = canonical_name(operation.get('zone', ''))
                 owner, kind = planner.record_identity(domain)
-                identity = ('record', domain, owner, kind)
+                identity = ('record', domain, owner, RecordType.identity(kind))
                 record_zones.add(domain)
             elif planner.resource == 'zone':
                 self.zone_operations.append(planner.request)
@@ -2185,3 +2356,132 @@ class BatchManager(Manager):
                 probes[(name, 'SOA')] = None if self.final_config.zones[name]['kind'] == 'forward' else '*'
         self.expected_serials = expected
         self.check_probes([(name, kind, serial) for (name, kind), serial in sorted(probes.items())])
+
+
+class DeploymentResources:
+    """Materialize a fresh deployment from the canonical management schemas.
+
+    A deployment builds a new desired graph; it never interprets operations
+    against live data. Runtime options/ACL/logging are planned on the target
+    against the generated baseline and validated there by the same BatchManager.
+    No configuration is published by this controller-side compiler.
+    """
+
+    def __init__(self, request, context):
+        if not isinstance(request, dict):
+            raise ManagementError('bind_resources_deploy must be a resource request mapping')
+        if request.get('resource') == 'batch':
+            if set(request) != {'resource', 'action', 'operations'} or request.get('action') not in ('create', 'apply'):
+                raise ManagementError('Deployment batches accept resource, action create/apply and operations only')
+            operations = request['operations']
+        else:
+            operations = [request]
+        # An explicitly empty desired deployment is useful for forwarding-only
+        # bootstrap. Management still requires at least one actual operation.
+        if operations == []:
+            self.operations = []
+        else:
+            self.operations = BatchManager(dict(resource='batch', action='read', operations=operations), context).operations
+        self.context = dict(context)
+
+    def compile(self):
+        """Return private template inputs, preserving order and SOA serials."""
+        # Template lookups may repeat. Neither a previous result nor its caller
+        # can accumulate operations or mutate the owned input request.
+        self.authoritative, self.forwarded, self.extras = {}, {}, []
+        self.explicit_records = set()
+        for operation in self.operations:
+            planner = Manager(operation, self.context, check=True)
+            if planner.resource == 'zone':
+                self.zone(planner)
+            elif planner.resource == 'record':
+                self.record(planner)
+            else:
+                self.extras.append(operation)
+        for domain, zone in self.authoritative.items():
+            document = ZoneDocument(zone['data'], domain)
+            # Multiple RR edits create one initial state, not a sequence of
+            # live serial increments. The requested initial serial stays exact.
+            token = document.serial()
+            zone['data'] = document.text[:token.start] + str(zone['serial']) + document.text[token.end:]
+            zone['records'] = [self.catalog_record(rr, domain)
+                for rr in document.records if (domain, rr['name'], rr['type']) in self.explicit_records]
+        return json.loads(json.dumps(dict(authoritative_zones=list(self.authoritative.values()),
+                    forward_zones=list(self.forwarded.values()), extra_operations=self.extras)))
+
+    @staticmethod
+    def catalog_record(record, domain):
+        """Derive reverse/topology metadata without rewriting source RDATA.
+
+        A/AAAA numeric aliases and RFC 3597 wire presentations still describe
+        addresses. Decode those for PTR generation; all other generic RDATA
+        stays opaque and must pass the final native BIND validation.
+        """
+        kind = record['type']
+        identity = RecordType.identity(kind)
+        value = ' '.join(token.text for token in record['tokens'])
+        payload = None
+        if value.startswith('\\#'):
+            match = re.fullmatch(r'\\#\s+([0-9]+)(?:[ \t]+([0-9A-Fa-f \t]*))?', value)
+            if match is None:
+                raise ManagementError('Invalid generic RDATA presentation')
+            digits = match[1].lstrip('0') or '0'
+            hex_data = re.sub(r'[ \t]', '', match[2] or '')
+            try:
+                payload = bytes.fromhex(hex_data)
+            except ValueError as error:
+                raise ManagementError('Invalid generic RDATA hex') from error
+            if len(digits) > 5 or int(digits) != len(payload) or len(payload) > 65535:
+                raise ManagementError('Generic RDATA length does not match its bytes')
+            kind = identity
+        if identity in ('TYPE1', 'TYPE28'):
+            kind, size = ('A', 4) if identity == 'TYPE1' else ('AAAA', 16)
+            if payload is not None:
+                if len(payload) != size:
+                    raise ManagementError('Address RDATA length does not match its family')
+                value = str(ipaddress.ip_address(payload))
+        return dict(name='@' if record['name'] == domain else record['name'][:-len(domain)-1], type=kind, value=value)
+
+    def zone(self, planner):
+        request = planner.request
+        domain = canonical_name(request['name'])
+        if planner.action != 'create':
+            raise ManagementError('A fresh deployment declares each zone with action create')
+        if domain in Manager.PROTECTED_ZONES or any(
+                native != '.' and (domain.endswith('.' + native) or native.endswith('.' + domain))
+                for native in Manager.PROTECTED_ZONES):
+            raise ManagementError('Native/root zones are protected')
+        # Domain and topology validation also runs on the complete materialized
+        # catalog before any target configuration changes.
+        if not ZoneDeclaration.DOMAIN.fullmatch(domain.rstrip('.')):
+            raise ManagementError('Invalid deployment zone suffix')
+        if request.get('kind') == 'forward':
+            if {'serial', 'ttl'} & set(request) or request.get('policy', 'only') != 'only':
+                raise ManagementError('A forwarding zone requires policy only and no local SOA')
+            if 'dnssec_validate' in request and not isinstance(request['dnssec_validate'], bool):
+                raise ManagementError('dnssec_validate must be a YAML boolean')
+            self.forwarded[domain] = dict(domain=domain.rstrip('.'), policy='only',
+                forwarders=planner.forwarders(request.get('forwarders')),
+                dnssec_validate=request.get('dnssec_validate', True))
+        elif request.get('kind') == 'authoritative':
+            if {'policy', 'forwarders', 'dnssec_validate'} & set(request):
+                raise ManagementError('Forwarding fields cannot be applied to an authoritative zone')
+            planner.validate_peers()
+            data = planner.authoritative_data(domain)
+            if planner.zone_declaration:
+                data = planner.zone_declaration.apply_records(data, {}, self.context)
+                self.explicit_records.update((domain, owner, kind) for owner, kind in planner.zone_declaration.records)
+            self.authoritative[domain] = dict(domain=domain.rstrip('.'), serial=request.get('serial', 1),
+                                             ttl=request.get('ttl', 300), data=data)
+        else:
+            raise ManagementError('Create kind forward or authoritative')
+
+    def record(self, planner):
+        domain = canonical_name(planner.request['zone'])
+        if domain not in self.authoritative:
+            raise ManagementError('Declare the authoritative zone before its records')
+        owner, kind = planner.record_identity(domain)
+        zone = self.authoritative[domain]
+        zone['data'] = ZoneDocument(zone['data'], domain).change(planner.action, owner, kind,
+            planner.request.get('values'), planner.request.get('ttl'), bump_serial=False)
+        self.explicit_records.add((domain, owner, kind))

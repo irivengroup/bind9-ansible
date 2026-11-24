@@ -37,9 +37,9 @@ def test_native_zone_outputs_permissions_retirement_and_serial_helper(zones, tmp
     forwarded = [{'domain': name, 'forwarders': forwarders} for name in
                  ('corp.example.test', 'outside.test', '0.' + REVERSE)] if delegations else []
     reverse = {'domain': REVERSE, 'serial': 8, 'records': [{'name': '20', 'value': 'www.example.test.'}]}
-    values.update(bind_authoritative_zones=values['bind_authoritative_zones'] if populated else [],
-                  bind_generated_reverse_zones=[reverse] if populated else [], bind_forward_zones=forwarded,
-                  bind_managed_zones=values['bind_authoritative_zones'] + [reverse] if populated else [],
+    values.update(_bind_deploy_authoritative_zones=values['_bind_deploy_authoritative_zones'] if populated else [],
+                  bind_generated_reverse_zones=[reverse] if populated else [], _bind_deploy_forward_zones=forwarded,
+                  bind_managed_zones=values['_bind_deploy_authoritative_zones'] + [reverse] if populated else [],
                   group_names=['dns_primary' if primary else 'dns_secondary'])
     archive = backup(tmp_path, [])
     values['bind_recovery_archive'] = str(archive)
@@ -85,7 +85,7 @@ def test_native_reverse_reconciliation_uses_real_predeployment_bytes(zones, tmp_
     reverse = {'domain': REVERSE, 'serial': 8, 'records': [{'name': '10', 'value': 'changed.example.test.'}]}
     prior = ReverseTemplate().render(serial=25)
     archive = backup(tmp_path, [('var/named/zones/' + REVERSE + '.zone', prior.encode('utf-8'), tarfile.REGTYPE)])
-    values.update(bind_generated_reverse_zones=[reverse], bind_managed_zones=values['bind_authoritative_zones'] + [reverse],
+    values.update(bind_generated_reverse_zones=[reverse], bind_managed_zones=values['_bind_deploy_authoritative_zones'] + [reverse],
                   bind_existing_reverse_files={'files': []}, bind_recovery_archive=str(archive))
     status, result = NativeZoneRun('tasks.d/deploy/zones.yml', values,
         inventory_hosts=hosts, inventory_groups=groups).run()

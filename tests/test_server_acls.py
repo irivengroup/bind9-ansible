@@ -23,7 +23,7 @@ class TestServerAcls:
                        group_names=[role], bind_tsig_key_name='site-transfer',
                        bind_tsig_algorithm='hmac-sha256', bind_tsig_secret='render-only',
                        bind_allowed_clients=['192.0.2.0/24', '10.0.0.0/24'],
-                       bind_authoritative_zones=[{'domain': 'example.test'}], bind_forward_zones=[])
+                       _bind_deploy_authoritative_zones=[{'domain': 'example.test'}], _bind_deploy_forward_zones=[])
         output = Environment(undefined=StrictUndefined).from_string(TEMPLATE.read_text()).render(**context)
         definitions = dict(re.findall(r'acl "([^"]+)"\s*\{([^{}]+)\};', output))
         for peer, prefix in (('p', 'primary'), ('s', 'secondary')):

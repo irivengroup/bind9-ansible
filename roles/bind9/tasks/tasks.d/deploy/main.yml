@@ -13,18 +13,22 @@
     _bind_probe_legacy_network: true
   tags: [always]
 
+- name: Compile the unified desired resource declaration
+  ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/resources.yml'
+  tags: [always]
+
 - name: Provision shared site TSIG on the controller
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/tsig.yml'
   tags: [deploy, configure]
 
 - name: Generate reverse zones and PTR records from authoritative addresses
   ansible.builtin.set_fact:
-    bind_generated_reverse_zones: "{{ bind_authoritative_zones | automatic_reverse_zones }}"
+    bind_generated_reverse_zones: "{{ _bind_deploy_authoritative_zones | automatic_reverse_zones }}"
   tags: [always]
 
 - name: Combine direct and automatically generated reverse zones
   ansible.builtin.set_fact:
-    bind_managed_zones: "{{ bind_authoritative_zones + bind_generated_reverse_zones }}"
+    bind_managed_zones: "{{ _bind_deploy_authoritative_zones + bind_generated_reverse_zones }}"
   tags: [always]
 
 - name: Validate named inputs
@@ -147,6 +151,10 @@
     - name: Install authoritative zone files
       ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/zones.yml'
       tags: [deploy, configure, zones, records]
+
+    - name: Customize generated options ACLs and logging in the DNS transaction
+      ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/customization.yml'
+      tags: [deploy, configure]
 
     - name: Configure SELinux contexts
       ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/security.yml'

@@ -1,6 +1,6 @@
 ---
 # Replace this zone with the existing authoritative zone of your site.
-bind_manage:
+bind_resources_manage:
   resource: record
   action: list
   zone: site1.prod.example.test

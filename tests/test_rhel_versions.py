@@ -57,7 +57,7 @@ def test_el7_workflow_report_check_survives_shell_argument_serialization(tmp_pat
 def test_deployment_and_management_admit_redhat_major_versions_from_seven(major):
     values = settings()
     values.update(ansible_distribution_major_version=major,
-                  bind_manage=dict(resource='option', action='read', name='minimal-responses'))
+                  bind_resources_manage=dict(resource='option', action='read', name='minimal-responses'))
     CanonicalPredicates('deploy/validate.yml').check('Validate supported platform and mandatory inputs', values, True)
     CanonicalPredicates('manage/main.yml').check('Validate the management platform and explicit request envelope', values, True)
 
@@ -67,7 +67,7 @@ def test_deployment_and_management_admit_redhat_major_versions_from_seven(major)
 def test_platform_expansion_preserves_unsupported_host_refusals(distribution, major):
     values = settings()
     values.update(ansible_distribution=distribution, ansible_distribution_major_version=major,
-                  bind_manage=dict(resource='option', action='read', name='minimal-responses'))
+                  bind_resources_manage=dict(resource='option', action='read', name='minimal-responses'))
     CanonicalPredicates('deploy/validate.yml').check('Validate supported platform and mandatory inputs', values, False)
     CanonicalPredicates('manage/main.yml').check('Validate the management platform and explicit request envelope', values, False)
 
@@ -116,6 +116,34 @@ def test_management_uses_python_three_on_legacy_targets_and_preserves_selected_m
     transaction = next(item for parent in tasks for item in parent.get('block', [])
                        if item['name'] == 'Run the private management transaction')
     transport = Templar(loader=DataLoader(), variables=facts).template(transaction['vars'])
+    assert transport == {'ansible_python_interpreter': expected}
+
+
+@pytest.mark.parametrize('major,version,interpreter,expected', [
+    ('7', '2.7.5', '/usr/bin/python', '/usr/bin/python3'),
+    ('7', '3.6.8', '/opt/python3', '/opt/python3'),
+    ('8', '3.6.8', '/usr/libexec/platform-python', '/usr/libexec/platform-python'),
+    ('9', '3.9.21', '/usr/bin/python3', '/usr/bin/python3'),
+    ('10', '3.12.9', '/usr/bin/python3', '/usr/bin/python3')])
+def test_deployment_customization_hands_the_required_runtime_to_the_native_module(major, version, interpreter, expected):
+    from ansible.playbook.task import Task
+    from native_ansible_runner import init_plugin_loader
+    # A standalone batch must register real built-ins just like the Ansible CLI;
+    # a previous native workflow must not supply this prerequisite by accident.
+    if init_plugin_loader is not None:
+        init_plugin_loader()
+    tasks = TaskExpressions.load('deploy/customization.yml')
+    values = dict(ansible_distribution_major_version=major, ansible_python_version=version,
+                  ansible_python_interpreter=interpreter, _bind_deploy_extra_operations=[{}])
+    # Native Task loading normalizes scalar `when`; the expression-only helper
+    # expects lists and would otherwise iterate the condition's characters.
+    loader = DataLoader()
+    task = Task.load(tasks[0], loader=loader)
+    renderer = Templar(loader=loader, variables=values)
+    assert task.evaluate_conditional(renderer, values) is True
+    facts = renderer.template(task.args)
+    assert facts['_bind_deploy_resources_python'] == expected
+    transport = Templar(loader=DataLoader(), variables=facts).template(tasks[1]['vars'])
     assert transport == {'ansible_python_interpreter': expected}
 
 

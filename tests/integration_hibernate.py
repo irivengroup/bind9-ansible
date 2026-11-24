@@ -46,9 +46,9 @@ class HibernateIntegration(LoopbackIntegration):
                         context.update(bind_dnssec_active=validation, group_names=[role],
                                        bind_trusted_networks=dict(cloud_clients=cloud, internal_clients=internal))
                         if not authority:
-                            context.update(bind_authoritative_zones=[], bind_managed_zones=[])
+                            context.update(_bind_deploy_authoritative_zones=[], bind_managed_zones=[])
                         if not forward:
-                            context['bind_forward_zones'] = []
+                            context['_bind_deploy_forward_zones'] = []
                         self.render(folder / ('matrix-' + str(count)), context)
                         count += 1
         return count
@@ -56,8 +56,8 @@ class HibernateIntegration(LoopbackIntegration):
     def probes(self, folder):
         """Run the exact Ansible loopback task against native UDP/TCP replies."""
         _, context = next(self.contexts())
-        context.update(bind_dnssec_active=False, bind_forward_zones=[],
-                       bind_authoritative_zones=[], bind_managed_zones=[])
+        context.update(bind_dnssec_active=False, _bind_deploy_forward_zones=[],
+                       _bind_deploy_authoritative_zones=[], bind_managed_zones=[])
         config = self.render(folder / 'server', context)
         with socket.socket() as reservation:
             reservation.bind(('127.0.0.1', 0))

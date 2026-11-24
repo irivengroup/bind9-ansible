@@ -491,7 +491,7 @@ class NativeZoneRun(NativeProvisionRun):
     def __init__(self, filename, variables, **options):
         # These fixture values enter canonical filesystem paths. Keep every
         # real write inside this runner's independently owned container roots.
-        for zone in variables.get('bind_authoritative_zones', []) + variables.get('bind_generated_reverse_zones', []):
+        for zone in variables.get('_bind_deploy_authoritative_zones', []) + variables.get('bind_generated_reverse_zones', []):
             name = zone.get('domain', '')
             if not name or any(character not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-' for character in name) or '..' in name:
                 raise ValueError('Native zone fixtures require literal DNS names')

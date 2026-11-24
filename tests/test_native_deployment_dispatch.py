@@ -23,7 +23,7 @@ def run(phase, locked=False, check=False, **values):
         bind_front_routes_enabled=False, ansible_distribution='RedHat', ansible_distribution_major_version='8',
         bind_tsig_key_name='site-transfer', bind_tsig_algorithm='hmac-sha256',
         bind_tsig_secret=base64.b64encode(b'public-synthetic-test-fixture-0000').decode('ascii'),
-        bind_authoritative_zones=[], bind_forward_zones=[], bind_trusted_networks=dict(cloud_clients=[], internal_clients=['203.0.113.0/24']))
+        bind_trusted_networks=dict(cloud_clients=[], internal_clients=['203.0.113.0/24']))
     variables.update(values)
     return NativeDeploymentPlayRun('main.yml', variables, check_mode=check, inventory_hosts=hosts,
         inventory_groups=dict(site=['localhost', 'peer'], dns_primary=['localhost'], dns_secondary=['peer'],
@@ -57,6 +57,20 @@ def test_native_public_deployment_nonprovisioning_tags_preserve_original_dispatc
     else:
         assert result.ok.count('Validate supported platform and mandatory inputs') == 2
         assert 'Acquire the shared deployment and management lease without stealing it' not in result.ok
+
+
+def test_native_public_deployment_preflight_consumes_the_unified_resource_declaration():
+    request = dict(resource='batch', action='create', operations=[dict(
+        resource='zone', action='create', name='unified.example.test', kind='forward', policy='only',
+        forwarders=[dict(address='203.0.113.53')])])
+    status, result = run('preflight', bind_resources_deploy=request)
+    assert status == 0 and not result.failed, (status, result.failed)
+    # An ignored declaration used to leave the role's empty zone lists in force.
+    # Both real host workers must now validate the declared forwarding zone.
+    # Authority replication readiness has a separate live-DNS fixture; it must
+    # not be bypassed for this non-provisioning dispatch scenario.
+    assert result.ok.count('Validate each conditional forwarding zone') == 2
+    assert not Path('/etc/named.conf').exists()
 
 
 class NativeRouteMessageRun(NativeTaskRun):

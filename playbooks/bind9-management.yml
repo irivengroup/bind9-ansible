@@ -19,9 +19,9 @@
       vars:
         _bind_manage_preflight: true
       when:
-        - bind_manage is defined and bind_manage is mapping
-        - bind_manage.resource | default('') == 'batch'
-        - bind_manage.action | default('') == 'apply'
+        - bind_resources_manage is defined and bind_resources_manage is mapping
+        - bind_resources_manage.resource | default('') == 'batch'
+        - bind_resources_manage.action | default('') == 'apply'
         - not ansible_check_mode
 
 - name: Apply targeted BIND management without redeployment

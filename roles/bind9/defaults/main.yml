@@ -10,8 +10,11 @@ bind_trusted_networks:
   internal_clients: []
 # Automatic validation by default; explicit false deploys no DNSSEC runtime assets.
 bind_dnssec_active: auto
-bind_forward_zones: []
-bind_authoritative_zones: []
+# One resource request; an empty list explicitly deploys no custom resources.
+bind_resources_deploy:
+  resource: batch
+  action: create
+  operations: []
 bind_backup_root: /var/backups/Bind9-Ansible/bind
 bind_monitoring_enabled: false
 

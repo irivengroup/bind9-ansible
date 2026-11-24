@@ -26,6 +26,8 @@ class CampaignPlan:
     MODULES = {
         'tests/test_management_acl_logging.py': 'checker',
         'tests/test_native_management_playbook.py': 'public',
+        # This transport must use the genuine deployed native checker path.
+        'tests/test_native_resources_deploy.py': 'public',
     }
 
     @classmethod

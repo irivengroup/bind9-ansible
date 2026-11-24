@@ -32,7 +32,8 @@ class InventoryPreflight:
                          {'include_role': {'name': 'bind9', 'tasks_from': 'tasks.d/dnssec_settings.yml'}},
                          {'include_role': {'name': 'bind9', 'tasks_from': 'tasks.d/clients.yml'}},
                          {'include_role': {'name': 'bind9', 'tasks_from': 'tasks.d/site_peers.yml'}},
-                         {'set_fact': {'bind_managed_zones': '{{ bind_authoritative_zones + (bind_authoritative_zones | automatic_reverse_zones) }}'}},
+                         {'include_role': {'name': 'bind9', 'tasks_from': 'tasks.d/deploy/resources.yml'}},
+                         {'set_fact': {'bind_managed_zones': '{{ _bind_deploy_authoritative_zones + (_bind_deploy_authoritative_zones | automatic_reverse_zones) }}'}},
                          {'include_role': {'name': 'bind9', 'tasks_from': 'tasks.d/deploy/validate.yml'}}]}]
             path.write_text(yaml.safe_dump(play))
             for name in ('dev', 'preprod', 'prod'):

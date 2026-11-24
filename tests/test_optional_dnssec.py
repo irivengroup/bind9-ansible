@@ -50,8 +50,8 @@ class TestOptionalDnssec:
                      hostvars={'p':{'bind_back_ip':'10.0.0.11'},'s':{'bind_back_ip':'10.0.0.12'}},
                      bind_front_ip='192.0.2.11',bind_back_ip='10.0.0.11',
                      bind_tsig_key_name='test-transfer',bind_tsig_algorithm='hmac-sha256',
-                     bind_tsig_secret='render-only',bind_authoritative_zones=[],
-                     bind_forward_zones=[{'domain':'private.test','dnssec_validate':False,
+                     bind_tsig_secret='render-only',_bind_deploy_authoritative_zones=[],
+                     _bind_deploy_forward_zones=[{'domain':'private.test','dnssec_validate':False,
                                           'forwarders':[{'address':'10.11.0.53'}]}])
         if value == '__omitted__':
             context.pop('bind_dnssec_active')

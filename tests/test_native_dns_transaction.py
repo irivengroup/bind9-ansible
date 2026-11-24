@@ -16,6 +16,7 @@ from test_native_health import replies as health_replies
 from test_native_front_routes import BASE, NEW, NativeRouteLab
 from test_native_preflight import scope
 from test_native_security import commands as security_replies
+from resource_inputs import edit_zone_data
 
 pytestmark = pytest.mark.skipif(os.name != 'posix' or os.environ.get('BIND9_NATIVE_STATE_LAB') != '1',
     reason='Requires an explicitly enabled disconnected clean Linux root')
@@ -24,10 +25,10 @@ ORIGINAL = b'// original native transaction fixture\noptions { directory "/var/n
 
 def variables(dnssec):
     hosts, groups = scope()
-    for name in ('bind_authoritative_zones', 'bind_managed_zones'):
-        hosts['localhost'][name][0]['serial'] = 7
+    for name in ('_bind_deploy_authoritative_zones', 'bind_managed_zones'):
+        edit_zone_data(hosts['localhost'][name][0], serial=7)
     # Keep host identities below global extra-vars so the peer remains distinct.
-    values = dict(bind_dnssec_active=dnssec, bind_generated_reverse_zones=[],
+    values = dict(bind_dnssec_active=dnssec, bind_generated_reverse_zones=[], _bind_deploy_extra_operations=[],
         bind_front_routes_enabled=False, bind_front_routes_defer_commit=False,
         bind_backup_root=NativeMigrationRun.ROOT, bind_primary_host='localhost')
     return values, hosts, groups
@@ -111,6 +112,27 @@ def test_native_protected_dns_transaction_commits_or_restores_exact_prior_config
             inventory_hosts=hosts, inventory_groups=groups).run()
         check_dns_result(config, units, status, result, failure)
         assert json.loads(calls.read_text())['calls']
+
+
+def test_native_resource_customization_refusal_restores_the_entire_predeployment_snapshot(transaction):
+    config, units, commands = transaction
+    values, hosts, groups = variables(False)
+    values['_bind_deploy_extra_operations'] = [dict(resource='option', action='update', name='allow-query', value='{ any; }')]
+    # This transaction fixture isolates the vendor include boundary; the
+    # separate public cohort supplies the genuine BIND parser. Here complete
+    # readable includes let the real private module reach its protected-option
+    # refusal, rather than failing earlier on an unrelated missing include.
+    Path('/etc/named.rfc1912.zones').write_text('// owned transaction fixture include\n')
+    policy = Path('/etc/crypto-policies/back-ends/bind.config')
+    policy.parent.mkdir(parents=True)
+    policy.write_text('// owned transaction fixture crypto include\n')
+    with NativeRecordedBoundary(commands, NativeTransactionRun, replies()):
+        status, result = NativeTransactionRun('tasks.d/deploy/main.yml', values,
+            inventory_hosts=hosts, inventory_groups=groups).run()
+        check_dns_result(config, units, status, result, 'customization')
+    assert result.failed[0] == 'Validate custom resources against the generated baseline and native includes'
+    assert 'Check generated BIND configuration and authoritative zones' not in result.ok
+    assert policy.read_text() == '// owned transaction fixture crypto include\n'
 
 
 @pytest.mark.skipif(os.environ.get('BIND9_CANONICAL_BASH_LAB') != '1',

@@ -31,7 +31,7 @@ def test_mandatory_identity_inputs_must_be_defined(field):
     CanonicalPredicates('deploy/validate.yml').check('Validate template input types before rendering', values, False)
 
 
-@pytest.mark.parametrize('field', ['bind_authoritative_zones', 'bind_forward_zones'])
+@pytest.mark.parametrize('field', ['_bind_deploy_authoritative_zones', '_bind_deploy_forward_zones'])
 def test_optional_container_type_guard_does_not_imply_the_remaining_preflight_succeeded(field):
     values = settings()
     values.pop(field)
@@ -57,17 +57,17 @@ def test_platform_guard_independently_rejects_invalid_inputs(fault):
     elif fault == 'same-local-address': values['bind_back_ip'] = values['bind_front_ip']
     elif fault == 'short-secret': values['bind_tsig_secret'] = 'short'
     elif fault == 'invalid-clients': values['bind_allowed_clients'] = None
-    elif fault == 'invalid-forward-list': values['bind_forward_zones'] = None
-    elif fault == 'invalid-authoritative-list': values['bind_authoritative_zones'] = None
+    elif fault == 'invalid-forward-list': values['_bind_deploy_forward_zones'] = None
+    elif fault == 'invalid-authoritative-list': values['_bind_deploy_authoritative_zones'] = None
     elif fault == 'same-peer-back': peers['peer']['bind_back_ip'] = peers['localhost']['bind_back_ip']
     elif fault == 'duplicate-authority': values['bind_managed_zones'].append(copy.deepcopy(values['bind_managed_zones'][0]))
-    elif fault == 'authority-forward-collision': values['bind_forward_zones'][0]['domain'] = 'example.test'
+    elif fault == 'authority-forward-collision': values['_bind_deploy_forward_zones'][0]['domain'] = 'example.test'
     elif fault.startswith('missing-'):
         peers['localhost' if 'primary' in fault else 'peer'].pop('bind_front_ip')
     elif fault.startswith('invalid-primary-') or fault.startswith('invalid-secondary-'):
         peers['localhost' if 'primary' in fault else 'peer']['bind_' + fault.rsplit('-', 1)[1] + '_ip'] = 'not-an-ip'
     else:
-        values['bind_forward_zones'].append(copy.deepcopy(values['bind_forward_zones'][0]))
+        values['_bind_deploy_forward_zones'].append(copy.deepcopy(values['_bind_deploy_forward_zones'][0]))
     CanonicalPredicates('deploy/validate.yml').check('Validate supported platform and mandatory inputs', values, False)
 
 
@@ -113,7 +113,7 @@ def test_authoritative_names_are_refused_before_rendering_zone_files(domain):
 def test_final_topology_guard_independently_rejects_an_authority_forward_collision():
     from ansible.errors import AnsibleError
     values = settings()
-    values['bind_forward_zones'] = [dict(domain='example.test', forwarders=[{'address': '192.0.2.53'}])]
+    values['_bind_deploy_forward_zones'] = [dict(domain='example.test', forwarders=[{'address': '192.0.2.53'}])]
     # This filter reports the precise topology error instead of returning False.
     with pytest.raises((ValueError, AnsibleError), match='zone names must be unique') as caught:
         CanonicalPredicates('deploy/validate.yml').check(
@@ -162,7 +162,7 @@ def test_topology_assertion_refuses_a_false_result_from_its_filter_provider(monk
     monkeypatch.setattr(predicates, 'Templar', templar_with_failed_provider)
     CanonicalPredicates('deploy/validate.yml').check(
         'Validate DNS topology and private forwarding delegation cuts', values, False)
-    assert calls == [(values['bind_managed_zones'], values['bind_forward_zones'])]
+    assert calls == [(values['bind_managed_zones'], values['_bind_deploy_forward_zones'])]
 
 
 @pytest.mark.parametrize('kind', ['directory', 'file'])
@@ -246,7 +246,7 @@ def test_reverse_file_catalog_runs_only_on_the_primary(primary):
     ['upstream.test', 'upstream.test'], ['upstream.test', 'child.upstream.test']])
 def test_suffix_overlap_guard_rejects_duplicate_or_nested_forwarding_in_isolation(domains):
     values = settings()
-    values['bind_forward_zones'] = [dict(domain=domain, forwarders=[{'address': '192.0.2.53'}])
+    values['_bind_deploy_forward_zones'] = [dict(domain=domain, forwarders=[{'address': '192.0.2.53'}])
                                     for domain in domains]
-    values['item'] = values['bind_forward_zones'][0]
+    values['item'] = values['_bind_deploy_forward_zones'][0]
     CanonicalPredicates('deploy/validate.yml').check('Reject overlapping conditional DNS suffixes', values, False)

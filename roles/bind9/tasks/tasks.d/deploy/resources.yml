@@ -1,0 +1,35 @@
+---
+- name: Require one unambiguous desired resource declaration
+  ansible.builtin.assert:
+    that:
+      - bind_authoritative_zones is not defined
+      - bind_forward_zones is not defined
+      - bind_resources_deploy is mapping
+    fail_msg: 'Use bind_resources_deploy only. Migrate bind_authoritative_zones and bind_forward_zones to zone/record operations; the old variables are not aliases.'
+
+- name: Require identical desired resources on both site peers
+  ansible.builtin.assert:
+    that:
+      - >-
+        hostvars[bind_primary_host].bind_resources_deploy | default({'resource': 'batch', 'action': 'create', 'operations': []}) ==
+        hostvars[bind_secondary_host].bind_resources_deploy | default({'resource': 'batch', 'action': 'create', 'operations': []})
+    fail_msg: 'Both site peers must declare the same bind_resources_deploy request.'
+  no_log: true
+
+- name: Compile deployment resources using the management request schemas
+  ansible.builtin.set_fact:
+    _bind_deploy_resources: >-
+      {{ bind_resources_deploy | resources_deploy({
+        'primary_front': hostvars[bind_primary_host].bind_front_ip,
+        'secondary_front': hostvars[bind_secondary_host].bind_front_ip,
+        'primary_back': hostvars[bind_primary_host].bind_back_ip,
+        'secondary_back': hostvars[bind_secondary_host].bind_back_ip,
+        'service_addresses': bind_site_dns_addresses | default([])}) }}
+  no_log: true
+
+- name: Select only materialized resource data for deployment templates
+  ansible.builtin.set_fact:
+    _bind_deploy_authoritative_zones: '{{ _bind_deploy_resources.authoritative_zones }}'
+    _bind_deploy_forward_zones: '{{ _bind_deploy_resources.forward_zones }}'
+    _bind_deploy_extra_operations: '{{ _bind_deploy_resources.extra_operations }}'
+  no_log: true

@@ -47,7 +47,7 @@ class ManagementPlaybook:
             ansible_distribution_major_version='8', bind_tsig_key_name='site-transfer')
         # None denotes an omitted variable in this public-entry fixture.
         if envelope is not None:
-            variables['bind_manage'] = envelope
+            variables['bind_resources_manage'] = envelope
         variables.update(values)
         with NativeRecordedBoundary(self.folder, NativeManagementPlayRun, {}) as state:
             status, result = NativeManagementPlayRun('manage.yml', variables, inventory_hosts=self.hosts,
@@ -73,6 +73,14 @@ def test_native_public_management_reads_both_ordered_hosts_without_batch_preflig
     assert result.ok.count('Run the private management transaction') == 2
     assert 'Gather the existing platform and network facts for preflight' not in result.ok
     assert 'censored' in result.registers['bind_management_result']
+
+
+def test_native_public_management_refuses_the_old_request_variable_before_any_transaction(playbook):
+    """An obsolete envelope must not silently trigger a management operation."""
+    status, result = playbook.run(None, bind_manage=READ)
+    assert status == 2
+    assert result.failed == ['Validate the management platform and explicit request envelope']
+    assert 'Run the private management transaction' not in result.ok
 
 
 @pytest.mark.parametrize('resource,name,value', [

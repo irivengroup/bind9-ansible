@@ -232,7 +232,8 @@ class YamlInventory:
                 pairs[key.value] = (key, child)
             # A task has a module action or a structural block. Literal defaults
             # and Galaxy metadata remain in scope with zero executable tasks.
-            actions = [key for key in pairs if key.startswith('ansible.builtin.') or key == 'bind9_manage']
+            actions = [key for key in pairs if key.startswith('ansible.builtin.') or
+                       key in ('bind9_manage', 'bind9_deploy_resources')]
             structural = 'block' in pairs
             play = 'hosts' in pairs
             if actions or structural or play:

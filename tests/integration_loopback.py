@@ -27,6 +27,8 @@ import time
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 import yaml
 
+from resource_inputs import deployment_context, edit_zone_data, rebase_generated_nameservers
+
 
 class LoopbackIntegration:
     """Keep rendered files, daemon lifetime and DNS requests within one sandbox."""
@@ -74,13 +76,15 @@ class LoopbackIntegration:
                 for kind in ('primary', 'secondary'):
                     context['bind_' + kind + '_host'] = next(x for x in site if x in groups[context['bind_' + kind + '_group']])
                 context['bind_tsig_secret'] = base64.b64encode(secrets.token_bytes(32)).decode('ascii')
-                context['bind_generated_reverse_zones'] = self.reverse(context['bind_authoritative_zones'])
-                context['bind_managed_zones'] = context['bind_authoritative_zones'] + context['bind_generated_reverse_zones']
+                deployment_context(context)
+                context['bind_generated_reverse_zones'] = self.reverse(context['_bind_deploy_authoritative_zones'])
+                context['bind_managed_zones'] = context['_bind_deploy_authoritative_zones'] + context['bind_generated_reverse_zones']
                 yield environment + '-' + host, context
 
     def render(self, folder, context):
         """Rebase only filesystem locations into the isolated test directory."""
-        self.topology(context['bind_managed_zones'], context['bind_forward_zones'])
+        rebase_generated_nameservers(context)
+        self.topology(context['bind_managed_zones'], context['_bind_deploy_forward_zones'])
         data = folder / 'named'
         (data / 'zones').mkdir(parents=True)
         (data / 'slaves').mkdir()
@@ -247,10 +251,10 @@ class LoopbackIntegration:
             reservation.bind(('127.0.0.1', 0))
             reservations.append(reservation)
         pport, sport, uport = [x.getsockname()[1] for x in reservations]
-        for zone in primary['bind_forward_zones']:
+        for zone in primary['_bind_deploy_forward_zones']:
             zone['forwarders'] = [{'address': '127.0.0.6', 'port': uport}]
         secure_domain, secure_file, secure_anchor = self.signed_upstream(folder / 'signed')
-        primary['bind_forward_zones'].append({'domain': secure_domain, 'dnssec_validate': True,
+        primary['_bind_deploy_forward_zones'].append({'domain': secure_domain, 'dnssec_validate': True,
                                               'forwarders': [{'address': '127.0.0.6', 'port': uport}]})
         secondary = copy.deepcopy(primary)
         secondary.update(bind_front_ip='127.0.0.4', bind_back_ip='127.0.0.5',
@@ -266,14 +270,14 @@ class LoopbackIntegration:
         sconf.write_text(sconf.read_text().replace('127.0.0.3 key', '127.0.0.3 port ' + str(pport) + ' key'))
         upstream = folder / 'upstream'
         upstream.mkdir()
-        forward_domain = primary['bind_forward_zones'][0]['domain']
+        forward_domain = primary['_bind_deploy_forward_zones'][0]['domain']
         zonefile = upstream / 'forward.zone'
         zonefile.write_text('$TTL 300\n@ IN SOA ns.' + forward_domain + '. hostmaster.' + forward_domain + '. (1 3600 900 1209600 300)\n@ IN NS ns.' + forward_domain + '.\nns IN A 127.0.0.6\nprobe IN A 203.0.113.55\nstrict IN A 203.0.113.56\n')
         uconf = upstream / 'named.conf'
         uconf.write_text('options { directory "' + str(upstream) + '"; listen-on port ' + str(uport) + ' { 127.0.0.6; }; listen-on-v6 { none; }; recursion no; dnssec-validation no; pid-file "' + str(upstream / 'named.pid') + '"; }; controls { }; zone "' + forward_domain + '" { type master; file "' + str(zonefile) + '"; }; zone "' + secure_domain + '" { type master; file "' + str(secure_file) + '"; };')
         for reservation in reservations:
             reservation.close()
-        zone = primary['bind_authoritative_zones'][0]
+        zone = primary['_bind_deploy_authoritative_zones'][0]
         record = next(x for x in zone['records'] if x['type'] == 'A')
         query = record['name'] + '.' + zone['domain']
         if delay_primary:
@@ -345,7 +349,7 @@ class LoopbackIntegration:
                 assert dig('127.0.0.1', pport, '127.0.0.1', 'bogus.' + secure_domain, cd=True) == '203.0.113.62'
                 checks += 3
                 for config in (pconf, sconf):
-                    assert self.private_exceptions(config)['renewed'] == sorted(zone['domain'] for zone in primary['bind_forward_zones'] if not zone.get('dnssec_validate', True))
+                    assert self.private_exceptions(config)['renewed'] == sorted(zone['domain'] for zone in primary['_bind_deploy_forward_zones'] if not zone.get('dnssec_validate', True))
                     checks += 1
                 # Removal of a private marker drops only the corresponding owned NTA.
                 # Unsigned data may legitimately be insecure; strict validation must
@@ -404,7 +408,7 @@ class LoopbackIntegration:
                         checks += 1
             serial = int(zone['serial']) + 1
             record['value'] = '203.0.113.77'
-            zone['serial'] = serial
+            edit_zone_data(zone, record=record, serial=serial)
             primaryfile = pconf.parent / 'named/zones' / (zone['domain'] + '.zone')
             primaryfile.write_text(self.jinja.get_template('authoritative.zone.j2').render(auth_zone=zone, **primary))
             processes[1].send_signal(signal.SIGHUP)
@@ -452,7 +456,7 @@ class LoopbackIntegration:
         context['hostvars'][context['bind_primary_host']].update(bind_front_ip='127.0.0.2', bind_back_ip='127.0.0.3')
         context['hostvars'][context['bind_secondary_host']].update(bind_front_ip='127.0.0.4', bind_back_ip='127.0.0.5')
         context['bind_trusted_networks']['cloud_clients'], context['bind_trusted_networks']['internal_clients'] = ['127.0.0.10'], ['127.0.0.11']
-        for zone in context['bind_forward_zones']:
+        for zone in context['_bind_deploy_forward_zones']:
             zone['forwarders'] = [{'address': '127.0.0.6', 'port': 65534}]
         path = self.render(folder, context)
         with socket.socket() as reservation:
@@ -494,7 +498,7 @@ class LoopbackIntegration:
                 denied = subprocess.check_output([str(self.bin_dir / 'dig'), '@127.0.0.1', '-p', str(port), '-b', '127.0.0.9', '+time=2', '+tries=1', 'localhost', 'A'], universal_newlines=True)
                 assert 'status: REFUSED' in denied
                 # Business-zone access remains available through localhost.
-                zone = context['bind_authoritative_zones'][0]
+                zone = context['_bind_deploy_authoritative_zones'][0]
                 record = next(x for x in zone['records'] if x['type'] == 'A')
                 query = record['name'] + '.' + zone['domain']
                 answer = subprocess.check_output([str(self.bin_dir / 'dig'), '@127.0.0.1', '-p', str(port), '+short', query, 'A'], universal_newlines=True).strip()
@@ -579,8 +583,8 @@ class LoopbackIntegration:
             local=socket.socket()
             local.bind(('127.0.0.1',0))
         port=local.getsockname()[1]
-        context.update(bind_dnssec_active=False,bind_authoritative_zones=[],bind_managed_zones=[],
-                       bind_forward_zones=[{'domain':domain,'forwarders':[{'address':'::1','port':uport}]}],
+        context.update(bind_dnssec_active=False,_bind_deploy_authoritative_zones=[],bind_managed_zones=[],
+                       _bind_deploy_forward_zones=[{'domain':domain,'forwarders':[{'address':'::1','port':uport}]}],
                        bind_front_ip='127.0.0.2',bind_back_ip='127.0.0.3',
                        group_names=[context['bind_primary_group']],bind_trusted_networks=dict(cloud_clients=['127.0.0.10'], internal_clients=[]))
         context['hostvars'][context['bind_primary_host']].update(bind_front_ip='127.0.0.2',bind_back_ip='127.0.0.3')
@@ -678,17 +682,17 @@ class LoopbackIntegration:
                             context['bind_trusted_networks']['cloud_clients'] = clients
                             context['bind_trusted_networks']['internal_clients'] = internal
                             if not auth:
-                                context['bind_authoritative_zones'] = []
+                                context['_bind_deploy_authoritative_zones'] = []
                                 context['bind_managed_zones'] = []
                             if not forward:
-                                context['bind_forward_zones'] = []
+                                context['_bind_deploy_forward_zones'] = []
                             self.render(root / ('matrix-' + str(count)), context)
                             count += 1
             _, context = next(self.contexts())
             queries = self.exercise(root / 'live', copy.deepcopy(context))
             queries += self.exercise_replication(root / 'replication', context)
             unrelated = copy.deepcopy(context)
-            unrelated['bind_forward_zones'][0]['domain'] = 'remote.other.test'
+            unrelated['_bind_deploy_forward_zones'][0]['domain'] = 'remote.other.test'
             queries += self.exercise_replication(root / 'unrelated', unrelated)
             queries += self.exercise_replication(root / 'manual-validation', copy.deepcopy(context), validation=True)
             queries += self.exercise_replication(root / 'validation-disabled', copy.deepcopy(context), validation=False)

@@ -52,7 +52,7 @@ def replies(populated=True):
 def variables(populated=True):
     return {'bind_primary_host': 'localhost', 'bind_back_ip': '192.0.2.2',
             'bind_managed_zones': [{'domain': 'example.test'}] if populated else [],
-            'bind_forward_zones': [{'domain': 'upstream.test'}] if populated else []}
+            '_bind_deploy_forward_zones': [{'domain': 'upstream.test'}] if populated else []}
 
 
 @pytest.mark.parametrize('fault', [None, 'loopback_rc', 'loopback_status', 'loopback_aa', 'loopback_answer',

@@ -8,20 +8,21 @@ from pathlib import Path
 import pytest
 
 from native_ansible_runner import NativeTaskRun
+from resource_inputs import materialize_zone
 
 pytestmark = pytest.mark.skipif(os.name != 'posix', reason='Requires the native Linux Ansible controller')
 
 
 def scope():
-    zone = {'domain': 'example.test', 'serial': 1, 'ttl': 300,
-            'records': [{'name': 'www', 'type': 'A', 'value': '192.0.2.20'}]}
+    zone = materialize_zone({'domain': 'example.test', 'serial': 1, 'ttl': 300,
+            'records': [{'name': 'www', 'type': 'A', 'value': '192.0.2.20'}]}, '198.51.100.2', '198.51.100.3')
     local = dict(bind_front_ip='198.51.100.2', bind_back_ip='192.0.2.2',
                  bind_tsig_key_name='site-transfer', bind_tsig_algorithm='hmac-sha256',
                  bind_tsig_secret=base64.b64encode(b'public-synthetic-test-fixture-0000').decode('ascii'),
                  bind_primary_host='localhost', bind_secondary_host='peer',
                  bind_allowed_clients=['203.0.113.0/24'], ansible_distribution='RedHat',
-                 ansible_distribution_major_version='8', bind_authoritative_zones=[copy.deepcopy(zone)],
-                 bind_managed_zones=[zone], bind_forward_zones=[{'domain': 'upstream.test',
+                 ansible_distribution_major_version='8', _bind_deploy_authoritative_zones=[copy.deepcopy(zone)],
+                 bind_managed_zones=[zone], _bind_deploy_forward_zones=[{'domain': 'upstream.test',
                     'forwarders': [{'address': '192.0.2.53'}]}])
     hosts = {'localhost': local, 'peer': {'bind_front_ip': '198.51.100.3', 'bind_back_ip': '192.0.2.3'}}
     return hosts, {'dns_primary': ['localhost'], 'dns_secondary': ['peer']}
@@ -45,13 +46,13 @@ def test_native_preflight_accepts_both_dns_roles_and_optional_empty_zone_lists(s
         groups = {'dns_primary': ['peer'], 'dns_secondary': ['localhost']}
         local.update(bind_primary_host='peer', bind_secondary_host='localhost')
     if not populated:
-        local.update(bind_authoritative_zones=[], bind_managed_zones=[], bind_forward_zones=[])
+        local.update(_bind_deploy_authoritative_zones=[], bind_managed_zones=[], _bind_deploy_forward_zones=[])
     status, result = run(hosts, groups)
     assert status == 0 and not result.failed
     assert result.ok[-1] == 'Reject explicit reverse masks in authoritative records' if populated else bool(result.skipped)
 
 
-@pytest.mark.parametrize('key', ['bind_authoritative_zones', 'bind_forward_zones', 'bind_allowed_clients'])
+@pytest.mark.parametrize('key', ['_bind_deploy_authoritative_zones', '_bind_deploy_forward_zones', 'bind_allowed_clients'])
 @pytest.mark.parametrize('value', ['invalid scalar', {}, None])
 def test_native_preflight_rejects_container_type_confusion(key, value):
     hosts, groups = scope()
@@ -108,7 +109,7 @@ def test_native_authoritative_ttl_is_a_bounded_dns_duration_not_interpolated_tex
     {'address': '192.0.2.53', 'port': True}, {'address': 'not-an-address'}])
 def test_native_forwarding_guards_refuse_loops_and_invalid_ports(endpoint):
     hosts, groups = scope()
-    hosts['localhost']['bind_forward_zones'][0]['forwarders'] = [endpoint]
+    hosts['localhost']['_bind_deploy_forward_zones'][0]['forwarders'] = [endpoint]
     status, result = run(hosts, groups)
     assert status == 2 and result.failed == ['Validate each forwarding destination']
 
@@ -117,7 +118,7 @@ def test_native_forwarding_guards_refuse_loops_and_invalid_ports(endpoint):
     ('policy', 'first'), ('forwarders', [])])
 def test_native_forward_zone_contract_rejects_unsafe_zone_definitions(key, value):
     hosts, groups = scope()
-    hosts['localhost']['bind_forward_zones'][0][key] = value
+    hosts['localhost']['_bind_deploy_forward_zones'][0][key] = value
     status, result = run(hosts, groups)
     assert status == 2 and result.failed == ['Validate each conditional forwarding zone']
 
@@ -131,13 +132,27 @@ def test_native_authoritative_zone_contract_rejects_unsafe_definitions(key, valu
     assert status == 2 and result.failed == ['Validate authoritative zone definitions']
 
 
-@pytest.mark.parametrize('key,value', [('type', 'SOA'), ('name', 'unsafe;owner'), ('value', ''),
+# Exercise each operand of the type guard: a non-string must short-circuit,
+# while a malformed string must reach and fail the DNS-type grammar test.
+@pytest.mark.parametrize('key,value', [('type', 'SOA'), ('type', 1), ('type', 'A;bad'),
+                                     ('name', 'unsafe;owner'), ('value', ''),
                                      ('value', '192.0.2.20\ninjected')])
 def test_native_resource_record_guards_reject_unsafe_rdata(key, value):
     hosts, groups = scope()
     hosts['localhost']['bind_managed_zones'][0]['records'][0][key] = value
     status, result = run(hosts, groups)
     assert status == 2 and result.failed == ['Validate authoritative resource records']
+
+
+@pytest.mark.parametrize('kind,value', [('NS', 'ns.example.test.'),
+    ('NAPTR', '10 10 "S" "SIP+D2U" "" _sip._udp.example.test.'),
+    ('TYPE65280', '\\# 2 AABB')])
+def test_native_shared_record_types_keep_native_validation_and_topology_guards(kind, value):
+    hosts, groups = scope()
+    hosts['localhost']['bind_managed_zones'][0]['records'][0] = dict(name='service', type=kind, value=value)
+    status, result = run(hosts, groups)
+    assert status == 0 and not result.failed
+    assert 'Validate authoritative resource records' in result.ok
 
 
 @pytest.mark.parametrize('value,accepted', [

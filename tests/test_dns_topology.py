@@ -3,6 +3,7 @@ import base64
 import importlib.util
 import ipaddress
 from pathlib import Path
+from resource_inputs import materialize_zone
 
 import pytest
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
@@ -77,16 +78,16 @@ class TestDnsTopology:
     def test_real_zone_templates_contain_the_dns_cut_regression(self):
         env = Environment(loader=FileSystemLoader(str(ROLE / 'templates')), undefined=StrictUndefined)
         env.filters.update(FilterModule().filters())
-        zone = {'domain': 'example.test', 'serial': 2, 'records': []}
-        context = dict(auth_zone=zone, bind_authoritative_zones=[zone], bind_managed_zones=[zone],
-                       bind_forward_zones=[forwarding()], bind_primary_host='p', bind_secondary_host='s',
+        zone = materialize_zone({'domain': 'example.test', 'serial': 2, 'records': []}, '192.0.2.1', '192.0.2.2')
+        context = dict(auth_zone=zone, _bind_deploy_authoritative_zones=[zone], bind_managed_zones=[zone],
+                       _bind_deploy_forward_zones=[forwarding()], bind_primary_host='p', bind_secondary_host='s',
                        hostvars={'p': {'bind_front_ip': '192.0.2.1'}, 's': {'bind_front_ip': '192.0.2.2'}})
         output = env.get_template('authoritative.zone.j2').render(**context)
         assert 'corp.example.test. IN NS bind-forwarder-1.corp.example.test.' in output
         assert 'bind-forwarder-2.corp.example.test. IN A 198.51.100.53' in output
         root = env.get_template('empty-root.zone.j2').render(**context)
         assert 'corp.example.test. IN NS' not in root
-        context['bind_forward_zones'] = [forwarding('other.test')]
+        context['_bind_deploy_forward_zones'] = [forwarding('other.test')]
         assert 'other.test. IN NS' in env.get_template('empty-root.zone.j2').render(**context)
 
     @pytest.mark.parametrize('front,back,key,algorithm,secret', [
@@ -178,11 +179,11 @@ class TestDnsTopology:
             assert plan['servers'][1]['address']=='2001:db8::53'
         env=Environment(loader=FileSystemLoader(str(ROLE/'templates')),undefined=StrictUndefined)
         env.filters.update(FilterModule().filters())
-        context=dict(bind_authoritative_zones=[],bind_forward_zones=[forward])
+        context=dict(_bind_deploy_authoritative_zones=[],_bind_deploy_forward_zones=[forward])
         root=env.get_template('empty-root.zone.j2').render(**context)
         assert 'IN AAAA 2001:db8::53' in root
-        zone={'domain':'example.test','serial':2,'records':[]}
-        context.update(auth_zone=zone,bind_authoritative_zones=[zone],bind_managed_zones=[zone],
+        zone=materialize_zone({'domain':'example.test','serial':2,'records':[]}, '192.0.2.1', '192.0.2.2')
+        context.update(auth_zone=zone,_bind_deploy_authoritative_zones=[zone],bind_managed_zones=[zone],
                        bind_primary_host='p',bind_secondary_host='s',
                        hostvars={'p':{'bind_front_ip':'192.0.2.1'},'s':{'bind_front_ip':'192.0.2.2'}})
         authoritative=env.get_template('authoritative.zone.j2').render(**context)
@@ -194,7 +195,7 @@ class TestDnsTopology:
     def test_real_forwarder_task_supports_ipv6_without_local_endpoint_bypass(self,address,port,accepted):
         tasks=yaml.safe_load((ROLE/'tasks/tasks.d/deploy/validate.yml').read_text())
         task=next(item for item in tasks if item['name']=='Validate each forwarding destination')
-        variables=dict(bind_forward_zones=[forwarding(forwarders=[{'address':address,'port':port}])],
+        variables=dict(_bind_deploy_forward_zones=[forwarding(forwarders=[{'address':address,'port':port}])],
                        bind_front_ip='192.0.2.11',bind_back_ip='10.0.0.11',
                        bind_primary_host='p',bind_secondary_host='s',
                        hostvars={'p':{'bind_front_ip':'192.0.2.11','bind_back_ip':'10.0.0.11'},

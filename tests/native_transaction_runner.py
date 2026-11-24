@@ -10,6 +10,7 @@ from pathlib import Path
 import shutil
 
 from ansible.playbook.play import Play
+from ansible.plugins.loader import module_loader, module_utils_loader
 import yaml
 
 from native_ansible_runner import NativeContainerRun, NativeMigrationRun, NativeProvisionRun, NativeTaskRun
@@ -27,13 +28,14 @@ class NativeTransactionRun(NativeContainerRun):
     LOAD_HANDLERS = True
     SAFE_ACTIONS = NativeProvisionRun.SAFE_ACTIONS | {
         'ansible.builtin.find', 'ansible.builtin.slurp', 'ansible.builtin.script',
-        'ansible.builtin.fail', 'ansible.builtin.include_tasks'}
+        'ansible.builtin.fail', 'ansible.builtin.include_tasks', 'bind9_deploy_resources'}
     SAFE_META = NativeTaskRun.SAFE_META | {'flush_handlers'}
     COMMANDS = ('/usr/sbin/named-checkconf', '/usr/sbin/named-checkzone', '/usr/bin/dig',
                 '/usr/local/bin/semanage', '/usr/local/bin/restorecon', '/usr/local/bin/ls')
     TARGETS = tuple(dict.fromkeys(NativeProvisionRun.TARGETS + NativeMigrationRun.TARGETS + COMMANDS + (
         '/usr/local/sbin/named-transaction', '/usr/local/sbin/reverse-serial',
-        '/var/log/named', '/var/lib/Bind9-Ansible', '/etc/profile.d/bind9-sbin-path.sh')))
+        '/var/log/named', '/var/lib/Bind9-Ansible', '/etc/profile.d/bind9-sbin-path.sh',
+        '/etc/named.rfc1912.zones', '/etc/crypto-policies')))
     NAMES = (
         'Back up full BIND configuration before changes',
         'Prepare managed directories',
@@ -97,7 +99,7 @@ class NativeTransactionRun(NativeContainerRun):
                 'bind_runtime_files_before', 'bind_runtime_content_before', 'bind_front_transaction_token',
                 'bind_front_route_transaction_pending', 'bind_front_route_rollback_attempted'}):
             raise ValueError('Native transaction refuses extra-vars that override its own runtime facts')
-        for name in ('bind_authoritative_zones', 'bind_generated_reverse_zones'):
+        for name in ('_bind_deploy_authoritative_zones', 'bind_generated_reverse_zones'):
             for zone in effective.get(name, []):
                 domain = zone.get('domain', '')
                 if not domain or '..' in domain or any(character not in
@@ -124,6 +126,8 @@ class NativeTransactionRun(NativeContainerRun):
         return super().run()
 
     def execute_native(self, runner):
+        module_loader.add_directory(str(self.role / 'library'))
+        module_utils_loader.add_directory(str(self.role / 'module_utils'))
         source = str(self.role / 'tasks/tasks.d/deploy/main.yml')
         selected = self.selected(runner._loader.load_from_file(source))
         if not all(task.ansible_pos[0] == source for task in selected):

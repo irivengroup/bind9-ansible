@@ -66,8 +66,20 @@ class NativeBashChannel:
                     raw, ancillary, flags, _ = self.reader.recvmsg(self.MAX_PACKET, socket.CMSG_SPACE(12))
                 except socket.timeout:
                     if self.stopped.is_set():
-                        return
-                    continue
+                        # The timeout may predate the stop flag. A child can
+                        # have queued its terminal packet while this thread
+                        # was descheduled, before the parent observed exit.
+                        # Confirm the stopped socket is empty; every drained
+                        # packet still passes the same schema/credential checks.
+                        try:
+                            raw, ancillary, flags, _ = self.reader.recvmsg(
+                                self.MAX_PACKET, socket.CMSG_SPACE(12), socket.MSG_DONTWAIT)
+                        except (BlockingIOError, socket.timeout):
+                            # Python sockets with a timeout may wait in select
+                            # before the nonblocking recvmsg reaches the kernel.
+                            return
+                    else:
+                        continue
                 self.total += len(raw)
                 if (flags & (socket.MSG_TRUNC | socket.MSG_CTRUNC) or self.total > self.MAX_BYTES or
                         len(self.rows) >= self.MAX_ROWS):
