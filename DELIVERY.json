@@ -1,6 +1,6 @@
 {
   "project": "DNSZIBO / Bind9-Ansible",
-  "release": "local-20261125-readme-documentation",
+  "release": "local-20261125-documentation-harmonisee",
   "base_commit": "95d4d2d5bfe4a28372ff29b1eee7985bd142b77a",
   "git_commit_created": false,
   "cdc_source": "CDC_RESSOURCES_INTERFACES_20261123.md",
@@ -14,7 +14,7 @@
   "production_ready": false,
   "qualification": {
     "evidence_location": "External receipts bound to the exact source ZIP SHA-256",
-    "report": "RAPPORT_COHERENCE_QUALIFICATION_20261125.md",
+    "report": "RAPPORT_HARMONISATION_DOCUMENTATION_20261125.md",
     "threshold_basis_points": 9999,
     "metrics": [
       "statements",
@@ -198,11 +198,36 @@
     "roles/bind9/tasks/tasks.d/site_peers.yml",
     "roles/bind9/templates/named-healthcheck.service.j2"
   ],
-  "documentation_predecessor_zip_sha256": "efa00b0436c53567d5c10f6c6ce7a01fd41815ab8d3b0704b6c4db90b694c1d0",
+  "documentation_predecessor_zip_sha256": "496b35530e189779482456aabf14d2d59b1994004b5e87d82f2c45970b65a710",
   "documentation": {
     "readme": "README.md",
     "operational_reference": "docs/wiki.d/exploitation/REFERENCE_ROLE.md",
     "test_evidence_and_production_limits": "docs/wiki.d/qualification/QUALIFICATION_ACTUELLE.md",
-    "change_scope": "Documentation only; no executable, QA or security-control changes"
+    "change_scope": "Documentation harmonization plus Git transport preservation of exact fixture bytes and executable mode; no production, test or observer byte changes",
+    "canonical_topic_map": {
+      "architecture": "docs/wiki.d/exploitation/OPERATIONS.md#architecture",
+      "prerequis": "docs/wiki.d/exploitation/OPERATIONS.md#prerequis",
+      "deploiement": "docs/wiki.d/exploitation/OPERATIONS.md#deploiement",
+      "tags": "docs/wiki.d/exploitation/OPERATIONS.md#tags",
+      "reprise": "docs/wiki.d/exploitation/OPERATIONS.md#reprise",
+      "diagnostic": "docs/wiki.d/exploitation/OPERATIONS.md#diagnostic",
+      "livraison": "docs/wiki.d/exploitation/OPERATIONS.md#livraison",
+      "inventaire": "docs/wiki.d/configuration/reseau/INTERFACES_RESEAU.md",
+      "variables": "docs/wiki.d/configuration/VARIABLES.md",
+      "secrets": "docs/wiki.d/configuration/SECRETS.md",
+      "management": "docs/wiki.d/exploitation/MANAGEMENT.md",
+      "operations": "docs/wiki.d/configuration/reseau/FRONT_ROUTES.md",
+      "securite": "docs/wiki.d/configuration/reseau/ACL_SERVEURS.md",
+      "observabilite": "docs/wiki.d/exploitation/SUPERVISION.md",
+      "tests": "docs/wiki.d/qualification/TESTS_FONCTIONNELS.md"
+    }
+  },
+  "ci_transport_fix": {
+    "run_id": 45606014034,
+    "fixture_git_mode": "100755",
+    "immutable_registry_path": "tests/fixtures/iana_dns_types_20261123.csv",
+    "registry_sha256": "52a1b8d3a42dae6a223772b687dc775a4c289fb9fb3004dfb54da13dfd36a568",
+    "remote_push": false,
+    "external_patch": "CORRECTIF_CI_45606014034.patch"
   }
 }

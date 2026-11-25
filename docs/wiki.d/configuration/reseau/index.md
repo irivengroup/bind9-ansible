@@ -12,7 +12,7 @@
 - [Autorisation DNS permanente dans firewalld](FIREWALLD.md)
 - [Routes de retour FRONT : exploitation](FRONT_ROUTES.md)
 - [Déclarer les interfaces dans host_vars](INTERFACES_RESEAU.md)
-- [Loopback et zones natives EL8](LOOPBACK.md)
+- [Loopback et zones natives BIND](LOOPBACK.md)
 - [Transport natif BIND et écoute DNS](TRANSPORT_DNS.md)
 
 ---

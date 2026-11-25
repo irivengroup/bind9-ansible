@@ -11,3 +11,6 @@
 # Native observer patches are verified byte-for-byte before compilation.
 *.patch text eol=lf
 tests/fixtures/PYTHON36_LICENSE.txt text eol=lf
+# Pinned IANA snapshot: preserve original mixed CRLF/LF bytes and its SHA-256.
+# Git text normalization must not change this independent test oracle.
+tests/fixtures/iana_dns_types_20261123.csv -text

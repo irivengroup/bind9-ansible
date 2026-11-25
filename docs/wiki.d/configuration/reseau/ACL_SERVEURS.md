@@ -4,20 +4,11 @@
 
 [Retour au Parent](index.md)
 
+## Sommaire
 
-Les ACL sont définies une seule fois dans `roles/bind9/templates/named.conf.j2`, à partir des pairs du site courant. Elles ne sont pas des variables supplémentaires d'inventaire.
-
-| ACL | Membres |
-|---|---|
-| `local_loopback` | Exactement `127.0.0.1` |
-| `bind_primary_back_ip` | `hostvars[bind_primary_host].bind_back_ip` |
-| `bind_secondary_back_ip` | `hostvars[bind_secondary_host].bind_back_ip` |
-| `bind_primary_front_ip` | FRONT local, déclaré seulement sur le primaire |
-| `bind_secondary_front_ip` | FRONT local, déclaré seulement sur le secondaire |
-| `bind_servers_back_ip` | Les deux ACL individuelles BACK |
-| `user_defined_clients` | Fusion calculée `bind_allowed_clients` = cloud + internes sans doublons ; non vide obligatoire |
-| `dns_query_clients` | Loopback, pairs BACK et liste cliente unique |
-| `dns_recursive_clients` | Exclut d'abord les pairs BACK et la clé TSIG ; autorise ensuite loopback et liste cliente unique |
+- [Applications](#applications)
+- [Protections complémentaires](#protections-complémentaires)
+- [Effets du retrait des vues](#effets-du-retrait-des-vues)
 
 ## Applications
 
@@ -41,6 +32,14 @@ FRONT et BACK peuvent être calculés à partir d’une écoute unique ; les IP 
 
 `allow-query-on` et `listen-on` utilisent la même liste. Le primaire et le secondaire utilisent chacun les ACL FRONT et BACK locales. Une écoute unique regroupe ces rôles sur une seule adresse DNS. Les adresses d’écoute supplémentaires sont rendues explicitement dans ces deux directives et suivent l’ACL source commune des requêtes. La récursion et le cache restent réservés au loopback et aux rôles FRONT/BACK selon les listes de clients. L’agrégat BACK sert aux permissions de requête et au refus de récursion des pairs.
 
+## Protections complémentaires
+
+Les transferts sont globalement refusés et les mises à jour dynamiques interdites. `notify no` évite les notifications implicites ; chaque autorité primaire gérée utilise `notify explicit` et `also-notify` vers le secondaire BACK avec la clé du site.
+
+Le contrôle de la sortie canonique de `named-checkconf -p` suit les niveaux d’accolades et les noms entre guillemets, y compris après une ACL imbriquée, pour refuser les entrées directes `any`. Sortie vide, incomplète ou excessive : refus explicite. Ce contrôle complète le validateur natif ; sa sortie peut contenir des secrets et ne doit pas être publiée.
+
+La version BIND est masquée et les réponses minimales sont activées dans la base. Les politiques cryptographiques natives sont conservées ; FIPS nécessite sa propre qualification. TSIG authentifie les messages sans les chiffrer. Aucun service DNS over TLS ou DNS over HTTPS n’est intégré. Les ACL DNS ne remplacent pas les politiques d’accès réseau externes.
+
 ## Effets du retrait des vues
 
 Les deux catégories partagent un espace de noms et une ACL source calculée.
@@ -55,7 +54,7 @@ Les clients ordinaires, même munis de la clé TSIG, ne peuvent pas transférer 
 
 La récursion reste refusée aux pairs BACK et aux requêtes avec la clé de transfert. Les sources inconnues sont refusées. Le refus par défaut s'applique aussi aux mises à jour dynamiques et transferts non explicitement autorisés.
 
-Preuves et limites : [VALIDATION_RHEL8.md](../../qualification/VALIDATION_RHEL8.md). Commandes : [TESTS_FONCTIONNELS.md](../../qualification/TESTS_FONCTIONNELS.md).
+Preuves et limites : [VALIDATION_RHEL8.md](../../qualification/QUALIFICATION_ACTUELLE.md). Commandes : [TESTS_FONCTIONNELS.md](../../qualification/TESTS_FONCTIONNELS.md).
 
 ---
 

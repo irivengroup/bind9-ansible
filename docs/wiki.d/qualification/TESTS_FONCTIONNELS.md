@@ -1,44 +1,105 @@
-# Commandes de recette fonctionnelle
+# Recette fonctionnelle DNS, réseau et accès
 
-[Documentation](../../index.md) › [Qualification et contrôles](index.md) › Commandes de recette fonctionnelle
+[Documentation](../../index.md) › [Qualification et contrôles](index.md) › Recette fonctionnelle DNS, réseau et accès
 
 [Retour au Parent](index.md)
 
+## Sommaire
 
-Exécuter depuis la racine du projet sur le contrôleur Linux, puis sur les serveurs et clients indiqués. Les adresses ci-dessous sont celles de l'exemple **prod/site1** ; les remplacer par les valeurs réelles. Une commande `dig` terminée avec code 0 peut contenir REFUSED ou SERVFAIL : lire statut, AA, ANSWER et données.
+- [Tests de fonctionnement](#tests-de-fonctionnement)
+- [Loopback et zones natives](#loopback-et-zones-natives)
+- [Autorité, inverse et convergence](#autorité-inverse-et-convergence)
+- [Deux listes clientes et absence de routes internes](#deux-listes-clientes-et-absence-de-routes-internes)
+- [Contrôler les modes DNSSEC](#contrôler-les-modes-dnssec)
 
-## Contrôleur et serveur
+## Tests de fonctionnement
+
+Les commandes utilisent l’exemple `site1` et doivent suivre votre inventaire. Examiner **statut DNS, drapeaux et données** ; timeout et sortie vide ne prouvent jamais un refus de sécurité.
+
+### Sur chaque serveur
 
 ```bash
-ansible --version
-ansible-inventory -i inventory/prod/hosts.ini --graph
-ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --syntax-check
-ansible -i inventory/prod/hosts.ini dns_deployment_order -m ping
-ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --limit site1 --tags validate,health
-```
-
-Les tags `validate,health` supposent un déploiement déjà réalisé et des utilitaires BIND installés. Sur chaque serveur :
-
-```bash
-python3 --version
-rpm -q bind bind-utils NetworkManager iproute
 sudo named-checkconf -z /etc/named.conf
 sudo systemctl is-active named
-sudo ss -lnutp 'sport = :53'
-sudo journalctl -u named --since '-10 minutes' --no-pager
+sudo rndc status
+sudo ss -lnutp
+
+dig -b 127.0.0.1 @127.0.0.1 localhost A +norecurse +notcp +time=3 +tries=1
+dig -b 127.0.0.1 @127.0.0.1 localhost A +norecurse +tcp +time=3 +tries=1
+dig -b 127.0.0.1 @127.0.0.1 -x 127.0.0.1 +norecurse +notcp +time=3 +tries=1
+dig -b 127.0.0.1 @127.0.0.1 -x 127.0.0.1 +norecurse +tcp +time=3 +tries=1
+
+dig @127.0.0.1 corp.site1.prod.example.test SOA +notcp +time=3 +tries=1
+dig @127.0.0.1 corp.site1.prod.example.test SOA +tcp +time=3 +tries=1
+dig @127.0.0.1 apps.site1.prod.example.test SOA +notcp +time=3 +tries=1
+dig @127.0.0.1 apps.site1.prod.example.test SOA +tcp +time=3 +tries=1
+dig @127.0.0.1 nom-hors-perimetre.invalid A +time=3 +tries=1
 ```
 
-Attendu : configuration et zones sans erreur, service actif, UDP/TCP sur 127.0.0.1 et ses FRONT/BACK locales, aucune écoute DNS IPv6. Le service conserve son lancement natif IPv4/IPv6 ; seule l’écoute DNS IPv6 est désactivée. Ne pas publier une configuration complète contenant les secrets TSIG/RNDC. DNSSEC est activé en mode `auto` par défaut. RNDC reste administratif dans tous les modes ; les commandes NTA/timer suivantes s’appliquent uniquement à `true`/`auto` :
+Attendus : configuration acceptée, zones chargées, service `active`, RNDC opérationnel. Écoute DNS IPv4 loopback/FRONT/BACK seulement, RNDC sur loopback seulement. Localhost : `NOERROR`, drapeau `aa`, A `127.0.0.1`, PTR `localhost.`. Chaque forward doit retourner le SOA de son suffixe avec `NOERROR` ; `aa` n’est pas exigé pour ces réponses récursives. Le nom hors périmètre doit retourner `NXDOMAIN`. Une résolution Internet générale n’est pas un critère de succès de cette architecture.
+
+Sur le primaire de l’exemple :
 
 ```bash
-sudo rndc -s 127.0.0.1 -k /etc/rndc.key status
-sudo rndc -s 127.0.0.1 -k /etc/rndc.key nta -dump
-sudo systemctl status named-private-dnssec.timer --no-pager
-sudo journalctl -u named-private-dnssec.service --since '-1 day' --no-pager
-sudo systemctl cat named.service
+sudo named-checkzone site1.prod.example.test \
+  /var/named/zones/site1.prod.example.test.zone
 ```
 
-Avec `true`/`auto`, attendu : seulement les suffixes privés explicitement déclarés dans les NTA appartenant au rôle, pas de NTA racine globale ; timer actif et aucune erreur. Les NTA manuelles éventuelles ne sont pas revendiquées/supprimées par le rôle. Pour une zone stricte de recette dont la chaîne est connue et accessible, contrôler une donnée signée valide (NOERROR/AD), puis une signature corrompue maîtrisée (SERVFAIL) ; ne pas altérer une zone de production. Un suffixe privé exempté n'a pas de garantie DNSSEC et ne doit pas être annoncé comme validé. Les données unsigned peuvent être légitimement insecure ; unsigned ne signifie pas systématiquement bogus. Procédure et contraintes de racine privée : [DNSSEC.md](../configuration/bind/DNSSEC.md).
+Le parcours `deploy` contrôle aussi les inverses et compare les SOA aux serials réellement réconciliés du primaire.
+
+### Depuis les clients
+
+Exemple FRONT, puis comparaison BACK depuis un poste autorisé à joindre ces adresses :
+
+```bash
+dig @192.0.2.11 app.site1.prod.example.test A +notcp +time=3 +tries=1
+dig @192.0.2.12 app.site1.prod.example.test A +tcp +time=3 +tries=1
+dig @10.20.1.11 site1.prod.example.test SOA +norecurse +time=3 +tries=1
+dig @10.20.1.12 site1.prod.example.test SOA +norecurse +time=3 +tries=1
+```
+
+Attendus : `NOERROR`, `aa` pour les données autoritatives, A `192.0.2.101` et même serial attendu entre pairs. Tester aussi les inverses, chaque type utilisé et chaque forward depuis les segments clients. La récursion sur BACK exige une liste interne déclarée ; un SOA autoritatif ne prouve pas l’accès au cache récursif.
+
+Depuis une source non autorisée pouvant atteindre le service, obtenir un refus DNS explicite ou le blocage prévu par la politique réseau ; distinguer ces niveaux de preuve. Tester UDP et TCP, et l’absence d’écoute DNS sur ADM.
+
+### Réplication et refus AXFR
+
+Comparer les SOA BACK, lire `xfer.log`, puis réaliser le transfert autorisé avec source BACK secondaire et fichier de clé BIND protégé. Ne jamais copier le secret dans la ligne de commande.
+
+L’outil ci-dessous teste depuis un **client FRONT** un AXFR non signé puis signé. Il exige `dig`, une IP source réellement portée par ce client et une clé au format BIND :
+
+```text
+bind-configtool check-front-axfr FRONT_DNS_IP ZONE CLIENT_SOURCE_IP ROOT_ONLY_TSIG_KEYFILE
+```
+
+Les arguments représentent vos valeurs réelles ; le dernier fichier contient un bloc de clé BIND, pas le fichier Base64 brut du contrôleur. L’exécutable installé sur le serveur est réservé à root ; préparer outil et clé sur un client de recette contrôlé et retirer les copies privées selon votre politique.
+
+| Code | Interprétation |
+|---|---|
+| `0` | Refus DNS explicite `REFUSED` ou `NOTAUTH` dans les deux essais. |
+| `1` | Zone transférée : anomalie bloquante pour ce client externe. |
+| `2` | Usage incorrect ou contrôle incomplet/ambigu, erreur réseau ou TSIG ; preuve complémentaire requise. |
+
+`Transfer failed` seul, `BADKEY`/`BADSIG`/`BADTIME`, une signature absente ou un timeout ne prouvent pas le refus attendu. Toutes les versions utilisent le format texte natif `+noall +comments +answer` : le format YAML de dig récent masque l'avertissement d'une réponse non signée à une question signée. Un avertissement natif d'échec de vérification rend le contrôle inconclusif. Tout diagnostic du client sur stderr le rend également inconclusif : `dig` peut ignorer une clé illisible ou invalide, envoyer une question non signée et retourner le code 0. Chaque essai exige un seul en-tête de réponse complet, non tronqué, avec le statut de refus dans son champ natif ; une mention dans une note ou une donnée ne suffit pas. La zone est transmise par `-q`, sans interprétation comme option ou serveur. Chaque requête a un délai de 15 secondes et une limite de sortie de 1 Mio ; dépassement, octet nul, erreur du producteur ou du nettoyage rendent le contrôle inconclusif. Les contenus bruts des réponses et diagnostics DNS ne sont pas repris dans les erreurs. Le secondaire BACK authentifié est autorisé même vers FRONT : ne pas le prendre comme client externe pour ce test.
+
+### Firewalld et routes
+
+```bash
+sudo firewall-cmd --state
+sudo firewall-cmd --get-active-zones
+sudo firewall-cmd --permanent --list-all-zones
+ip -4 route show table main
+```
+
+Pour chaque zone FRONT/BACK relevée, passer son nom réel à `--zone` et interroger `--query-service=dns` en runtime puis avec `--permanent` : attendu `yes`, retour `0`. Si les routes sont activées, vérifier leur profil et chemin effectif. Exemple sur le primaire :
+
+```bash
+ip -4 route get 198.51.100.10 from 192.0.2.11
+```
+
+Attendu : sortie FRONT et passerelle prévue, sans changement des chemins ADM/BACK ou de la route par défaut. Vérifier la permanence après redémarrage en recette. Procédures complémentaires : [TESTS_FONCTIONNELS.md](TESTS_FONCTIONNELS.md), [VALIDATION_RHEL8.md](VALIDATION_RHEL8.md).
+
+
 
 ## Loopback et zones natives
 
@@ -53,6 +114,8 @@ dig -4 -b 127.0.0.1 @127.0.0.1 0.in-addr.arpa SOA +norecurse
 ```
 
 Attendu : NOERROR/AA ; A 127.0.0.1, PTR localhost., AAAA ::1. Les données IPv6 natives ne signifient pas une écoute IPv6.
+
+
 
 ## Autorité, inverse et convergence
 
@@ -76,34 +139,6 @@ dig -4 -b 10.20.1.11 @10.20.1.12 site1.prod.example.test SOA +tcp +norecurse
 
 Après modification d'un record et incrément du serial, déployer la paire, vérifier la donnée sur les deux serveurs et consulter les journaux NOTIFY/transfert. Attendu : secondaire convergé ; aucun transfert non signé. Ces essais ne prouvent pas séparément l'usage d'IXFR plutôt qu'AXFR.
 
-## Forwarding et racine privée
-
-Sur chaque serveur :
-
-```bash
-dig -4 -b 127.0.0.1 @127.0.0.1 corp.site1.prod.example.test SOA +recurse
-dig -4 -b 127.0.0.1 @127.0.0.1 corp.site1.prod.example.test SOA +tcp +recurse
-dig -4 -b 127.0.0.1 @127.0.0.1 hors-perimetre.invalid A +recurse
-```
-
-Attendu : SOA du forwarder déclaré en UDP/TCP ; NXDOMAIN pour le nom hors périmètre. Adapter le suffixe forwardé à une zone réellement servie. Un forwarder indisponible pour une requête non mise en cache doit produire SERVFAIL, sans résolution Internet de secours ; ne pas couper un upstream de production pour ce test.
-
-## Contrôles d'accès
-
-Depuis une source absente de la liste et des ACL de pairs : une requête de zone métier doit être REFUSED. Depuis un client FRONT autorisé, vérifier les transferts non signés et signés avec l'outil, sans mettre le secret dans les arguments :
-
-```bash
-bind-configtool check-front-axfr 192.0.2.11 \
-  site1.prod.example.test 198.51.100.10 /chemin/protege/tsig.key
-```
-
-Cet outil doit être installé sur le client de recette avec dig. L'adresse source doit lui appartenir. Code 0 : refus explicite des deux essais ; 1 : transfert inattendu ; 2 : contrôle incomplet/ambigu, si le RCODE AXFR reste absent. Le dig EL8 est interrogé avec `+noall +comments +answer`, sans exiger YAML. Un échec réseau ou `Transfer failed` seul ne suffit pas. Le secondaire BACK authentifié est autorisé, y compris vers FRONT ; ne pas utiliser ce pair pour tester le refus d'un client externe. Détail : [ACL_SERVEURS.md](../configuration/reseau/ACL_SERVEURS.md).
-
-## Routes, reprise et décision de mise en production
-
-Les routes sont désactivées par défaut. Leur activation, simulation, contrôle du chemin `ip -4 route get CLIENT from FRONT_IP`, rollback et persistance sont décrits dans [FRONT_ROUTES.md](../configuration/reseau/FRONT_ROUTES.md). La recette doit préserver la session SSH, les routes par défaut et les profils existants. Le second déploiement doit conserver la donnée et ne pas ajouter de route inutile ; une sauvegarde forcée est attendue à chaque deploy.
-
-Arrêter la mise en production en cas de syntaxe invalide, service inactif, mauvais statut/réponse, SOA divergents, transfert client réussi, résultat de sécurité inconclusif ou mutation réseau inattendue. Restaurer la sauvegarde préalable selon [OPERATIONS.md](../exploitation/OPERATIONS.md). Les critères et validations manquantes sont dans [VALIDATION_RHEL8.md](VALIDATION_RHEL8.md).
 
 
 ## Deux listes clientes et absence de routes internes
@@ -125,6 +160,21 @@ ne fournit pas d’isolation stricte entre catégories et interfaces ; vérifier
 
 Pour `false`, attendu : `dnssec-validation no`, aucun hook privé dans `systemctl cat named`, aucun helper ni unité de renouvellement gérés déployés. En sortie d’un ancien mode actif, le timer doit être arrêté/désactivé. Une signature invalide n’est plus rejetée par DNSSEC. Le contrôle des ACL et TSIG reste applicable. Voir [DNSSEC.md](../configuration/bind/DNSSEC.md).
 
+
+## Contrôler les modes DNSSEC
+
+DNSSEC est activé en mode `auto` par défaut. RNDC reste administratif dans tous les modes ; les commandes NTA/timer suivantes s’appliquent uniquement à `true`/`auto` :
+
+```bash
+sudo rndc -s 127.0.0.1 -k /etc/rndc.key status
+sudo rndc -s 127.0.0.1 -k /etc/rndc.key nta -dump
+sudo systemctl status named-private-dnssec.timer --no-pager
+sudo journalctl -u named-private-dnssec.service --since '-1 day' --no-pager
+sudo systemctl cat named.service
+```
+
+Avec `true`/`auto`, attendu : seulement les suffixes privés explicitement déclarés dans les NTA appartenant au rôle, pas de NTA racine globale ; timer actif et aucune erreur. Les NTA manuelles éventuelles ne sont pas revendiquées/supprimées par le rôle. Pour une zone stricte de recette dont la chaîne est connue et accessible, contrôler une donnée signée valide (NOERROR/AD), puis une signature corrompue maîtrisée (SERVFAIL) ; ne pas altérer une zone de production. Un suffixe privé exempté n'a pas de garantie DNSSEC et ne doit pas être annoncé comme validé. Les données unsigned peuvent être légitimement insecure ; unsigned ne signifie pas systématiquement bogus. Procédure et contraintes de racine privée : [DNSSEC.md](../configuration/bind/DNSSEC.md).
+
 ---
 
-Documentation DNSZIBO · navigation actualisée le 23 novembre 2026.
+Documentation DNSZIBO · contenu harmonisé le 25 novembre 2026.

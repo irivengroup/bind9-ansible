@@ -4,11 +4,12 @@
 
 [Retour au Parent](index.md)
 
+## Sommaire
 
-La configuration canonique active trois journaux sous `/var/log/named`.
-L’ACL cliente s’appelle désormais `user_defined_clients` ; sa source reste
-le fait Ansible calculé `bind_allowed_clients`, fusion des listes cloud et
-internes. Aucun paramètre DNSSEC, réseau ou de routage n’est renommé.
+- [Fichiers et catégories](#fichiers-et-catégories)
+- [Création, permissions et SELinux](#création-permissions-et-selinux)
+- [Déploiement et exploitation](#déploiement-et-exploitation)
+- [Conservation et supervision](#conservation-et-supervision)
 
 ## Fichiers et catégories
 
@@ -66,7 +67,7 @@ Quand SELinux est activé, le rôle :
 
 Cette association persistante couvre les fichiers créés lors des rotations
 et les futurs relabels. Les outils SELinux proviennent du paquet
-`policycoreutils-python-utils`, déjà installé par le projet. Aucune
+`policycoreutils-python` sur EL7 et `policycoreutils-python-utils` sur EL8+, installés par le rôle. Aucune
 collection ni dépendance supplémentaire n’est ajoutée. Aucun changement
 de mode enforcing ni autorisation SELinux globale n’est effectué.
 
@@ -74,9 +75,7 @@ Le drop-in `bind9-runtime.conf` fixe `UMask=0027` pour le seul service
 `named`. Les fichiers recréés lors des rotations conservent ainsi le mode
 `0640`. Le handler existant redémarre le service lorsque ce drop-in change,
 puis conserve le chemin de rechargement natif lorsque l’unité est inchangée.
-La rotation réelle sous BIND EL8 9.11.36 a reproduit le mode `0644` avant
-cette correction, puis confirmé `0640` sur les trois journaux avec le même
-scénario et la politique du drop-in corrigé. Le répertoire reste en `0750`.
+L’essai avant/après de cette correction est conservé dans la [campagne de journalisation](../../historique/CAMPAGNES_CONFIGURATION.md#journalisation). Le répertoire reste en `0750`.
 
 Les journaux peuvent contenir des IP clientes, des noms demandés lors de
 refus et des informations opérationnelles. Leur accès et leur conservation
@@ -94,15 +93,18 @@ reprise DNS lorsqu’elle se produit dans le bloc protégé.
 Après déploiement sur chaque serveur :
 
 ```bash
+getenforce
+sudo ls -Zd /var/log/named /var/log/named/default.log \
+  /var/log/named/security.log /var/log/named/xfer.log
+sudo semanage fcontext -l | grep -F '/var/log/named'
 sudo named-checkconf -z /etc/named.conf
-sudo ls -ldZ /var/log/named
-sudo ls -lZ /var/log/named/default.log /var/log/named/security.log /var/log/named/xfer.log
 sudo semanage fcontext -l -C
-sudo tail -n 50 /var/log/named/default.log
-sudo tail -n 50 /var/log/named/security.log
-sudo tail -n 50 /var/log/named/xfer.log
 sudo rndc -s 127.0.0.1 -k /etc/rndc.key status
-sudo journalctl -u named --since '15 minutes ago' --no-pager
+sudo tail -n 100 /var/log/named/default.log
+sudo tail -n 100 /var/log/named/security.log
+sudo tail -n 100 /var/log/named/xfer.log
+sudo journalctl -u named --since '-30 minutes' --no-pager
+sudo du -sh /var/log/named /var/backups/Bind9-Ansible/bind
 sudo ausearch -m AVC,USER_AVC -ts recent
 ```
 
@@ -121,88 +123,11 @@ conserver le relevé des règles locales ; une restauration éventuelle de
 ces règles doit tenir compte de leur état antérieur. Le rôle ne retire
 pas automatiquement une règle potentiellement préexistante.
 
-## Parties impactées
 
-| Fichier | Modification nécessaire |
-|---|---|
-| `roles/bind9/templates/named.conf.j2` | Canaux, catégories, désactivation explicite des requêtes ; renommage de l’ACL et de ses deux références |
-| `roles/bind9/templates/named-runtime-override.j2` | Masque de création `0027`, conservant les journaux en `0640` après rotation |
-| `roles/bind9/tasks/tasks.d/deploy/directories.yml` | Répertoire privé et préparation non destructive des trois fichiers |
-| `roles/bind9/tasks/tasks.d/path_safety.yml` | Protection des nouveaux chemins contre les liens symboliques |
-| `roles/bind9/tasks/tasks.d/deploy/security.yml` | Règle SELinux persistante, relabel récursif et contrôle des labels |
-| `roles/bind9/tasks/main.yml`, `roles/bind9/tasks/tasks.d/deploy/firewall.yml` | Import et ajout idempotent du service DNS runtime/permanent dans les zones FRONT/BACK ; détails dans [FIREWALLD.md](../reseau/FIREWALLD.md) |
-| `examples/deux-zones-forwardees/` | Deux configurations régénérées et texte aligné sur l’ACL |
-| `tests/` | Tests des tâches, de l’idempotence, des canaux réels, de la rotation et de l’ACL ; adaptation des chemins du laboratoire et du test restorecon |
-| `.github/workflows/ci.yml` | Ajout du script d’intégration logging au contrôle de syntaxe shell existant |
-| `README.md`, `docs/wiki.d/exploitation/OPERATIONS.md`, `docs/wiki.d/configuration/reseau/ACL_SERVEURS.md`, `docs/wiki.d/configuration/reseau/CLIENTS_UNIQUES.md`, `docs/wiki.d/qualification/VALIDATION_RHEL8.md` | Exploitation et contrat d’ACL alignés |
+## Conservation et supervision
 
-Le point d’entrée, les routes, scripts Python de production, handlers
-et variables publiques restent ceux de la livraison précédente. Le tag
-`firewall` et sa gestion sont ajoutés à la demande. Les tests
-pytest ajoutés sont découverts par la CI existante ; la CI distante n’a pas
-été exécutée. Les métadonnées et le manifeste décrivent le diff exact.
-
-## Vérifications et limites
-
-La passe courante conserve ses preuves de recette et de couverture séparément
-de la livraison antérieure. Les comptages ci-dessous sont historiques ; ils
-ne constituent pas les mesures globales de la version en cours.
-
-La recette actuelle a exécuté le scénario de rotation avec le démon BIND EL8
-non privilégié et vérifié les trois modes `0640`, les cinq archives et la
-suppression de la plus ancienne. Le validateur d’unités EL8 a lu `UMask=0027`.
-Les modules Ansible de publication et le handler ont également été exercés,
-avec une frontière de commande systemd doublée, pour le redémarrage et
-l’idempotence. Ces contrôles ne qualifient pas un démarrage système réel.
-
-### Recettes historiquement consignées
-
-La recette locale de cette livraison comprend 489 tests contrôleur sous
-chacun des moteurs Jinja 2.10.3 et 3.0.3, puis 12 workflows de fichiers/SELinux
-et 8 workflows firewalld sous Jinja 2.10.3, soit 509 tests distincts avec ce
-moteur. Les deux scénarios BIND de journalisation s’ajoutent aux laboratoires
-DNS existants, chacun 109 configurations et 282 contrôles DNS.
-
-- **EXÉCUTÉ** : tests contrôleur Ansible 2.9.27, Jinja 2.10.3 et 3.0.3,
-  vérification de la règle exacte, de ses trois branches et des labels,
-  rendus de l’ACL pour les deux rôles et les différentes listes de clients.
-- **EXÉCUTÉ** : vrai runner Ansible et vrais modules de fichiers, avec
-  doubles `semanage`/`restorecon`/`ls` : préservation des données et dates,
-  idempotence, SELinux désactivé et erreurs explicites de politique/label.
-- **EXÉCUTÉ** : BIND EL8 9.11.36 et BIND 9.18.24, dans des espaces réseau
-  isolés, exécutés sous l’utilisateur non privilégié `nobody` : trois
-  fichiers écrits, refus et AXFR TSIG journalisés, requêtes désactivées,
-  rotation réelle au seuil de 10 Mio et suppression de la plus ancienne
-  des cinq archives. Les chemins seuls sont adaptés au laboratoire.
-- **EXÉCUTÉ** : configurations et essais DNS existants, exemples primaire
-  et secondaire contrôlés par le parseur natif, syntaxe Ansible, Pyflakes,
-  syntaxe shell et inspection des références.
-- **NON EXÉCUTÉ** : SELinux enforcing réel et domaine `named_t` sur RHEL,
-  unités système réelles, disque/saturation, charge et durée de rétention
-  observée. Raison : aucun accès à vos serveurs. Prérequis : paire de
-  recette RHEL 8, outils SELinux, espace disque et sauvegardes. Procédure :
-  déployer, effectuer les commandes ci-dessus, provoquer des refus et des
-  transferts de recette, contrôler les AVC puis répéter le déploiement.
-  Résultat attendu : écritures par named, labels persistants après rotation
-  et relabel, absence d’AVC lié aux logs, historique conservé. Risques :
-  politique locale, options de service, système de fichiers et charge réelle.
-
-La qualification sur vos serveurs reste **NON TERMINÉE**. Les procédures
-générales de recette et de rollback restent dans
-[VALIDATION_RHEL8.md](../../qualification/VALIDATION_RHEL8.md) et [OPERATIONS.md](../../exploitation/OPERATIONS.md).
-Pour la recette isolée, sur un contrôleur Linux avec Ansible et les outils
-BIND de test préparés comme dans le rapport de validation :
-
-```bash
-python -m pytest -q tests/test_logging.py tests/test_logging_ansible.py tests/test_user_defined_client_acl.py
-sudo bash tests/run_integration_logging.sh --bin-dir /opt/recette/bind/bin --native-dir /opt/recette/bind/native --named /opt/recette/bind/sbin/named
-```
-
-Le second test nécessite root, `unshare`, `ip`, l’utilisateur `nobody` et
-les binaires BIND. Il ne modifie ni les interfaces ni la politique SELinux
-du système hôte. Les particularités BIND `querylog`/canaux suivent les
-[recommandations ISC](https://kb.isc.org/docs/aa-01526).
+Les journaux ne garantissent aucune rétention d’un mois ou quotidienne. `ansible.cfg` ne définit pas de `log_path` ; conserver les comptes rendus Ansible avec votre mécanisme protégé. Le [moniteur périodique](../../exploitation/SUPERVISION.md) garde ses unités systemd existantes ; il ne fournit ni collecte centrale ni notification externe.
 
 ---
 
-Documentation DNSZIBO · navigation actualisée le 23 novembre 2026.
+Documentation DNSZIBO · contenu harmonisé le 25 novembre 2026.

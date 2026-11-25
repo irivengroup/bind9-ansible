@@ -11,3 +11,65 @@ Les rendus de ce dossier illustrent deux adresses d’écoute par serveur. Pour 
 Ce sont des valeurs d'illustration, pas une configuration à copier telle quelle sur un serveur. Le parcours `deploy` fournit le canal RNDC administratif et le drop-in commun de reload RNDC, sans restriction de famille au lancement. Le mode `auto`, désormais par défaut, installe le helper, les hooks et le renouvellement des exceptions. Les deux forwards privés non signés portent `dnssec_validate: false` ; leurs exceptions limitées sont appliquées via RNDC. Utiliser le parcours complet : copier seulement named.conf ne suffit pas. Une surcharge explicite `bind_dnssec_active: false` désactive ces composants.
 
 Le rendu a été contrôlé avec `named-checkconf -z` EL8 dans un répertoire temporaire, avec chemins adaptés ; aucun déploiement cible de ces adresses n'est revendiqué. Voir [DNSSEC et limites](../../docs/wiki.d/configuration/bind/DNSSEC.md), [README du projet](../../README.md) et [recette](../../docs/wiki.d/qualification/TESTS_FONCTIONNELS.md).
+
+## Configuration commune du site
+
+Le fichier ci-dessous ajoute une autorité au scénario ; les rendus statiques fournis dans ce dossier illustrent les deux forwards seuls et doivent être régénérés pour cette variante.
+
+`inventory/prod/group_vars/site1.yml` — exemple complet avec **deux zones forwardées** et une autorité :
+
+```yaml
+---
+bind_site_name: site1
+bind_tsig_key_name: prod-site1-transfer
+bind_tsig_algorithm: hmac-sha256
+bind_tsig_secret_file: "{{ lookup('env', 'HOME') }}/.local/share/bind9-ansible/tsig/prod/site1.key"
+
+bind_trusted_networks:
+  cloud_clients:
+    - 198.51.100.0/24
+    - 203.0.113.25
+  internal_clients: []
+
+bind_dnssec_active: auto
+bind_front_routes_enabled: false
+bind_monitoring_enabled: false
+
+bind_resources_deploy:
+  resource: batch
+  action: create
+  operations:
+    - resource: zone
+      action: create
+      kind: authoritative
+      zone:
+        domain: site1.prod.example.test
+        ttl: 300
+        serial: 2026101601
+        records:
+          - name: app
+            type: A
+            value: 192.0.2.101
+    - resource: zone
+      action: create
+      name: corp.site1.prod.example.test
+      kind: forward
+      policy: only
+      dnssec_validate: false
+      forwarders:
+        - address: 10.11.0.53
+          port: 53
+    - resource: zone
+      action: create
+      name: apps.site1.prod.example.test
+      kind: forward
+      policy: only
+      dnssec_validate: false
+      forwarders:
+        - address: 10.11.0.54
+          port: 53
+```
+
+Les forwarders doivent réellement servir le SOA des suffixes déclarés et répondre en UDP/TCP. Ces enfants forwardés sont délégués sous l’autorité parente. Si aucune autorité n’est nécessaire, ne déclarer aucune opération de création autoritaire dans `bind_resources_deploy`. Un [exemple rendu primaire/secondaire avec deux zones forwardées](README.md) est livré séparément.
+
+

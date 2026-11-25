@@ -4,15 +4,12 @@
 
 [Retour au Parent](index.md)
 
+## Sommaire
 
-Rapport historique : le paramètre de déploiement courant est désormais `hibernate_deployment: no`. Voir [HIBERNATE_DEPLOYMENT.md](../exploitation/HIBERNATE_DEPLOYMENT.md) et [AUDIT_HIBERNATE_DEPLOYMENT.md](../historique/AUDIT_HIBERNATE_DEPLOYMENT.md) pour le contrat et les preuves actuels. Les résultats et anciens paramètres décrits ci-dessous restent propres à la livraison historique.
-
-Révision **2026.10.17-management-io-safety.1**, à partir de
-`Bind9-Ansible-management-integrite.zip`, SHA-256
-`4307808fe31a73b170ba76999a1f045b42dccb77739387c08c128d3f245c4f15`.
-Les références synchronisées, archives et sources des livraisons précédentes
-restent inchangées. Leurs résultats sont historiques ; les résultats ci-dessous
-sont propres à cette passe.
+- [Objectif, menaces et décisions](#objectif-menaces-et-décisions)
+- [Contrôles réellement exécutés](#contrôles-réellement-exécutés)
+- [Reproduire en laboratoire jetable](#reproduire-en-laboratoire-jetable)
+- [Qualification restante et risques](#qualification-restante-et-risques)
 
 ## Objectif, menaces et décisions
 

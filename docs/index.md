@@ -1,8 +1,7 @@
 # Documentation DNSZIBO
 
 Ce portail rassemble la documentation de configuration, d’exploitation et de
-qualification du rôle BIND. Les fiches historiques gardent leurs dates, résultats
-et limites ; une ancienne recette n’est pas une nouvelle qualification.
+qualification du rôle BIND. Chaque sujet opérationnel a une page de référence ; le README sert de point d’entrée. Les preuves et limites de production sont regroupées dans la rubrique Qualification. Les archives conservent leurs dates et observations, sans constituer une nouvelle qualification.
 
 ## Sommaire
 

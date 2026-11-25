@@ -4,31 +4,9 @@
 
 [Retour au Parent](index.md)
 
+## Sommaire
 
-Rapport historique : le paramètre de déploiement courant est désormais `hibernate_deployment: no`. Voir [HIBERNATE_DEPLOYMENT.md](../exploitation/HIBERNATE_DEPLOYMENT.md) et [AUDIT_HIBERNATE_DEPLOYMENT.md](AUDIT_HIBERNATE_DEPLOYMENT.md) pour le contrat et les preuves actuels. Les résultats et anciens paramètres décrits ci-dessous restent propres à la livraison historique.
-
-Historique de la livraison source. Les changements de la révision durcie sont détaillés dans [DURCISSEMENT_MANAGEMENT.md](DURCISSEMENT_MANAGEMENT.md).
-
-Source immuable : `Bind9-Ansible-zones-vides-natives.zip`, SHA-256 `9c146b0c91755e5b416ea063b46e235365f099e17f04b789307024beb44c8f79`. Projet : **Bind9-Ansible**. Cette évolution concerne le cycle d’exploitation, la concurrence et la reprise ; elle ne remplace pas le modèle DNS déployé.
-
-| Domaine | Modification et invariant protégé |
-|---|---|
-| Points d’entrée | `playbooks/bind9-deploy.yml` conservé ; ajout de `playbooks/bind9-management.yml`, séquentiel, une action par exécution. |
-| Déploiement | `roles/bind9/tasks/main.yml` ajoute le garde/lease et appelle l’orchestration existante déplacée dans `tasks.d/deploy/main.yml`. Ordre et bloc de rollback existants conservés. |
-| Sceau | `tasks.d/deploy/guard.yml`, `seal.yml`, `defaults/main.yml` et marqueur final dans `deploy/health.yml`. `force: false` ; reconstruction explicitement autorisée par `force=yes`. Aucun sceau après un échec ou un parcours partiel. |
-| Réorganisation | 27 fichiers contextuels de `tasks.d/` déplacés dans `tasks.d/deploy/`, ainsi que l’orchestration précédente. Les imports et leurs consommateurs/tests/documents sont réalignés. Les 11 fichiers partagés restent à la racine. La liste exhaustive des déplacements figure dans `DELIVERY.json`. |
-| Management | `tasks/manage.yml` et `tasks.d/manage/main.yml` appellent le module `library/bind9_manage.py`, avec la logique dans `module_utils/bind9_management.py`. Aucun appel au template global ou aux tâches de routage. |
-| Données | Edition de clauses/RRsets ciblés ; SOA et délégations modifiés seulement lorsqu’ils sont nécessaires à l’action. Fichiers conservés par défaut au delete zone, purge explicite et sauvegardée. Pas de PTR implicite. |
-| Contrats publics | Ajout de `force`, `bind_manage`, `bind_manage_checksums`, `bind_manage_show_values`. Les variables DNS/réseau existantes restent inchangées. Les chemins internes des tâches ont changé ; adapter les éventuels consommateurs externes `tasks_from`. |
-| Configuration DNS | `templates/named.conf.j2`, templates de zones, exemples existants, scripts/filtres DNS et inventaires conservés octet pour octet. Défaut DNSSEC `auto`, écoute DNS IPv4 et capacités sortantes IPv4/IPv6 conservés. |
-| Réseau | Algorithmes FRONT, passerelle, profils NetworkManager et rollback réseau conservés ; seuls les chemins d’import changent. Aucun changement réseau par management. |
-| Sauvegarde/reprise | Outil `bind-configtool` existant réutilisé pour l’archive complète ; journal ciblé privé supplémentaire, restauration des seules cibles de l’opération et refus d’écraser un conflit manuel. |
-| Exploitation | Documentation CRUD, migration depuis une livraison sans sceau, rétention des sauvegardes et reprise des leases interrompues dans `MANAGEMENT.md`. Le management ne met pas à jour l’inventaire. |
-| Tests et CI | Tests adaptés aux déplacements sans retrait d’assertions métier ; nouveaux scénarios de checksum, CRUD, fichiers dangereux, champs incompatibles, signatures statiques, rollback et cache. Contrôle des deux playbooks et seuil de couverture 98 % du moteur ajouté à la CI. |
-| Dépendances | Aucun paquet, collection, service ou bibliothèque Python de production ajouté. Le module utilise la bibliothèque standard Python 3.6+. Les outils BIND/RHEL déjà prérequis restent nécessaires. |
-
-Les noms cités ci-dessous décrivent la révision historique. Le contrat actuel
-utilise `bind_resources_manage` ; voir [la migration de la requête](../exploitation/MANAGEMENT.md#contrat-de-la-requête-bind_resources_manage).
+- [Menaces et limites de protection](#menaces-et-limites-de-protection)
 
 ## Menaces et limites de protection
 

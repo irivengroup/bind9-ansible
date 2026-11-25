@@ -5,15 +5,17 @@
 [Retour au Parent](../../index.md)
 
 
+Les deux premières fiches portent les procédures et la synthèse actuelles. Les fichiers de preuves et rapports de révisions antérieures qui suivent restent des archives datées ; leurs anciennes commandes, variables et seuils ne remplacent pas le contrat courant.
+
 ## Sommaire
 
-- [Qualification actuelle : preuves et limites de production](QUALIFICATION_ACTUELLE.md)
+- [Qualification : preuves de test et limites de production](QUALIFICATION_ACTUELLE.md)
+- [Recette fonctionnelle DNS, réseau et accès](TESTS_FONCTIONNELS.md)
 - [PREUVES_FIABILITE_IO.txt](PREUVES_FIABILITE_IO.txt)
 - [PREUVES_HIBERNATE_DEPLOYMENT.txt](PREUVES_HIBERNATE_DEPLOYMENT.txt)
 - [PREUVES_INTEGRITE_LIVE.txt](PREUVES_INTEGRITE_LIVE.txt)
 - [PREUVES_LOTS_ET_LISTES.txt](PREUVES_LOTS_ET_LISTES.txt)
 - [PREUVES_MANAGEMENT_DURCI.txt](PREUVES_MANAGEMENT_DURCI.txt)
-- [Commandes de recette fonctionnelle](TESTS_FONCTIONNELS.md)
 - [Validation et impacts — fiabilité des données et I/O](VALIDATION_FIABILITE_IO.md)
 - [Vérification des routes externes](VALIDATION_FRONT_ROUTES.md)
 - [Vérifications et impacts — intégrité de la configuration live](VALIDATION_INTEGRITE_LIVE.md)

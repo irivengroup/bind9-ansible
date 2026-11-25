@@ -4,6 +4,79 @@
 
 [Retour au Parent](index.md)
 
+## Sommaire
+
+- [Inventaire et environnements](#inventaire-et-environnements)
+- [Périmètre](#périmètre)
+- [Choisir la topologie](#choisir-la-topologie)
+- [Une seule interface](#une-seule-interface)
+- [Plusieurs interfaces avec une seule écoute DNS](#plusieurs-interfaces-avec-une-seule-écoute-dns)
+- [Plusieurs écoutes DNS et ADMIN dédié](#plusieurs-écoutes-dns-et-admin-dédié)
+- [Plusieurs IPv4 et connexion SSH par nom](#plusieurs-ipv4-et-connexion-ssh-par-nom)
+- [Paire ISO et variables communes](#paire-iso-et-variables-communes)
+- [Routage et pare-feu](#routage-et-pare-feu)
+- [Appliquer les exemples](#appliquer-les-exemples)
+- [Configuration commune du site](#configuration-commune-du-site)
+
+## Inventaire et environnements
+
+Les inventaires fournis sont `inventory/dev`, `inventory/preprod`, `inventory/prod`. `ansible.cfg` sélectionne la production par défaut : **toujours préciser `-i` dans les procédures**. N’utiliser qu’un environnement par exécution.
+
+Extrait cohérent du site `site1` de production ; l’inventaire livré contient également `site3` :
+
+```ini
+[site1]
+site1-dns01
+site1-dns02
+
+[dns_primary]
+site1-dns01
+
+[dns_secondary]
+site1-dns02
+
+[dns_deployment_order]
+site1-dns01
+site1-dns02
+```
+
+Chaque hôte appartient à exactement un groupe de rôle ; chaque site comporte exactement un primaire et un secondaire. Placer le primaire avant son secondaire dans `dns_deployment_order`. Le playbook applique `serial: 1`, `order: inventory`, `any_errors_fatal: true`.
+
+`inventory/prod/group_vars/all.yml` :
+
+```yaml
+---
+bind_environment: prod
+```
+
+`inventory/prod/host_vars/site1-dns01.yml` :
+
+```yaml
+---
+ansible_host: 10.10.1.11
+bind_listen_interfaces:
+  - name: ens256
+    ipaddress: 192.0.2.11
+    scope: front
+  - name: ens224
+    ipaddress: 10.20.1.11
+    scope: back
+```
+
+`inventory/prod/host_vars/site1-dns02.yml` :
+
+```yaml
+---
+ansible_host: 10.10.1.12
+bind_listen_interfaces:
+  - name: ens256
+    ipaddress: 192.0.2.12
+    scope: front
+  - name: ens224
+    ipaddress: 10.20.1.12
+    scope: back
+```
+
 
 ## Périmètre
 
@@ -85,17 +158,7 @@ Ne pas conserver d'anciennes IP FRONT/BACK différentes de cette adresse.
 
 Exemple primaire :
 
-```yaml
----
-ansible_host: 10.10.1.11
-bind_listen_interfaces:
-  - name: ens256
-    ipaddress: 192.0.2.11
-    scope: front
-  - name: ens224
-    ipaddress: 10.20.1.11
-    scope: back
-```
+Utiliser le bloc primaire complet de la [paire d’inventaire](#inventaire-et-environnements) ci-dessus.
 
 Le secondaire déclare respectivement `10.10.1.12`, `192.0.2.12` et
 `10.20.1.12`. Les deux IP DNS doivent appartenir à deux interfaces d'écoute
@@ -226,6 +289,10 @@ Pour revenir à l'inventaire précédent, restaurer ensemble les deux `host_vars
 et leurs variables de site sauvegardées. Cela ne retire aucune route déjà
 committée : leur reprise suit la procédure dédiée aux routes FRONT.
 
+## Configuration commune du site
+
+Les ressources, clients et références TSIG vont dans `group_vars`. Le [scénario complet à deux forwards](../../../../examples/deux-zones-forwardees/README.md#configuration-commune-du-site) conserve un exemple de fichier de site ; le [catalogue des variables](../VARIABLES.md) décrit chaque entrée.
+
 ---
 
-Documentation DNSZIBO · contenu actualisé le 25 novembre 2026.
+Documentation DNSZIBO · contenu harmonisé le 25 novembre 2026.

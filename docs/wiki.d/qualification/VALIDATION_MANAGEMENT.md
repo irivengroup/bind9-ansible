@@ -4,12 +4,12 @@
 
 [Retour au Parent](index.md)
 
+## Sommaire
 
-Rapport historique : le paramètre de déploiement courant est désormais `hibernate_deployment: no`. Voir [HIBERNATE_DEPLOYMENT.md](../exploitation/HIBERNATE_DEPLOYMENT.md) et [AUDIT_HIBERNATE_DEPLOYMENT.md](../historique/AUDIT_HIBERNATE_DEPLOYMENT.md) pour le contrat et les preuves actuels. Les résultats et anciens paramètres décrits ci-dessous restent propres à la livraison historique.
-
-Rapport historique de la livraison `2026.10.17-management`. Pour les changements et contrôles rejoués sur la révision durcie, voir [DURCISSEMENT_MANAGEMENT.md](../historique/DURCISSEMENT_MANAGEMENT.md). Les nombres ci-dessous ne constituent pas de nouveaux résultats sur cette révision.
-
-Projet **Bind9-Ansible**, cible RHEL 8, Ansible 2.9, Python serveur 3.6.8. Source : `Bind9-Ansible-zones-vides-natives.zip`, SHA-256 `9c146b0c91755e5b416ea063b46e235365f099e17f04b789307024beb44c8f79`. Les anciennes livraisons sont conservées ; le dossier `sources/` n’a pas été modifié. Les empreintes du contenu courant figurent dans `SOURCE-MANIFEST.sha256`.
+- [Résultats observés](#résultats-observés)
+- [Parties impactées et invariants](#parties-impactées-et-invariants)
+- [Contrôles restant à réaliser](#contrôles-restant-à-réaliser)
+- [Reproduction en laboratoire](#reproduction-en-laboratoire)
 
 ## Résultats observés
 

@@ -69,7 +69,7 @@ Les interfaces FRONT et BACK peuvent être distinctes ou partager une même éco
 Les autorisations clientes reposent sur les réseaux déclarés ; les politiques
 réseau déterminent les chemins d’accès aux interfaces.
 
-Consultez la [référence d’architecture](docs/wiki.d/exploitation/REFERENCE_ROLE.md#architecture)
+Consultez la [référence d’architecture](docs/wiki.d/exploitation/OPERATIONS.md#architecture)
 et le [contrat des ACL](docs/wiki.d/configuration/reseau/ACL_SERVEURS.md).
 
 <a id="prerequis"></a>
@@ -93,7 +93,7 @@ Sur les serveurs :
 Le rôle installe `bind`, `bind-utils`, `python3` et l’outillage SELinux natif. Les
 routes FRONT optionnelles nécessitent aussi NetworkManager actif. La liste
 complète des paquets, fichiers et flux requis figure dans les
-[prérequis détaillés](docs/wiki.d/exploitation/REFERENCE_ROLE.md#prerequis).
+[prérequis détaillés](docs/wiki.d/exploitation/OPERATIONS.md#prerequis).
 
 <a id="inventaire"></a>
 ## Inventaire et interfaces
@@ -164,7 +164,7 @@ et les [six exemples de paires](examples/interfaces/README.md).
 
 Placez les paramètres communs dans `group_vars` et les sélections propres aux
 serveurs dans `host_vars`. Les [valeurs par défaut](roles/bind9/defaults/main.yml)
-et la [référence des variables](docs/wiki.d/exploitation/REFERENCE_ROLE.md#variables)
+et la [référence des variables](docs/wiki.d/configuration/VARIABLES.md)
 décrivent le contrat complet.
 
 ### Réseaux clients autorisés
@@ -236,7 +236,7 @@ séparément dans un stockage chiffré. La clé RNDC native reste distincte.
 Ansible Vault peut protéger les identifiants de connexion et d’élévation ;
 le lecteur TSIG attend un fichier Base64 brut, pas un fichier chiffré par Vault.
 
-La [procédure TSIG et Vault](docs/wiki.d/exploitation/REFERENCE_ROLE.md#secrets)
+La [procédure TSIG et Vault](docs/wiki.d/configuration/SECRETS.md)
 décrit la préparation, les permissions et la rotation coordonnée.
 
 <a id="deploiement"></a>
@@ -258,7 +258,7 @@ ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml \
 ```
 
 Ajoutez `--ask-become-pass` si nécessaire ou utilisez vos variables Vault
-protégées. Le [parcours de déploiement](docs/wiki.d/exploitation/REFERENCE_ROLE.md#deploiement)
+protégées. Le [parcours de déploiement](docs/wiki.d/exploitation/OPERATIONS.md#deploiement)
 précise les étapes, contrôles et conditions d’arrêt.
 
 Pour poser un sceau après un déploiement réussi, ajoutez
@@ -298,7 +298,7 @@ avant une modification.
 | `routes-recover` | Reprendre explicitement une transaction réseau interrompue. |
 | `monitor` | Installer le moniteur lorsque `bind_monitoring_enabled: true`. |
 
-Le [catalogue complet des tags](docs/wiki.d/exploitation/REFERENCE_ROLE.md#tags)
+Le [catalogue complet des tags](docs/wiki.d/exploitation/OPERATIONS.md#tags)
 précise les prérequis des parcours partiels. Pour le parcours normal, utilisez
 `--tags deploy`. Ajoutez `monitor` pour installer également le moniteur et
 conservez les tâches `always`.
@@ -330,7 +330,7 @@ et applique les contextes SELinux lorsque celui-ci est actif.
 
 Préparez les politiques réseau externes, restreignez l’accès aux configurations
 et sauvegardes contenant des secrets, et conservez les protections système.
-La [référence de sécurité](docs/wiki.d/exploitation/REFERENCE_ROLE.md#securite)
+La [référence de sécurité](docs/wiki.d/configuration/reseau/ACL_SERVEURS.md)
 et les fiches [ACL](docs/wiki.d/configuration/reseau/ACL_SERVEURS.md),
 [firewalld](docs/wiki.d/configuration/reseau/FIREWALLD.md) et
 [DNSSEC](docs/wiki.d/configuration/bind/DNSSEC.md) détaillent ces mécanismes.
@@ -348,7 +348,7 @@ Le script `bind-healthcheck.sh` est installé sous
 `named-healthcheck.service` et `named-healthcheck.timer`.
 
 Consultez la [journalisation](docs/wiki.d/configuration/bind/JOURNALISATION.md)
-et la [supervision](docs/wiki.d/exploitation/REFERENCE_ROLE.md#observabilite)
+et la [supervision](docs/wiki.d/exploitation/SUPERVISION.md)
 pour la rétention, la migration du moniteur et les contrôles à compléter.
 
 <a id="tests"></a>
@@ -358,7 +358,7 @@ Après un changement, vérifiez les réponses DNS depuis chaque serveur et depui
 les segments clients : localhost, autorité, forwarding, réplication et refus
 des accès non autorisés. Contrôlez aussi firewalld et les routes activées.
 
-Les [commandes et résultats attendus](docs/wiki.d/exploitation/REFERENCE_ROLE.md#tests)
+Les [commandes et résultats attendus](docs/wiki.d/qualification/TESTS_FONCTIONNELS.md)
 et les [tests fonctionnels](docs/wiki.d/qualification/TESTS_FONCTIONNELS.md)
 permettent de préparer cette recette.
 
@@ -372,7 +372,7 @@ lister et restaurer ces archives privées ; la rétention est de 30 jours,
 
 Préparez le retour arrière avant l’intervention : archive et empreinte contrôlées,
 secret TSIG, inventaire, version et composants runtime nécessaires.
-La [procédure de restauration](docs/wiki.d/exploitation/REFERENCE_ROLE.md#reprise)
+La [procédure de restauration](docs/wiki.d/exploitation/OPERATIONS.md#reprise)
 décrit le périmètre exact, l’arrêt des services et les contrôles de remise en service.
 
 <a id="diagnostic"></a>
@@ -380,7 +380,7 @@ décrit le périmètre exact, l’arrêt des services et les contrôles de remis
 
 Relevez l’hôte, l’heure, la version, la tâche en échec et la dernière sauvegarde.
 Conservez les messages utiles sans exposer de secret. Le
-[guide de diagnostic](docs/wiki.d/exploitation/REFERENCE_ROLE.md#diagnostic)
+[guide de diagnostic](docs/wiki.d/exploitation/OPERATIONS.md#diagnostic)
 relie les symptômes aux contrôles DNS, réseau, journaux et SELinux.
 
 <a id="validation"></a>

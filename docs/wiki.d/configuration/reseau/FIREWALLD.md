@@ -4,11 +4,11 @@
 
 [Retour au Parent](index.md)
 
+## Sommaire
 
-Le rôle autorise le service firewalld **`dns`**, correspondant au port 53
-en UDP et TCP. `named` est le nom du service système BIND ; ce n’est pas
-le nom du service firewalld utilisé. Le canal RNDC 953 reste local et
-n’est pas ouvert par ces tâches.
+- [Comportement intégré](#comportement-intégré)
+- [Portée et reprise](#portée-et-reprise)
+- [Contrôles de recette](#contrôles-de-recette)
 
 ## Comportement intégré
 
@@ -17,7 +17,8 @@ des paquets BIND et avant les vérifications du primaire et la sauvegarde
 DNS. Le tag `firewall` permet aussi d’exécuter uniquement cette gestion :
 
 ```bash
-ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --tags firewall
+ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml \
+  --limit site1 --tags firewall
 ```
 
 Prérequis : `ip`, `firewall-cmd` et un démon firewalld **déjà actif** sur
@@ -26,8 +27,8 @@ Son absence ou son arrêt provoque un échec explicite. Aucune collection
 Ansible supplémentaire ni code Python de pare-feu n’est ajouté.
 
 Les tâches découvrent toutes les interfaces portant les adresses DNS locales
-sélectionnées, y compris les adresses secondaires. La sélection vient de
-`bind_listen_interfaces` ou de la résolution FRONT/BACK ; une écoute unique est
+sélectionnées, y compris les adresses secondaires. La sélection vient exclusivement de la liste d’objets
+`bind_listen_interfaces`, à partir de laquelle FRONT/BACK sont résolus ; une écoute unique est
 acceptée. Chaque adresse choisie doit être présente une seule fois. Elles
 interrogent ensuite séparément les zones **runtime** et **permanentes** de ces
 interfaces. Voir [les déclarations host_vars](INTERFACES_RESEAU.md).
@@ -66,8 +67,6 @@ reste hors du périmètre qualifié.
 
 ## Contrôles de recette
 
-Les paragraphes EXÉCUTÉ/NON EXÉCUTÉ ci-dessous conservent le bilan historique de cette fiche ; ils ne remplacent pas les campagnes de qualification ultérieures.
-
 Sur chaque cible, relever les zones de toutes les interfaces d’écoute DNS, actives et permanentes :
 
 ```bash
@@ -84,22 +83,9 @@ et TCP depuis de vrais clients FRONT/BACK, ainsi que le maintien des
 services et des affectations initiales. Contrôler la persistance après
 redémarrage sur la paire de recette.
 
-**EXÉCUTÉ** : expressions réelles Ansible 2.9/Jinja, et workflows du vrai
-runner avec doubles `firewall-cmd`/`ip` : zones distinctes/runtime-permanent,
-interface commune, zone par défaut, adresses secondaires, idempotence,
-préservation SSH/affectations et refus de données ou commandes invalides.
-Résultats courants dans `DELIVERY.json`.
 
-**NON EXÉCUTÉ** : règles noyau/firewalld réels, trafic distant et reboot
-RHEL. Raison : aucune cible accessible ; le laboratoire utilise des
-doubles CLI. Prérequis : hôtes de recette avec firewalld actif et clients
-autorisés. Procédure : contrôles ci-dessus, deuxième exécution et reboot.
-Attendu : `dns` actif et permanent, accès DNS UDP/TCP autorisé, aucun
-changement d’affectation ou de service sans rapport. Risques : règles
-source/politiques locales prioritaires, service `dns` personnalisé,
-versions cibles et dérive de configuration. La qualification opérationnelle
-reste **NON TERMINÉE** tant que cette recette n’est pas effectuée.
+Les [essais initiaux](../../historique/CAMPAGNES_CONFIGURATION.md#firewalld) restent datés ; les recettes Rocky et critères natifs sont recensés dans la [qualification actuelle](../../qualification/QUALIFICATION_ACTUELLE.md).
 
 ---
 
-Documentation DNSZIBO · navigation actualisée le 23 novembre 2026.
+Documentation DNSZIBO · contenu harmonisé le 25 novembre 2026.

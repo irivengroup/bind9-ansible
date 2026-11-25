@@ -4,16 +4,14 @@
 
 [Retour au Parent](index.md)
 
-Cette page sépare les résultats observés en laboratoire des validations à réaliser
-sur l’infrastructure de destination. La réorganisation documentaire du 25 novembre
-2026 ne modifie aucun composant de production, test, instrument ni contrôle de sécurité.
-
 ## Sommaire
 
-- [Résultats et provenance](#resultats)
-- [Compatibilité et environnements exercés](#compatibilite)
-- [Rejouer les contrôles et qualifier la production](#validation)
-- [Historique et traçabilité](#historique)
+- [Résultats et provenance](#résultats-et-provenance)
+- [Compatibilité et environnements exercés](#compatibilité-et-environnements-exercés)
+- [Validation, tests du projet et limites](#validation-tests-du-projet-et-limites)
+- [Transport Git des fixtures de CI](#transport-git-des-fixtures-de-ci)
+- [Contrôles avant production](#contrôles-avant-production)
+- [Historique et traçabilité](#historique-et-traçabilité)
 
 <a id="resultats"></a>
 ## Résultats et provenance
@@ -42,7 +40,7 @@ L’archive effectivement mesurée porte le SHA-256
 `55b760768de685597ab7e7b9d0668ff80c91b6024e1b2d33e7bfec5576fce24f`.
 La réadmission documentaire précédente porte le SHA-256
 `efa00b0436c53567d5c10f6c6ce7a01fd41815ab8d3b0704b6c4db90b694c1d0`.
-Le rapport externe `RAPPORT_COHERENCE_QUALIFICATION_20261125.md` rattache la nouvelle
+Le rapport externe `RAPPORT_HARMONISATION_DOCUMENTATION_20261125.md` rattache la nouvelle
 archive à ces preuves par comparaison des octets des 63 composants et de tous
 les fichiers QA. Il ne présente pas ces résultats comme une nouvelle exécution
 de la campagne. L’extraction Windows contrôle l’identité des sources ; elle
@@ -114,6 +112,8 @@ python -m pytest -q tests \
 python tests/integration_preflight.py
 ```
 
+La sélection avec `--ignore` ci-dessus est un dépistage partiel : elle ne fournit aucune preuve des cinq couvertures et ne remplace pas la campagne exhaustive suivante.
+
 Les workflows privilégiés exigent un **laboratoire jetable**, root et leurs prérequis. Certains manipulent des chemins système ou substituent des commandes ; ne pas exécuter ces suites sous root sur un DNS de production. La CI décrit les suites routes/DNSSEC et le seuil de couverture.
 
 La collecte des cinq métriques utilise le contrôleur QA Python 3.11 et ses versions inspectées (`ansible-core 2.16.19`, `Jinja 3.1.6`, `pytest 9.0.3`, `coverage.py 7.6.1`). Dans ce laboratoire, `python tools/quality/run_coverage_suite.py --output /tmp/bind9-five-metrics --batch-size 32 tests` répartit toute la sélection collectée en lots natifs/instrumentés, puis applique le même vérificateur à leur réunion. Les filtrages, tests ignorés, échecs et sources modifiées restent bloquants ; les limites des observateurs et les cinq seuils de 99,99 % sont contrôlés avant arrondi. Les mesures par lot et leurs refus ne constituent pas une qualification de production. Les tests de fichiers système exigent en plus un conteneur propre et déconnecté explicitement activé par `BIND9_NATIVE_STATE_LAB=1` ; les contrôles BIND, NetworkManager et espaces de noms conservent leurs prérequis distincts.
@@ -146,13 +146,26 @@ sudo --preserve-env=PATH env "PYTHON=$(command -v python)" \
   bash tests/run_integration_front_routes.sh
 ```
 
-### Contrôles avant production
+<a id="import-git-et-mode-exécutable-de-la-fixture-front"></a>
+## Transport Git des fixtures de CI
+
+Le ZIP conserve déjà `tests/fixtures/native_network_cli.py` en mode Unix `0755`. Un import depuis Windows peut néanmoins enregistrer cette entrée en `100644` dans Git. La CI vérifie à la fois `git ls-tree HEAD` et le droit d’exécution réel : changer seulement le fichier ou l’index ne corrige pas le commit qu’elle exécute.
+
+L’annotation du run `45606014034` porte sur le commit `eef389687d28d64e21bb32bc143a2f3a56eab8b5`. Son blob de fixture est `ea2b33c964b06885f9495bc857c3f577948f0b5b`, identique au contenu local. Le correctif externe `CORRECTIF_CI_45606014034.patch` enregistre ce mode, protège le registre IANA contre la normalisation Git et restaure ses octets épinglés. La vérification locale conserve le refus avant, le refus lorsque seul l’index est corrigé et la réussite du contrôle original après un commit synthétique isolé ; elle ne constitue pas une nouvelle CI hébergée.
+
+Le [run hébergé 45606014034](https://github.com/irivengroup/bind9-ansible/actions/runs/45606014034) est **ÉCHOUÉ**. Les journaux des sept jobs de validation montrent chacun le même test IANA refusé : la normalisation CRLF/LF transforme l’empreinte originale `52a1b8d3a42dae6a223772b687dc775a4c289fb9fb3004dfb54da13dfd36a568` en `9936c708c80311b26266aad152e762cc2b444610fd9e58bf04fa3c5130ed1831`. Les 111 fins de ligne CRLF et les autres LF du snapshot original doivent rester exactes. La règle `.gitattributes` `tests/fixtures/iana_dns_types_20261123.csv -text` préserve ces octets ; l’empreinte attendue et le test ne changent pas.
+
+Le patch restaure le registre original sans changer ses données ni son oracle. Le contrôle de round-trip Git vérifie les deux causes avant/après et conserve les refus. Une nouvelle CI hébergée reste **NON EXÉCUTÉE** pour le correctif local ; aucun push n’est effectué.
+
+Dans le dépôt Git réel, examiner les modifications en cours, vérifier que les deux fixtures ne portent aucune modification à conserver, puis appliquer ce patch avec `git apply --index --binary`, puis vérifier `git diff --cached --summary` et `git ls-files --stage -- tests/fixtures/native_network_cli.py`. L’entrée FRONT attendue est `100755`, sans modification de son blob. Le registre doit retrouver l’empreinte originale ci-dessus ; ne jamais modifier l’empreinte attendue pour accepter sa version normalisée. Enregistrer ensuite ce changement dans un commit après revue de tout le contenu indexé et vérifier `git ls-tree HEAD -- tests/fixtures/native_network_cli.py`. Le dossier de publication locale ne contient pas de `.git` : aucun commit ni push n’y est effectué. Le seuil et le contrôle AppArmor ne sont pas modifiés.
+
+## Contrôles avant production
 
 Raison commune des contrôles non exécutés : aucune paire native RHEL représentative accessible dans cet environnement ; les hôtes fournis sont fictifs. Prérequis : paire de recette représentative, inventaire réel, clients autorisés/non autorisés et accès ADM de secours.
 
 | Statut | Procédure | Attendu et risque restant |
 |---|---|---|
-| **NON EXÉCUTÉ** | Exécuter `deploy -e hibernate_deployment=yes`, recette DNS, refus du deuxième `deploy` avec `true` et `false`, puis retrait opérateur du sceau et reconstruction, CRUD ciblé avec les vrais Python/DNF/services RHEL. | Données/réponses stables ; sceau persistant bloquant ; sauvegarde lors d’une reconstruction autorisée ou d’une écriture CRUD effective. Écarts possibles de paquets, versions et état système. |
+| **NON EXÉCUTÉ** | Exécuter `deploy -e hibernate_deployment=yes`, recette DNS, refus du deuxième `deploy` avec `true` et `false`, puis retrait opérateur du sceau et reconstruction, CRUD ciblé avec les vrais Python et YUM (EL7) ou DNF (EL8+) et services RHEL. | Données/réponses stables ; sceau persistant bloquant ; sauvegarde lors d’une reconstruction autorisée ou d’une écriture CRUD effective. Écarts possibles de paquets, versions et état système. |
 | **NON EXÉCUTÉ** | Tester SELinux enforcing, systemd, firewalld, trafic des deux segments puis reboot de recette, un hôte à la fois. | Écritures `named_t` autorisées, labels/services/timers corrects, DNS/routes persistants, ADM/BACK préservés. Restent politiques locales et comportements de boot. |
 | **NON EXÉCUTÉ** | Tester chaînes DNSSEC réelles, suffixes privés, renouvellement NTA sur plus de sept jours, ancres RFC5011 et FIPS si utilisé. | Validation selon politique, exceptions limitées et renouvelées. Restent expirations, chaînes upstream et crypto-policy réelle. |
 | **NON EXÉCUTÉ** | Provoquer en recette un échec protégé, une perte de contrôleur et une restauration manuelle avec backups persistants. | Cohérence données/runtime, retrait des routes de l’opération, pair sain disponible, RPO/RTO mesurés. Risque de reprise partielle et perte d’état mémoire. |
@@ -165,7 +178,7 @@ Détails : [VALIDATION_RHEL8.md](VALIDATION_RHEL8.md), [VALIDATION_ROUTES_NATIVE
 <a id="historique"></a>
 ## Historique et traçabilité
 
-Référence historique : `remediation-2026.11.04-coverage-hardening.1.zip`, SHA-256 `b8ef36e938957c03f73540219d29137bf643fddf21d04fe018059bb302cb6bff`. Révision de cette preuve historique : `2026.11.04-coverage-hardening.2`. La présente livraison est identifiée par `DELIVERY.json` et le rapport externe `RAPPORT_COHERENCE_QUALIFICATION_20261125.md`. Les résultats de cette livraison historique sont dans [REVUE_DURCISSEMENT_COUVERTURE.md](../../../REVUE_DURCISSEMENT_COUVERTURE.md), [COUVERTURE.json](../../../COUVERTURE.json) et `DELIVERY.json`. L’historique d’hibernation reste dans [AUDIT_HIBERNATE_DEPLOYMENT.md](../historique/AUDIT_HIBERNATE_DEPLOYMENT.md) ; le [durcissement FRONT](../historique/DURCISSEMENT_FRONT_ACTUEL.md) conserve sa portée historique. Les preuves de la présente révision doivent correspondre à son archive exacte ; les anciennes mesures ne la qualifient pas.
+Référence historique : `remediation-2026.11.04-coverage-hardening.1.zip`, SHA-256 `b8ef36e938957c03f73540219d29137bf643fddf21d04fe018059bb302cb6bff`. Révision de cette preuve historique : `2026.11.04-coverage-hardening.2`. La présente livraison est identifiée par `DELIVERY.json` et le rapport externe `RAPPORT_HARMONISATION_DOCUMENTATION_20261125.md`. Les résultats de cette livraison historique sont dans [REVUE_DURCISSEMENT_COUVERTURE.md](../../../REVUE_DURCISSEMENT_COUVERTURE.md), [COUVERTURE.json](../../../COUVERTURE.json) et `DELIVERY.json`. L’historique d’hibernation reste dans [AUDIT_HIBERNATE_DEPLOYMENT.md](../historique/AUDIT_HIBERNATE_DEPLOYMENT.md) ; le [durcissement FRONT](../historique/DURCISSEMENT_FRONT_ACTUEL.md) conserve sa portée historique. Les preuves de la présente révision doivent correspondre à son archive exacte ; les anciennes mesures ne la qualifient pas.
 
 
 ---

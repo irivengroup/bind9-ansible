@@ -4,60 +4,23 @@
 
 [Retour au Parent](index.md)
 
+## Sommaire
 
-Le rôle expose une seule variable `bind_trusted_networks`, contenant deux listes
-plates d’IP IPv4 ou de sous-réseaux CIDR.
+- [Exemple avec clients internes seuls](#exemple-avec-clients-internes-seuls)
+- [Limite de la configuration sans vues](#limite-de-la-configuration-sans-vues)
+- [Migration, tests et rollback](#migration-tests-et-rollback)
 
-Les valeurs par défaut sont les suivantes.
+## Exemple avec clients internes seuls
+
+Ce cas autorise les réseaux internes sans alimenter le moteur de routes FRONT.
 
 ```yaml
 bind_trusted_networks:
   cloud_clients: []
-  internal_clients: []
-```
-
-Le déploiement exige au moins une liste remplie. Une sous-liste omise vaut
-`[]`. Une valeur `null`, un autre type de collection ou une clé inconnue
-provoque une erreur avant modification du serveur. Exemple de configuration
-
-```yaml
-bind_trusted_networks:
-  cloud_clients:
-    - 192.0.2.0/24
-    - 10.150.1.23
   internal_clients:
     - 192.168.20.25
     - 10.30.1.0/24
 ```
-
-Ces valeurs sont fictives. Les inventaires conservent les internes à `[]`
-tant que leurs réseaux réels ne sont pas renseignés.
-
-| Entrée cloud | Entrée interne | Résultat |
-|---|---|---|
-| Non vide | Vide | DNS sur FRONT/loopback ; routes cloud possibles |
-| Vide | Non vide | DNS sur BACK/loopback ; aucune opération de routes FRONT |
-| Non vide | Non vide | DNS sur FRONT/BACK/loopback ; seules routes cloud possibles |
-| Vide | Vide | Refus avant toute modification, pour tous les tags |
-
-La colonne DNS décrit les destinations de récursion/cache. Les requêtes
-autoritatives restent admises sur les écoutes locales pour la fusion et les
-ACL techniques. Le loopback et les pairs BACK ne sont pas des entrées clientes.
-
-`bind_allowed_clients` est un **fait calculé**, pas une troisième entrée :
-`(bind_trusted_networks.cloud_clients + bind_trusted_networks.internal_clients) | unique | list`. Les doublons
-textuellement identiques sont retirés ; aucune liste n’est modifiée et les
-sous-réseaux ne sont pas élargis pour l’autorisation DNS. Une surcharge
-contradictoire par extra-vars échoue explicitement. Les deux entrées sont
-typées et validées avant concaténation ; IPv6, `/0`, CIDR non canoniques,
-structures de groupes et caractères d’injection sont refusés.
-
-La fusion alimente uniquement l’ACL BIND commune `user_defined_clients` et ses
-contrôles de requêtes/récursion/cache. Le plan de routes lit exclusivement
-`bind_trusted_networks.cloud_clients` : IP seule normalisée en `/32`, déduplication/agrégation
-des routes, profil et passerelle FRONT existants, gardes BACK/ADM/SSH et
-rollback des seuls ajouts possédés conservés. Les réseaux internes ne passent
-pas au plan, même s’ils appartiennent directement au sous-réseau BACK.
 
 ## Limite de la configuration sans vues
 
@@ -74,6 +37,10 @@ transfert restent exclus de la récursion.
 
 ## Migration, tests et rollback
 
+Les anciens noms `bind_frontend_clients`, `bind_backend_clients`, `bind_cloud_clients` et `bind_internal_clients` doivent être retirés des inventaires et surcharges après transfert de leurs valeurs dans `bind_trusted_networks`. Les anciens réglages DNSSEC migrent vers [bind_dnssec_active](../bind/DNSSEC.md#compatibilité-et-migration).
+
+
+
 Conserver la version et les variables précédentes. Déplacer les anciennes
 listes dans les clés `cloud_clients` et `internal_clients` de
 `bind_trusted_networks`, en conservant toutes leurs valeurs. Renseigner les
@@ -83,28 +50,7 @@ inventaires et des fichiers de surcharge pendant cette migration.
 Les hôtes internes ne doivent pas rester dans la liste cloud uniquement pour
 obtenir une autorisation DNS : cela les exposerait au calcul de routes FRONT.
 
-Depuis le contrôleur Linux de recette, à la racine du projet :
-
-```bash
-sudo python -m pytest -q tests
-python tests/integration_preflight.py
-ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml --syntax-check
-sudo bash tests/run_integration_front_routes.sh
-```
-
-Les nombres et résultats exécutés sont consignés dans `DELIVERY.json`.
-Les rendus où les deux listes sont vides vérifient seulement les branches et
-références du template ; ces entrées sont refusées par le rôle avant déploiement.
-Les cas couvrent fusion/doublons, une liste vide, refus des deux vides,
-listes mal typées, accès DNS FRONT/BACK, routes exclusivement cloud,
-internes seuls sans routage, surcharge et rollback.
-
-**NON EXÉCUTÉ** : déploiement sur vos serveurs RHEL 8, DNF/Python cible réel,
-SELinux, unités systemd, réseau/SSH réels, reboot cible, renouvellement DNSSEC
-sur sept jours, restauration système, charge et CI distante. Raison : aucune
-paire cible accessible. Prérequis, procédures, attendus et risques :
-[VALIDATION_RHEL8.md](../../qualification/VALIDATION_RHEL8.md). Qualification de production
-**NON TERMINÉE**.
+Les tests de ce contrat se rejouent dans le [laboratoire isolé](../../qualification/QUALIFICATION_ACTUELLE.md#rejouer-les-contrôles). Les comptes et limites d’origine sont [archivés](../../historique/CAMPAGNES_CONFIGURATION.md#clients).
 
 Pour revenir à la version précédente, restaurer ensemble l’archive source
 et ses variables ; une sauvegarde BIND seule ne restaure pas les sources Ansible. Le rescue
@@ -117,4 +63,4 @@ préexistantes ou déjà commises restent conservées. Voir
 
 ---
 
-Documentation DNSZIBO · navigation actualisée le 23 novembre 2026.
+Documentation DNSZIBO · contenu harmonisé le 25 novembre 2026.

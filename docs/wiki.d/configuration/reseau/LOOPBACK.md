@@ -1,17 +1,13 @@
-# Loopback et zones natives EL8
+# Loopback et zones natives BIND
 
-[Documentation](../../../index.md) › [Configuration](../index.md) › [Réseau et interfaces](index.md) › Loopback et zones natives EL8
+[Documentation](../../../index.md) › [Configuration](../index.md) › [Réseau et interfaces](index.md) › Loopback et zones natives BIND
 
 [Retour au Parent](index.md)
 
+## Sommaire
 
-Le template canonique écoute sur `local_loopback` (`127.0.0.1`) et les adresses FRONT/BACK locales. `/etc/named.rfc1912.zones` est inclus au niveau global, sans vues. Le rôle contrôle en lecture seule ce fichier et les trois données natives `/var/named/named.localhost`, `named.loopback` et `named.empty`. Ces trois données peuvent aussi utiliser les liens relatifs du paquet BIND vers leur fichier homonyme dans `/usr/share/named`. Chaque lien doit appartenir à root. Le répertoire de destination et les fichiers réguliers doivent également appartenir à root et être protégés en écriture pour le groupe et les autres utilisateurs. Un lien sur `/etc/named.rfc1912.zones` reste refusé.
-
-La sauvegarde omet ces trois chemins et `/var/named/named.ca` uniquement lorsqu’ils utilisent les liens du paquet. Le lien de `named.ca` doit viser le fichier régulier protégé `/etc/named.ca`. Leur contenu et leurs liens restent en place à la restauration, même si une archive produite sous une version antérieure contient ces chemins comme fichiers réguliers. Les autres liens dans l’arborescence de sauvegarde restent refusés, et les archives admises contiennent uniquement des fichiers réguliers et des répertoires.
-
-Le fichier natif EL8 inspecté déclare `localhost.localdomain`, `localhost`, la zone inverse IPv6 de `::1`, `1.0.0.127.in-addr.arpa` et `0.in-addr.arpa`. Le template omet désormais `empty-zones-enable` et utilise le défaut natif activé de BIND ; aucune valeur `no` n’est ajoutée. Cette option est indépendante de la racine privée `empty-root.zone` et du chargement des zones localhost. L'écoute IPv6 est désactivée ; les données natives AAAA `::1` et PTR IPv6 restent consultables via IPv4. Le rôle ne modifie pas `/etc/resolv.conf`.
-
-La récursion locale permet les suffixes forwardés ; les autres noms suivent la racine privée NXDOMAIN, sauf les zones natives et autoritatives plus spécifiques. Les zones natives sont visibles à toutes les sources admises par `allow-query`, selon le modèle global sans vues. Les fichiers de données officiels ne sont pas personnalisés.
+- [Retrait de la déclaration explicite](#retrait-de-la-déclaration-explicite)
+- [Qualification](#qualification)
 
 ## Retrait de la déclaration explicite
 
@@ -32,10 +28,11 @@ dig -4 -b 127.0.0.1 @127.0.0.1 localhost AAAA +norecurse
 
 Attendu : NOERROR, AA, A `127.0.0.1`, PTR `localhost.` et AAAA `::1`. Le rôle contrôle automatiquement les quatre premières réponses locales, les SOA exacts des zones métier et les SOA forwardés en UDP/TCP. Le moniteur facultatif contrôle le loopback et la présence de SOA autoritatifs, sans comparaison des serials ni interrogation des zones forwardées ; demander `bind_monitoring_enabled: true` et le tag `monitor` pour son timer systemd.
 
-**EXÉCUTÉ** : laboratoire BIND EL8 9.11.36 et BIND 9.18.24, chacun 109 configurations et 284 contrôles DNS, avec fichiers natifs inchangés. Les vraies tâches Ansible loopback, disponibilité primaire et vérification des fichiers sont aussi exercées ; voir [CORRECTION_CONTROLES_DNS.md](../../historique/CORRECTION_CONTROLES_DNS.md) pour le défaut d’échappement Jinja corrigé et les parties impactées. **NON EXÉCUTÉ** : recette sur votre système RHEL réel ; raisons, procédure et risques dans [VALIDATION_RHEL8.md](../../qualification/VALIDATION_RHEL8.md). Les modes DNSSEC `false`/`true`/`auto`, le canal RNDC uniquement IPv4 et les exceptions privées optionnelles sont décrits dans [DNSSEC.md](../bind/DNSSEC.md).
 
-**EXÉCUTÉ sur cette révision :** 48 tests ciblés réussis avec chacun des moteurs Ansible 2.9.27/Jinja 2.10.3 et Jinja 3.0.3 ; contrôle syntaxique de l’inventaire de production, Pyflakes et compilation du test DNS. Le contrôle natif de la zone vide automatique réussit dans les deux moteurs BIND. Les suites complètes et workflows de la livraison précédente restent des preuves héritées, distinguées dans `DELIVERY.json`.
+## Qualification
+
+Les [mesures historiques](../../historique/CAMPAGNES_CONFIGURATION.md#loopback) restent attribuées à leurs versions BIND. La [qualification actuelle](../../qualification/QUALIFICATION_ACTUELLE.md) ne les présente pas comme rejouées.
 
 ---
 
-Documentation DNSZIBO · navigation actualisée le 23 novembre 2026.
+Documentation DNSZIBO · contenu harmonisé le 25 novembre 2026.
