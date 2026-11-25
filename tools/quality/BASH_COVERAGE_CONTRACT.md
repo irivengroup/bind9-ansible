@@ -8,7 +8,7 @@ on managed servers.
 
 ## Supported scope and units
 
-The byte-pinned `roles/bind9/files/named-healthcheck.sh` profile measures all five
+The byte-pinned `roles/bind9/files/bind-healthcheck.sh` profile measures all five
 metrics. The reviewed static inventories contain no runtime hits. A separate
 syntax-only native parse must reproduce every declaration, including code that
 a particular runtime invocation never reaches.
@@ -23,8 +23,10 @@ a particular runtime invocation never reaches.
   status used as a predicate, with true and false counted independently. A
   short-circuited operand receives no inferred outcome. This is not MC/DC.
 
-The health profile declares 71 statements, 46 branch outcomes, three functions,
-39 executable lines and 44 elementary-condition outcomes.
+The health profile declares 72 statements, 46 branch outcomes, three functions,
+40 executable lines and 44 elementary-condition outcomes. The renamed script
+retains the exact native unit counts of its previous revision; only the CLI
+usage name changes. A fresh native syntax parse binds the inventory to its bytes.
 
 The byte-pinned `roles/bind9/files/bind9-sbin-path.sh` is the single canonical
 source copied to `/etc/profile.d/bind9-sbin-path.sh`. Its separate complete

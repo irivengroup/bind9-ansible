@@ -1,6 +1,6 @@
 """Execute the actual two-phase playbook on two isolated local host trees.
 
-Only privileged roots, named GID and runtime commands are relocated/doubled.
+Privileged roots, named GID, runtime commands and IPv4 observations are relocated/modeled.
 This verifies orchestration and transport, not system RHEL or TSIG replication.
 """
 import json
@@ -14,6 +14,7 @@ import yaml
 from test_management import CONF, Lab
 from test_management_ansible import ROOT, Runner
 from test_management_batch import mixed
+from test_dns_network import modeled_management_interfaces
 
 pytestmark = pytest.mark.skipif(os.name != 'posix' or os.geteuid() != 0 or not shutil.which('ansible-playbook'),
                                 reason='Requires isolated Linux root and Ansible')
@@ -42,12 +43,16 @@ class PairRunner(Runner):
             ' serial=re.search(r"\\(\\s*(\\d+)",path.read_text()).group(1)\n'
             ' print(";; status: NOERROR\\n;; flags: qr aa; QUERY: 1, ANSWER: 1\\n"+name+" 60 IN SOA ns. host. "+serial+" 3600 900 604800 300")\n')
         dig.chmod(0o755)
-        self.inventory = folder / 'pair.ini'
-        self.inventory.write_text('[site1]\nprimary\nsecondary\n[dns_primary]\nprimary\n[dns_secondary]\nsecondary\n'
-            '[dns_deployment_order]\nprimary\nsecondary\n[all:vars]\nansible_connection=local\n'
-            'bind_environment=test\nbind_site_name=site1\n'
-            '[primary_vars]\nprimary bind_front_ip=192.0.2.11 bind_back_ip=10.0.0.11 bind_test_root=' + str(self.lab.root) + '\n'
-            '[secondary_vars]\nsecondary bind_front_ip=192.0.2.12 bind_back_ip=10.0.0.12 bind_test_root=' + str(self.secondary.root) + '\n')
+        hosts = modeled_management_interfaces(self.bin, ('primary','secondary'))
+        hosts['primary']['bind_test_root'] = str(self.lab.root)
+        hosts['secondary']['bind_test_root'] = str(self.secondary.root)
+        self.inventory = folder / 'pair-inventory.yml'
+        self.inventory.write_text(yaml.safe_dump(dict(all=dict(vars=dict(ansible_connection='local',
+            bind_environment='test',bind_site_name='site1'),children={
+                'site1':dict(hosts=hosts), 'dns_primary':dict(hosts=dict(primary={})),
+                'dns_secondary':dict(hosts=dict(secondary={})),
+                'dns_deployment_order':dict(hosts=dict(primary={},secondary={}))}))))
+        self.env['PATH'] = str(self.bin) + os.pathsep + self.env['PATH']
         play = yaml.safe_load((ROOT / 'playbooks/bind9-management.yml').read_text())
         play[-1]['post_tasks'] = [{'copy': {'content': '{{ bind_management_result | to_json }}',
             'dest': '{{ bind_test_root }}/result.json', 'mode': '0600'}, 'no_log': True}]

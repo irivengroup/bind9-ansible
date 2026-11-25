@@ -4,7 +4,7 @@ set -Eeuo pipefail
 export LC_ALL=C
 # EL7 dig lacks -r. A character-device HOME cannot contain operator dotfiles.
 export HOME=/dev/null
-[[ $# -ge 1 ]] || { echo 'usage: named-healthcheck LOCAL_BACK_IP [ZONE...]' >&2; exit 2; }
+[[ $# -ge 1 ]] || { echo 'usage: bind-healthcheck LOCAL_BACK_IP [ZONE...]' >&2; exit 2; }
 ip=$1; shift
 systemctl is-active --quiet named || { echo 'CRITICAL named inactive'; exit 2; }
 # dig is invoked with +noall +comments +answer. Each health question expects

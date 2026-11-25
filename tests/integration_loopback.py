@@ -61,6 +61,11 @@ class LoopbackIntegration:
             groups = configparser.ConfigParser(allow_no_value=True, delimiters=('=',))
             groups.read(str(inventory / 'hosts.ini'))
             hosts = {p.stem: self.read_yaml(p) for p in (inventory / 'host_vars').glob('*.yml')}
+            # These rendering fixtures contain declared addresses, not kernel
+            # observations. Real address ownership is checked by preflight.
+            for values in hosts.values():
+                for interface in values['bind_listen_interfaces']:
+                    values['bind_' + interface['scope'] + '_ip'] = interface['ipaddress']
             for host in groups['dns_deployment_order']:
                 context = self.read_yaml(self.role / 'defaults/main.yml')
                 context.update(self.read_yaml(inventory / 'group_vars/all.yml'))

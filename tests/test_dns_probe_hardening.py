@@ -115,6 +115,6 @@ esac
 ''')
     dig.chmod(0o755)
     env = dict(os.environ, PATH=str(tmp_path) + os.pathsep + os.environ['PATH'], PROBE_SCENARIO=scenario)
-    result = subprocess.run(['bash', str(ROLE / 'files/named-healthcheck.sh'), '192.0.2.11', 'example.test'],
+    result = subprocess.run(['bash', str(ROLE / 'files/bind-healthcheck.sh'), '192.0.2.11', 'example.test'],
                             env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=10)
     assert result.returncode == (0 if scenario == 'valid' else 2), result.stdout + result.stderr

@@ -11,6 +11,7 @@ from native_ansible_runner import NativeFilesystemScope, NativeRecordedBoundary
 from native_management_runner import NativeManagementRun
 from test_management import CONF, ROOT_ZONE, ZONE
 from test_native_directories import named_identity
+from test_dns_network import modeled_management_interfaces
 
 pytestmark = pytest.mark.skipif(os.name != 'posix' or os.environ.get('BIND9_NATIVE_STATE_LAB') != '1',
                                reason='Requires an explicitly enabled disconnected clean Linux root')
@@ -207,13 +208,15 @@ def test_native_management_secondary_batch_requires_the_matching_primary_phase(m
     assert not Path('/var/lib/Bind9-Ansible').exists()
 
 
-def test_native_management_real_wrapper_resolves_site_peers_before_reading(management):
+def test_native_management_real_wrapper_resolves_site_peers_before_reading(management, monkeypatch):
     # Populate the real inventory groups and host facts through the shared
     # runner rather than copying/importing the canonical tasks under new marks.
-    hosts = {name: dict(bind_environment='test', bind_site_name='site', bind_front_ip='192.0.2.' + suffix,
-                       bind_back_ip='10.0.0.' + suffix) for name, suffix in [('localhost', '11'), ('peer', '12')]}
     folder = management.folder / 'wrapper'
     folder.mkdir(mode=0o700)
+    network = folder / 'network';network.mkdir()
+    hosts = modeled_management_interfaces(network)
+    for host in hosts.values():host.update(bind_environment='test',bind_site_name='site')
+    monkeypatch.setenv('PATH',str(network)+os.pathsep+os.environ['PATH'])
     with NativeRecordedBoundary(folder, NativeManagementRun, {}):
         status, result = NativeManagementRun('manage.yml', dict(bind_resources_manage=READ,
             ansible_distribution='RedHat', ansible_distribution_major_version='8',

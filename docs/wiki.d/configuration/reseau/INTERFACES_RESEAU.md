@@ -21,12 +21,19 @@ le même `host_vars`.
 
 | Cas | Déclaration dans chaque host_vars | Résolution des rôles | Routes FRONT |
 |---|---|---|---|
-| Une interface | `ansible_host` | DNS, FRONT, BACK et ADMIN sur cette interface | Aucun ajout |
+| Une interface | `ansible_host` et liste d'une entrée `{name: ...}` | DNS, FRONT, BACK et ADMIN sur cette interface | Aucun ajout |
 | Plusieurs interfaces, une écoute DNS | `ansible_host` et `bind_listen_interfaces` avec une entrée | FRONT et BACK sur l'unique écoute ; ADMIN peut être distinct | Aucun ajout |
-| Deux interfaces, deux écoutes DNS | Sélection des écoutes, IP FRONT/BACK et `ansible_host` sur FRONT ou BACK | ADMIN partage une interface DNS | Aucun ajout |
-| FRONT, BACK et ADMIN distincts | Sélection des écoutes, IP FRONT/BACK et `ansible_host` sur ADMIN | Trois interfaces distinctes | Optionnelles, désactivées par défaut |
-| Plusieurs IPv4 sur une interface | Table nom → IPv4 dans `bind_listen_interfaces` | Une seule IPv4 choisie par interface d'écoute | Selon la séparation des trois rôles |
+| Deux interfaces, deux écoutes DNS | Entrées `name`, `ipaddress`, `scope: front/back` ; `ansible_host` sur FRONT ou BACK | ADMIN partage une interface DNS | Aucun ajout |
+| FRONT, BACK et ADMIN distincts | Mêmes entrées ; `ansible_host` sur ADMIN | Trois interfaces distinctes | Optionnelles, désactivées par défaut |
+| Plusieurs IPv4 sur une interface | Champ `ipaddress` de l'entrée correspondante | Une seule IPv4 choisie par interface d'écoute | Selon la séparation des trois rôles |
 | Connexion SSH par nom ou adresse traduite | Ajouter `bind_admin_ip` avec l'IPv4 ADMIN locale | SSH se connecte à `ansible_host`, le rôle identifie ADMIN par son IP locale | Selon la séparation des trois rôles |
+
+Les douze fichiers `inventory/*/host_vars/*.yml` livrés utilisent le modèle
+multi-interface avec ADMIN dédié : `ens256` (FRONT) et `ens224` (BACK) sont les deux écoutes DNS,
+et `ansible_host` reste l'adresse ADMIN. Les adresses FRONT/BACK existantes sont
+conservées. Ces noms d'interface sont des exemples à adapter aux serveurs réels ;
+ils ne sont pas imposés par le rôle. Pour une interface ou une écoute unique,
+remplacer ensemble les deux fichiers de la paire par le scénario correspondant.
 
 Les six paires complètes sont regroupées dans
 [les exemples d'interfaces](../../../../examples/interfaces/README.md). Leurs
@@ -40,6 +47,8 @@ Dans `inventory/prod/host_vars/site1-dns01.yml` :
 ```yaml
 ---
 ansible_host: 192.0.2.11
+bind_listen_interfaces:
+  - name: ens192
 ```
 
 Dans `inventory/prod/host_vars/site1-dns02.yml` :
@@ -47,12 +56,14 @@ Dans `inventory/prod/host_vars/site1-dns02.yml` :
 ```yaml
 ---
 ansible_host: 192.0.2.12
+bind_listen_interfaces:
+  - name: ens192
 ```
 
-Omettre `bind_front_ip`, `bind_back_ip` et `bind_listen_interfaces`. Le rôle
-résout FRONT et BACK vers l'adresse SSH locale et conserve le routage existant.
-Une interface portant plusieurs IPv4 peut aussi être sélectionnée explicitement
-avec la table décrite plus bas.
+Ne pas déclarer séparément `bind_front_ip` ou `bind_back_ip`. Le rôle résout
+FRONT et BACK vers l'IPv4 de l'écoute unique et conserve le routage existant.
+Avec plusieurs IPv4 sur cette interface, ajouter `ipaddress` pour éviter toute
+ambiguïté. `name` doit toujours correspondre à une interface locale active.
 
 ## Plusieurs interfaces avec une seule écoute DNS
 
@@ -62,7 +73,7 @@ Exemple primaire, ADMIN sur l'interface portant `10.10.1.11`, DNS sur `ens192` :
 ---
 ansible_host: 10.10.1.11
 bind_listen_interfaces:
-  - ens192
+  - name: ens192
 ```
 
 Le secondaire utilise `ansible_host: 10.10.1.12` et sa propre interface DNS.
@@ -78,10 +89,12 @@ Exemple primaire :
 ---
 ansible_host: 10.10.1.11
 bind_listen_interfaces:
-  - ens192
-  - ens224
-bind_front_ip: 192.0.2.11
-bind_back_ip: 10.20.1.11
+  - name: ens256
+    ipaddress: 192.0.2.11
+    scope: front
+  - name: ens224
+    ipaddress: 10.20.1.11
+    scope: back
 ```
 
 Le secondaire déclare respectivement `10.10.1.12`, `192.0.2.12` et
@@ -93,7 +106,9 @@ Avec seulement deux interfaces, utiliser par exemple `ansible_host: 192.0.2.11`
 sur le primaire et `ansible_host: 192.0.2.12` sur le secondaire : ADMIN partage
 FRONT. BIND conserve ses deux écoutes, mais le rôle n'ajoute aucune route FRONT.
 
-Une troisième écoute DNS ou davantage peut être ajoutée à la sélection. Les
+Déclarer exactement une entrée `scope: front` et une entrée `scope: back` avec
+plusieurs écoutes. Une troisième écoute DNS ou davantage peut être ajoutée sans
+champ `scope`. Les
 adresses supplémentaires suivent les autorisations de requête communes ; la
 récursion et le cache restent limités à loopback et aux rôles FRONT/BACK selon
 les listes clientes. Voir [les ACL](ACL_SERVEURS.md).
@@ -106,27 +121,44 @@ Si `ens192` porte plusieurs IPv4, choisir explicitement celle utilisée par DNS 
 ---
 ansible_host: 10.10.1.11
 bind_listen_interfaces:
-  ens192: 192.0.2.111
-  ens224: 10.20.1.11
-bind_front_ip: 192.0.2.111
-bind_back_ip: 10.20.1.11
+  - name: ens192
+    ipaddress: 192.0.2.111
+    scope: front
+  - name: ens224
+    ipaddress: 10.20.1.11
+    scope: back
 ```
 
-Les IP de rôle restent nécessaires avec plusieurs écoutes ; la table choisit
-l'adresse de chaque interface, elle ne remplace pas l'affectation FRONT/BACK.
-Une même interface ne doit être sélectionnée qu'une fois. Une liste vide ou une
-IP absente du serveur est refusée.
+`ipaddress` sélectionne une adresse déjà configurée sur l'interface indiquée ;
+`scope` attribue son rôle DNS. Une interface ou un scope FRONT/BACK en doublon,
+un champ inconnu, un scope autre que `front`/`back`, une liste vide ou une IPv4
+absente de l'interface sont refusés. `scope: admin` n'est pas une écoute DNS :
+ADMIN est identifié séparément par l'adresse locale de la connexion SSH.
 
 Avec une destination SSH par nom ou une traduction d'adresse :
 
 ```yaml
 ansible_host: dns01.example.test
 bind_admin_ip: 10.10.1.11
+bind_listen_interfaces:
+  - name: ens256
+    ipaddress: 192.0.2.11
+    scope: front
+  - name: ens224
+    ipaddress: 10.20.1.11
+    scope: back
 ```
 
 Ces deux variables ont des fonctions distinctes. `bind_admin_ip` doit désigner
 une IPv4 réellement présente sur la cible, pas l'adresse du contrôleur ni la
 passerelle. Il est inutile de la répéter si `ansible_host` est déjà cette IPv4.
+
+La liste d'objets est le seul format de sélection. Les anciennes listes de noms,
+tables nom → IPv4 et sélections par variables FRONT/BACK séparées sont retirées.
+Migrer les deux pairs ensemble ; toutes leurs adresses restent conservées dans
+les entrées `ipaddress`. Les identités FRONT/BACK utilisées en interne sont
+calculées après vérification de la topologie ; elles ne sont pas des déclarations
+supplémentaires à fournir dans les host_vars.
 
 ## Paire ISO et variables communes
 
@@ -172,7 +204,7 @@ demande une attention particulière. Voir [firewalld](FIREWALLD.md).
 1. Sauvegarder les deux `host_vars` et les variables de site actuellement utilisés.
 2. Choisir un seul dossier sous `examples/interfaces/` et remplacer les deux
    `host_vars` par cette paire, en adaptant les IP et noms aux serveurs réels.
-3. Retirer les anciennes déclarations incompatibles, y compris celles héritées
+3. Retirer les anciennes déclarations séparées, y compris celles héritées
    de `group_vars`. Ne pas ajouter les variantes à côté des fichiers actifs.
 4. Sur chaque serveur, comparer la déclaration avec la sortie de
    `ip -o -4 address show up`, puis contrôler le routage existant avec
@@ -196,4 +228,4 @@ committée : leur reprise suit la procédure dédiée aux routes FRONT.
 
 ---
 
-Documentation DNSZIBO · navigation actualisée le 23 novembre 2026.
+Documentation DNSZIBO · contenu actualisé le 25 novembre 2026.

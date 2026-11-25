@@ -29,7 +29,8 @@ class SitePlayRun(NativeTaskRun):
         return values
 
 
-@pytest.mark.parametrize('profile', ['single', 'one-listener', 'split', 'secondary-selection', 'asymmetric'])
+@pytest.mark.parametrize('profile', ['single', 'one-listener', 'split', 'asymmetric',
+                                     'object-split', 'object-hostname', 'object-shared'])
 def test_site_discovery_validates_both_hosts_before_assigning_peer_addresses(tmp_path, profile):
     settings, observed = {}, {}
     for hostname, suffix, devices in [('primary', '11', ('eth0', 'eth1', 'eth2', 'eth3')),
@@ -40,18 +41,23 @@ def test_site_discovery_validates_both_hosts_before_assigning_peer_addresses(tmp
                     ansible_host=admin, bind_environment='test', bind_site_name='dns_lab')
         if profile == 'single' or (profile == 'asymmetric' and hostname == 'secondary'):
             rows = rows[:2]
+            host['bind_listen_interfaces'] = [dict(name=devices[0])]
+        elif profile.startswith('object-'):
+            host['bind_listen_interfaces'] = [
+                dict(name=devices[0], ipaddress='192.0.2.' + suffix, scope='front'),
+                dict(name=devices[1], ipaddress='198.51.100.' + suffix, scope='back')]
+            if profile != 'object-shared':
+                admin = '203.0.113.' + suffix
+                host['ansible_host'] = admin
+            if profile == 'object-hostname':
+                host.update(ansible_host='dns' + suffix + '.example.test', bind_admin_ip=admin)
         elif profile == 'one-listener':
-            host['bind_listen_interfaces'] = [devices[1]]
-        elif profile == 'secondary-selection':
-            admin = '203.0.113.' + suffix
-            host.update(ansible_host=admin, bind_front_ip='192.0.2.' + suffix, bind_back_ip='198.51.100.' + suffix)
-            if hostname == 'secondary':
-                host['bind_listen_interfaces'] = list(devices[:2])
+            host['bind_listen_interfaces'] = [dict(name=devices[1])]
         else:
-            host.update(bind_listen_interfaces=[devices[0], devices[1], devices[3]],
-                        bind_front_ip='192.0.2.' + suffix, bind_back_ip='198.51.100.' + suffix,
+            host.update(bind_listen_interfaces=[dict(name=devices[0], scope='front'),
+                                               dict(name=devices[1], scope='back'), dict(name=devices[3])],
                         bind_admin_ip='203.0.113.' + suffix)
-        observed[admin] = rows
+        observed[host['ansible_host']] = rows
         settings[hostname] = host
     inventory = {'all': {'children': {
         'dns_lab': {'hosts': settings},
@@ -61,12 +67,15 @@ def test_site_discovery_validates_both_hosts_before_assigning_peer_addresses(tmp
     file = tmp_path / 'inventory.yml'
     file.write_text(yaml.safe_dump(inventory))
     write_ip_probe(tmp_path, observed)
-    aliases = '198.51.100.' if profile in ('one-listener', 'split', 'secondary-selection') else '192.0.2.'
-    listener_count = {'split': 3, 'secondary-selection': 2}.get(profile, 1)
+    aliases = '198.51.100.' if profile in ('one-listener', 'split',
+                                           'object-split', 'object-hostname', 'object-shared') else '192.0.2.'
+    listener_count = {'split': 3, 'object-split': 2,
+                      'object-hostname': 2, 'object-shared': 2}.get(profile, 1)
     checks = ['hostvars.secondary.bind_back_ip == "' + aliases + '12"',
               'bind_back_ip == "' + aliases + '11"',
               'bind_dns_listen_addresses | length == ' + str(listener_count),
-              '(bind_dns_front_routes_applicable | bool) == ' + ('true' if listener_count > 1 else 'false')]
+              '(bind_dns_front_routes_applicable | bool) == ' + (
+                  'true' if listener_count > 1 and profile != 'object-shared' else 'false')]
     playbook = tmp_path / 'discover.yml'
     playbook.write_text(yaml.safe_dump([{
         'hosts': 'primary', 'gather_facts': False,

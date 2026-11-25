@@ -33,7 +33,7 @@ if [[ $name == example.test && $PROBE_CASE == flags_in_note ]]; then printf ';; 
 
     def invoke(scenario):
         env = dict(os.environ, PATH=str(tmp_path) + os.pathsep + os.environ['PATH'], PROBE_CASE=scenario)
-        return subprocess.run(['bash', str(source / 'named-healthcheck.sh'), '192.0.2.11', 'example.test'],
+        return subprocess.run(['bash', str(source / 'bind-healthcheck.sh'), '192.0.2.11', 'example.test'],
                               env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               universal_newlines=True, timeout=10)
     return invoke

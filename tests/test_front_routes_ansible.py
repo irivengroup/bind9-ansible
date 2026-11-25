@@ -74,6 +74,11 @@ class AnsibleRouteSandbox:
                      'bind_primary_host': 'localhost', 'bind_secondary_host': 'secondary',
                      'bind_trusted_networks': {'cloud_clients': ['203.0.113.0/24'], 'internal_clients': ['10.0.0.0/24','10.30.1.20']}, 'bind_front_route_metric': 100,
                      'bind_front_routes_enabled': True}
+        if tasks_from == 'main.yml':
+            # Public entry points receive canonical inventory, not precomputed
+            # address facts from a lower-level transaction fixture.
+            variables.pop('bind_front_ip')
+            variables.pop('bind_back_ip')
         variables.update(extra_vars or {})
         play = [{'hosts': 'localhost', 'gather_facts': False, 'vars': variables,
                  # Dynamic includes need apply to reproduce the production
@@ -83,6 +88,10 @@ class AnsibleRouteSandbox:
                                             'apply': {'tags': ['always']}}, 'tags': ['always']},
                            {'name': 'Run actual route workflow', 'include_role': {
                      'name': 'bind9', 'tasks_from': tasks_from}, 'tags': ['always']}]}]
+        if tasks_from == 'main.yml':
+            # The public workflow owns these validations itself. Only private
+            # transaction tests need the explicit context-building prelude.
+            play[0]['tasks'] = play[0]['tasks'][-1:]
         playbook = self.folder / 'play.yml'
         playbook.write_text(yaml.safe_dump(play))
         command = ['ansible-playbook', '-i', str(self.inventory), str(playbook)]
@@ -99,21 +108,23 @@ class AnsibleRouteSandbox:
 class TestAnsibleNativeFrontRoutes:
     def test_docker_recipe_adds_its_own_route_then_rolls_back_only_that_route(self, tmp_path):
         """Execute the recipe itself so invalid nested variable names cannot hide."""
-        sandbox = AnsibleRouteSandbox(tmp_path)
+        # The recipe now observes both peers from canonical objects. Reuse the
+        # public fixture instead of injecting facts from a previous invocation.
+        from test_routes_deployed_entry_ansible import public_entry_sandbox
+        sandbox = public_entry_sandbox(tmp_path, front_prefix='198.51.101.')
         # Keep the recipe destination outside the directly connected FRONT LAN.
         sandbox.data['addresses'][0]['addr_info'][0]['local'] = '198.51.101.2'
         sandbox.data['runtime'][1]['dst'] = '198.51.101.0/24'
         sandbox.data['runtime'][2]['gateway'] = '198.51.101.1'
         sandbox.data['gateway'] = '198.51.101.1'
         sandbox.save()
-        variables = {'bind_front_ip': '198.51.101.2'}
-        applied = sandbox.run(extra_vars=variables)
+        applied = sandbox.run('main.yml', tags='routes')
         assert applied.returncode == 0, applied.stdout
         before = sandbox.read()
         recipe = yaml.safe_load((ROOT / 'tests/docker/rollback.yml').read_text())
         task_file = tmp_path / 'roles/bind9/tasks/tests_docker_rollback.yml'
         task_file.write_text(yaml.safe_dump(recipe[0]['tasks']))
-        result = sandbox.run('tests_docker_rollback.yml', extra_vars=variables)
+        result = sandbox.run('tests_docker_rollback.yml')
         assert result.returncode == 0, result.stdout
         assert 'recipe-controlled-downstream-failure' in result.stdout
         assert 'rescued=1' in result.stdout and 'failed=0' in result.stdout

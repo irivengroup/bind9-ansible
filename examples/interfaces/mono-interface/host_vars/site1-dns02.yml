@@ -1,3 +1,5 @@
 ---
 # Exemple fictif : remplacer ensemble les deux host_vars, puis adapter IP et interfaces.
 ansible_host: 192.0.2.12
+bind_listen_interfaces:
+  - name: ens192

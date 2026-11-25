@@ -3,6 +3,7 @@ import copy
 import importlib.util
 import os
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -95,6 +96,28 @@ def test_repeated_compilation_and_mutable_return_values_cannot_change_the_owned_
 def test_bad_envelopes_fail_before_materialization(envelope):
     with pytest.raises(M.ManagementError):
         M.DeploymentResources(envelope, CONTEXT).compile()
+
+
+@pytest.mark.parametrize('entry_point', ['single', 'batch', 'deployment'])
+def test_deep_resource_requests_have_the_same_safe_refusal(entry_point):
+    # Use a real encoder failure, without changing recursion limits or touching
+    # target files; every resource entry point must keep its domain boundary.
+    # Python 3.12 has a separate C encoder recursion limit. Exercise both
+    # encoder implementations with the same bounded input on every profile.
+    depth = 16384
+    assert sys.getrecursionlimit() < depth, 'The regression requires the declared default runtime recursion limit'
+    value = 'synthetic-value'
+    for _ in range(depth):
+        value = [value]
+    operation = dict(resource='option', action='update', name='max-cache-size', value=value)
+    batch = dict(resource='batch', action='read', operations=[operation])
+    factories = {
+        'single': lambda: M.Manager(operation, {}),
+        'batch': lambda: M.BatchManager(batch, {}),
+        'deployment': lambda: M.DeploymentResources(dict(batch, action='create'), {}),
+    }
+    with pytest.raises(M.ManagementError, match='ordinary JSON'):
+        factories[entry_point]()
 
 
 @pytest.mark.parametrize('operations', [

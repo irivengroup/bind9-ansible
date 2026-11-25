@@ -2,6 +2,9 @@
 
 Requires a disposable, disconnected root container with NET_ADMIN/SYS_ADMIN,
 NetworkManager, D-Bus, BIND and the controller dependencies already installed.
+The two inventory aliases share the disposable network namespace; both peers'
+declared addresses are really assigned there. This observes public ordering,
+not independent-host replication (covered by the separate two-node recipe).
 Only package installation, systemd transport and firewall/SELinux are adapted;
 actual role ordering, files, backups, RNDC, DNSSEC NTAs and routing remain real.
 Never execute on a DNS server or a container sharing the host network/bus.
@@ -160,9 +163,9 @@ class CombinedDeployment:
         else:
             raise RuntimeError('NetworkManager did not become ready')
         for kind, name, address, gateway, metric in (
-                ('ethernet', 'front', '198.51.100.10/24,' + self.front + '/24', '198.51.100.1', '500'),
-                ('dummy', 'back', self.back + '/24', '10.0.0.1', '100'),
-                ('dummy', 'adm', self.adm + '/24', '', '600')):
+                ('ethernet', 'front', '198.51.100.10/24,198.51.100.2/24,198.51.100.3/24', '198.51.100.1', '500'),
+                ('dummy', 'back', '10.0.0.2/24,10.0.0.3/24', '10.0.0.1', '100'),
+                ('dummy', 'adm', '192.0.2.2/24,192.0.2.3/24', '', '600')):
             self.command(['nmcli', 'connection', 'add', 'type', kind, 'ifname', name + '0', 'con-name', name,
                 'ipv4.method', 'manual', 'ipv4.addresses', address, 'ipv4.gateway', gateway,
                 'ipv4.route-metric', metric, 'ipv6.method', 'disabled'])
@@ -196,10 +199,16 @@ class CombinedDeployment:
         raise RuntimeError('Upstream did not become ready')
 
     def inventory(self):
-        self.inventory_path = self.work / 'hosts.ini'
-        self.inventory_path.write_text('[dns_primary]\nprimary ansible_connection=local ansible_host=192.0.2.2 bind_front_ip=198.51.100.2 bind_back_ip=10.0.0.2\n'
-            '[dns_secondary]\nsecondary ansible_connection=local ansible_host=192.0.2.3 bind_front_ip=198.51.100.3 bind_back_ip=10.0.0.3\n'
-            '[dns_deployment_order]\nprimary\nsecondary\n[lab]\nprimary\nsecondary\n')
+        self.inventory_path = self.work / 'hosts.yml'
+        hosts = {name: dict(ansible_connection='local', ansible_host='192.0.2.' + suffix,
+            bind_listen_interfaces=[dict(name='front0', ipaddress='198.51.100.' + suffix, scope='front'),
+                                    dict(name='back0', ipaddress='10.0.0.' + suffix, scope='back')])
+            for name,suffix in [('primary','2'),('secondary','3')]}
+        self.inventory_path.write_text(yaml.safe_dump(dict(all=dict(children={
+            'dns_primary':dict(hosts=dict(primary={})),
+            'dns_secondary':dict(hosts=dict(secondary={})),
+            'dns_deployment_order':dict(hosts=dict(primary={},secondary={})),
+            'lab':dict(hosts=hosts)}))))
         self.variables = dict(ansible_python_interpreter=sys.executable, ansible_distribution='RedHat',
             ansible_distribution_major_version='8', ansible_selinux={'status': 'disabled'},
             bind_dnssec_active='auto', bind_front_routes_enabled=True, bind_operation_lock_enabled=False,

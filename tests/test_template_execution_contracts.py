@@ -59,7 +59,7 @@ def test_healthcheck_service_invokes_each_managed_zone_on_the_back_address():
     rendered = environment().get_template('named-healthcheck.service.j2').render(
         bind_back_ip='10.0.0.11', bind_managed_zones=[{'domain': 'example.test'}, {'domain': '113.0.203.in-addr.arpa'}])
     command = next(line.split('=', 1)[1] for line in rendered.splitlines() if line.startswith('ExecStart='))
-    assert shlex.split(command) == ['/usr/local/sbin/named-healthcheck', '10.0.0.11', 'example.test', '113.0.203.in-addr.arpa']
+    assert shlex.split(command) == ['/usr/local/sbin/bind-healthcheck', '10.0.0.11', 'example.test', '113.0.203.in-addr.arpa']
     assert 'NoNewPrivileges=yes' in rendered and 'ProtectSystem=strict' in rendered
     assert 'ProtectHome=yes' in rendered and 'PrivateTmp=yes' in rendered
 

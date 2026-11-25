@@ -51,7 +51,7 @@ class PairedRun:
             # the fingerprinted project file explicitly in both fresh phases.
             environment['ANSIBLE_CONFIG'] = str(self.root / 'ansible.cfg')
         bash_manifest = environment.get('BIND9_NATIVE_BASH_MANIFEST')
-        bash_enabled = bool(bash_manifest and (self.root / 'roles/bind9/files/named-healthcheck.sh').is_file())
+        bash_enabled = bool(bash_manifest and (self.root / 'roles/bind9/files/bind-healthcheck.sh').is_file())
         if bash_enabled:
             environment.update(BIND9_NATIVE_BASH_MODE='baseline',
                                BIND9_NATIVE_BASH_OUTPUT=str(self.output / 'bash-baseline.json'))

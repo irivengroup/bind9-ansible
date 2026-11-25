@@ -67,7 +67,7 @@ esac
     dig.chmod(0o755)
     environment = dict(os.environ, PATH=str(tmp_path) + os.pathsep + os.environ['PATH'],
                        WRONG_OWNER_KIND=kind)
-    result = subprocess.run(['bash', str(ROLE / 'files/named-healthcheck.sh'), '192.0.2.11'],
+    result = subprocess.run(['bash', str(ROLE / 'files/bind-healthcheck.sh'), '192.0.2.11'],
                             env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             universal_newlines=True, timeout=10)
     assert result.returncode == (0 if kind == 'none' else 2), result.stdout + result.stderr

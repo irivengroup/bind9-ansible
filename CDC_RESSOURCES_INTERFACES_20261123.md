@@ -27,3 +27,34 @@ Les limites de lot communes restent de 64 opérations et 256 Kio. L'état désir
 ## Preuves et interprétation
 
 Le rapport externe de livraison doit relier chaque exigence aux sources, tests et preuves réellement exécutés. Les références du 20 novembre et des livraisons antérieures sont historiques. Elles ne remplacent pas les mesures de cette révision. Les contrôles de paquet et l'identité de l'archive complètent les observations de code ; ils ne sont pas une mesure de couverture.
+
+## Revue complémentaire du 24 novembre 2026
+
+Source : poursuite de la revue et du durcissement demandée par l’utilisateur ; contrat existant de refus des données JSON non sérialisables.
+
+| ID | Demande et critère observable |
+|---|---|
+| HARD-DEPTH-01 | Une limite de récursion du sérialiseur doit produire le même refus ManagementError pour une ressource, un lot et un déploiement, avant toute opération cible. Conserver les limites, les cas invalides refusés, AppArmor et les cinq seuils de 99,99 %. |
+
+Source complémentaire du 24 novembre 2026 : demande explicite de mise à jour des host_vars, puis précision utilisateur « ens224 = BACK et ens256 = FRONT ».
+
+| ID | Demande et critère observable |
+|---|---|
+| IF-02 | Les 12 host_vars actifs déclarent les écoutes FRONT ens256 et BACK ens224, conservent les adresses existantes et ADMIN via ansible_host. Les six paires restent ISO. Les exemples alternatifs mono-interface et multi-interface restent disponibles. |
+
+Précision IF-02 du 24 novembre 2026 : les noms d’interfaces sont fournis par les host_vars ; aucun nom d’interface propre à cette infrastructure ne doit être codé dans les playbooks ou le rôle. Les observations synthétiques de recette lisent elles aussi la sélection livrée.
+
+## Harmonisation des interfaces du 25 novembre 2026
+
+Source : demande utilisateur de liste uniforme, quel que soit le nombre d'interfaces et avec SSH par IPv4 ou par nom.
+
+| ID | Demande et critère observable |
+|---|---|
+| IF-03 | Tous les host_vars livrés utilisent `bind_listen_interfaces` comme liste d'objets avec `name`, `ipaddress` facultatif et `scope: front/back` pour plusieurs écoutes. Une écoute unique accepte `- name: ...`. FRONT/BACK sont dérivés de cette liste ; les anciennes déclarations séparées sont retirées des inventaires. |
+| IF-04 | ADMIN est identifié par l'IPv4 locale `ansible_host`, ou par `bind_admin_ip` avec une destination SSH par nom. Vérifier les adresses sur les interfaces réelles, les rôles ISO des deux pairs, les doublons et les contradictions avant écriture. Conserver l'absence de routes avec une seule interface et pour les clients internes, ainsi que le rollback. |
+| IF-05 | Retirer les anciens formats de sélection et les variables/code devenus inutiles, migrer tous les inventaires/exemples vers la structure unique sans perte d'adresses ni de fonctionnalités, puis rejouer les validations avec AppArmor et le seuil de 99,99 % inchangés. |
+| HEALTH-01 | Renommer le script source `named-healthcheck.sh` en `bind-healthcheck.sh`, mettre à jour tous ses appels actifs et l'outil installé, puis conserver ses contrôles DNS et les protections de son unité. Les noms des unités systemd restent stables pour éviter un second timer. |
+| REVIEW-01 | Refaire la vérification et le durcissement du projet complet, retirer les variables/code/fichiers devenus inutiles et conserver les preuves des refus et corrections, sans doublons ni réduction des contrôles. |
+| RECOVERY-01 | La reprise exclusive `routes-recover` utilise le journal vérifié sans compiler les ressources DNS ni exiger les paramètres clients/DNSSEC courants ou les faits d'adresses dérivés d'un appel précédent. Le moteur natif conserve toutes ses observations noyau/ADMIN, contrôles d'identité et refus de récupération incomplète. |
+
+Précision HEALTH-01 du 25 novembre : le déploiement retire l'ancien exécutable installé uniquement s'il correspond exactement aux octets SHA-256, propriétaire, groupe et mode de son prédécesseur. Un lien, répertoire ou fichier modifié est conservé et bloque explicitement la migration avant installation. L'exécutable vérifié est retiré après installation du remplacement et activation du timer existant.

@@ -47,19 +47,6 @@
     bind_primary_host: "{{ bind_site_primary_hosts[0] }}"
     bind_secondary_host: "{{ bind_site_secondary_hosts[0] }}"
 
-- name: Determine whether the pair needs interface discovery
-  ansible.builtin.set_fact:
-    _bind_observe_site_network: >-
-      {{ (_bind_probe_legacy_network | default(false)) or
-         (hostvars[bind_primary_host].bind_front_ip | default(none) | dns_network_required(
-            hostvars[bind_primary_host].bind_back_ip | default(none),
-            hostvars[bind_primary_host].bind_listen_interfaces is defined,
-            hostvars[bind_primary_host].bind_admin_ip is defined)) or
-         (hostvars[bind_secondary_host].bind_front_ip | default(none) | dns_network_required(
-            hostvars[bind_secondary_host].bind_back_ip | default(none),
-            hostvars[bind_secondary_host].bind_listen_interfaces is defined,
-            hostvars[bind_secondary_host].bind_admin_ip is defined)) }}
-
 - name: Resolve observed interface topology on both DNS peers
   block:
     - name: Read active IPv4 interfaces from the kernel of each peer
@@ -80,8 +67,6 @@
         _bind_peer_networks: >-
           {{ _bind_peer_networks | combine({item.item: (item.stdout | dns_ipv4_links |
              dns_network_resolve(hostvars[item.item].bind_listen_interfaces | default(none),
-                                 hostvars[item.item].bind_front_ip | default(none),
-                                 hostvars[item.item].bind_back_ip | default(none),
                                  hostvars[item.item].bind_admin_ip |
                                  default(hostvars[item.item].ansible_host | default(item.item))))}) }}
       loop: '{{ _bind_peer_links.results }}'
@@ -113,6 +98,5 @@
       vars:
         selected: '{{ _bind_peer_networks[inventory_hostname] }}'
   when:
-    - _bind_observe_site_network | bool
     # Recovery must be able to use the saved transaction after a topology change.
     - ansible_run_tags | difference(['routes-recover', 'never']) | length > 0

@@ -16,8 +16,11 @@ pytestmark = pytest.mark.skipif(os.name != 'posix' or os.environ.get('BIND9_NATI
 
 
 def run(phase, locked=False, check=False, **values):
-    hosts = {name: dict(bind_environment='test', bind_site_name='site', bind_front_ip='198.51.100.' + suffix,
-                       bind_back_ip='192.0.2.' + suffix, bind_admin_ip='10.0.0.' + suffix)
+    hosts = {name: dict(bind_environment='test', bind_site_name='site',
+                       bind_listen_interfaces=[
+                           dict(name='front0', ipaddress='198.51.100.' + suffix, scope='front'),
+                           dict(name='back0', ipaddress='192.0.2.' + suffix, scope='back')],
+                       bind_admin_ip='10.0.0.' + suffix)
              for name, suffix in [('localhost', '11'), ('peer', '12')]}
     variables = dict(ansible_run_tags=[phase], bind_operation_lock_enabled=locked,
         bind_front_routes_enabled=False, ansible_distribution='RedHat', ansible_distribution_major_version='8',

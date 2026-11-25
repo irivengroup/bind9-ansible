@@ -39,6 +39,8 @@ class NativeManagementPlayRun(NativeManagementRun):
     Both inventory aliases use this disposable root, so scenarios are limited
     to reads, unchanged approvals and refusals. No independent-host filesystem
     or DNS replication claim follows from these orchestration observations.
+    Public-wrapper fixtures model only IPv4 discovery through a strict ip
+    command boundary; actual peer interfaces are verified by the Rocky recipe.
     """
 
     FILES = {'manage.yml'}

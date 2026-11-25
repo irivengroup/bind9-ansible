@@ -4,6 +4,8 @@ The host already has a completion seal and operator DNS data. NetworkManager
 and iproute2 use the existing isolated CLI doubles; no BIND task is substituted.
 """
 import pytest
+import re
+import yaml
 
 from test_dns_network import link, write_ip_probe
 from test_front_routes_ansible import AnsibleRouteSandbox, BASE, NEW, pytestmark as inherited_pytestmark
@@ -11,18 +13,20 @@ from test_front_routes_ansible import AnsibleRouteSandbox, BASE, NEW, pytestmark
 pytestmark = inherited_pytestmark
 
 
-def public_entry_sandbox(folder):
+def public_entry_sandbox(folder, front_prefix='198.51.100.'):
     """Share inventory and private lease paths; retain production import/tag flow."""
     sandbox = AnsibleRouteSandbox(folder)
-    sandbox.inventory.write_text(
-        '[dns_primary]\nlocalhost ansible_connection=local ansible_host=192.0.2.2 '
-        'bind_front_ip=198.51.100.2 bind_back_ip=10.0.0.2\n'
-        '[dns_secondary]\nsecondary ansible_connection=local ansible_host=192.0.2.3 '
-        'bind_front_ip=198.51.100.3 bind_back_ip=10.0.0.3\n'
-        '[site1]\nlocalhost\nsecondary\n'
-        '[site1:vars]\nbind_environment=test\nbind_site_name=site1\n')
+    sandbox.inventory = folder / 'hosts.yml'
+    hosts = {name: dict(ansible_connection='local', ansible_host='192.0.2.' + suffix,
+        bind_listen_interfaces=[dict(name='front0', ipaddress=front_prefix + suffix, scope='front'),
+                                dict(name='back0', ipaddress='10.0.0.' + suffix, scope='back')])
+        for name,suffix in [('localhost','2'),('secondary','3')]}
+    sandbox.inventory.write_text(yaml.safe_dump(dict(all=dict(children={
+        'dns_primary':dict(hosts=dict(localhost={})),
+        'dns_secondary':dict(hosts=dict(secondary={})),
+        'site1':dict(vars=dict(bind_environment='test',bind_site_name='site1'),hosts=hosts)}))))
     write_ip_probe(folder / 'bin', {'': [
-        link('front0', '198.51.100.2', '198.51.100.3'),
+        link('front0', front_prefix + '2', front_prefix + '3'),
         link('back0', '10.0.0.2', '10.0.0.3'),
         link('adm0', '192.0.2.2', '192.0.2.3'),
     ]}, existing=True)
@@ -34,6 +38,50 @@ def public_entry_sandbox(folder):
         path = role / relative
         path.write_text(path.read_text().replace('/var/lib/Bind9-Ansible', str(sandbox.state_root)))
     return sandbox
+
+
+def apply_pending_transaction(sandbox):
+    """Seed a checked pending journal using the previous invocation's resolved facts."""
+    canonical = sandbox.inventory.read_bytes()
+    inventory = yaml.safe_load(canonical)
+    for host in inventory['all']['children']['site1']['hosts'].values():
+        for interface in host['bind_listen_interfaces']:
+            host['bind_' + interface['scope'] + '_ip'] = interface['ipaddress']
+    sandbox.inventory.write_text(yaml.safe_dump(inventory))
+    try:
+        return sandbox.run(extra_vars={'bind_front_routes_defer_commit': True})
+    finally:
+        # A separate real recovery invocation has only the canonical inventory,
+        # not ephemeral address facts from the earlier successful transaction.
+        sandbox.inventory.write_bytes(canonical)
+
+
+@pytest.mark.parametrize('dns_input', ['resources', 'clients', 'dnssec'])
+def test_recovery_uses_saved_route_state_without_current_dns_context(tmp_path, dns_input):
+    """Recovery needs its checked journal, even without derived DNS address facts."""
+    sandbox = public_entry_sandbox(tmp_path)
+    applied = apply_pending_transaction(sandbox)
+    assert applied.returncode == 0, applied.stdout
+    journal = sandbox.state_root / 'front-routes.pending'
+    assert journal.is_dir() and sandbox.read()['runtime'] == BASE + [NEW]
+    # A valid nonempty desired DNS state requires address facts when compiled.
+    # Route recovery must use its journal while retaining the helper's own
+    # mandatory kernel/admin safety observations.
+    request = dict(resource='zone', action='create', kind='authoritative', name='retained.example.test')
+    current_inputs = {
+        'resources': {'bind_resources_deploy': request},
+        'clients': {'bind_trusted_networks': {'cloud_clients': [], 'internal_clients': []}},
+        'dnssec': {'bind_dnssec_active': 'invalid'},
+    }
+    recovered = sandbox.run(tasks_from='main.yml', tags='routes-recover',
+                            extra_vars=current_inputs[dns_input])
+    assert recovered.returncode == 0, recovered.stdout
+    observation = re.search(r'TASK \[bind9 : Read active IPv4 interfaces from the kernel of each peer\].*?\n(.*?)(?=\nTASK|\Z)',
+                            recovered.stdout, re.DOTALL).group(1)
+    assert observation.count('skipping: [localhost] => (item=') == 2
+    assert 'ok: [localhost]' not in observation
+    assert not journal.exists()
+    assert sandbox.read()['runtime'] == BASE and sandbox.read()['persistent'] == []
 
 
 @pytest.mark.parametrize('native', [False, True])
@@ -85,10 +133,24 @@ def test_routes_on_a_deployed_host_ignore_a_previous_lease_without_changing_dns(
     assert not any(name in applied.stdout or name in repeated.stdout for name in forbidden)
 
 
+@pytest.mark.parametrize('tags', ['routes', 'deploy', 'preflight', 'routes-recover,routes', 'routes-recover,deploy'])
+def test_dns_input_checks_remain_mandatory_outside_exclusive_recovery(tmp_path, tags):
+    """Adding a recovery selector must not authorize DNS changes with invalid clients."""
+    sandbox = public_entry_sandbox(tmp_path)
+    before = sandbox.read()
+    result = sandbox.run(tasks_from='main.yml', tags=tags,
+        extra_vars={'bind_trusted_networks': {'cloud_clients': [], 'internal_clients': []}})
+    assert result.returncode != 0
+    assert 'cannot both be empty' in result.stdout
+    assert 'Select the explicit FRONT action without altering the DNS workflow' not in result.stdout
+    assert sandbox.read() == before
+    assert not (sandbox.state_root / 'front-routes.pending').exists()
+
+
 def test_reserved_never_tag_cannot_roll_back_an_interrupted_front_transaction(tmp_path):
     """The public entry must retain the journal until routes-recover is explicit."""
     sandbox = public_entry_sandbox(tmp_path)
-    applied = sandbox.run(extra_vars={'bind_front_routes_defer_commit': True})
+    applied = apply_pending_transaction(sandbox)
     assert applied.returncode == 0, applied.stdout
     journal = sandbox.state_root / 'front-routes.pending'
     identity = journal.stat().st_ino

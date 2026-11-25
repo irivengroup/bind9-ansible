@@ -156,6 +156,7 @@ class DockerComponentRecipe:
             bind_primary_host='primary', bind_secondary_host='secondary',
             bind_front_route_metric=100, bind_operation_lock_enabled=False,
             bind_front_routes_enabled=True, bind_dnssec_active='auto',
+            bind_monitoring_enabled=True,
             bind_trusted_networks=dict(internal_clients=['192.0.2.101', '10.154.0.101'], cloud_clients=['198.51.100.0/25', '198.51.100.200', '198.51.100.200/32', '198.51.100.0/25']),
             bind_resources_deploy=dict(resource='batch', action='create', operations=[dict(
                 resource='zone', action='create', kind='authoritative', zone=dict(
@@ -163,8 +164,9 @@ class DockerComponentRecipe:
                     records=[dict(name='app', type='A', value='198.51.100.50')]))]))
         inventory = dict(all=dict(vars=variables, children={
             'dns_deployment_order': dict(hosts={
-                node: dict(ansible_host=self.hosts[node], bind_front_ip='192.0.2.' + suffix,
-                           bind_back_ip='10.154.0.' + suffix)
+                node: dict(ansible_host=self.hosts[node], bind_listen_interfaces=[
+                    dict(name='eth1', ipaddress='192.0.2.' + suffix, scope='front'),
+                    dict(name='eth2', ipaddress='10.154.0.' + suffix, scope='back')])
                 for node, suffix in [('primary', '11'), ('secondary', '12')]}),
             'dns_primary': dict(hosts=dict(primary={})),
             'dns_secondary': dict(hosts=dict(secondary={})),
@@ -224,15 +226,20 @@ class DockerComponentRecipe:
                 '/etc/systemd/system/named.service.d/bind9-z-dnssec.conf '
                 '/etc/systemd/system/named-private-dnssec.service '
                 '/etc/systemd/system/named-private-dnssec.timer '
+                '/usr/local/sbin/bind-healthcheck '
+                '/etc/systemd/system/named-healthcheck.service '
+                '/etc/systemd/system/named-healthcheck.timer '
                 '/root/.ssh/authorized_keys; '
                 'nmcli -g GENERAL.CON-UUID device show eth1; '
                 'nmcli -g GENERAL.CON-UUID device show eth2; '
                 'stat -c "%a %u %g %n" /etc/NetworkManager/system-connections/bind9-lab-*.nmconnection '
                 '/etc/named.conf /var/log/named /var/log/named/default.log '
-                '/var/log/named/security.log /var/log/named/xfer.log')
+                '/var/log/named/security.log /var/log/named/xfer.log /usr/local/sbin/bind-healthcheck')
             self.ssh('restart-' + phase + '-native-services-' + node, node,
-                'systemctl is-active named NetworkManager firewalld sshd named-private-dnssec.timer; '
-                'systemctl is-enabled named NetworkManager firewalld sshd named-private-dnssec.timer; '
+                'systemctl is-active named NetworkManager firewalld sshd named-private-dnssec.timer named-healthcheck.timer; '
+                'systemctl is-enabled named NetworkManager firewalld sshd named-private-dnssec.timer named-healthcheck.timer; '
+                'systemctl start named-healthcheck.service; '
+                'test "$(systemctl show -p ExecMainStatus --value named-healthcheck.service)" = 0; '
                 'test "$(firewall-cmd --state)" = running; firewall-cmd --check-config; '
                 'ip6tables -t mangle -S PREROUTING | grep -F -- "-m rpfilter --validmark --invert -j DROP"; '
                 '/usr/libexec/platform-python -c ' + shlex.quote(

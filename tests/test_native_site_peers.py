@@ -16,21 +16,23 @@ pytestmark = pytest.mark.skipif(release.__version__ != '2.16.19' or jinja2.__ver
 def scope():
     variables = dict(bind_environment='lab', bind_site_name='site',
                      bind_primary_group='primaries', bind_secondary_group='secondaries')
-    hosts = {name: dict(bind_environment='lab', bind_site_name='site', bind_back_ip=back, bind_front_ip=front)
+    hosts = {name: dict(bind_environment='lab', bind_site_name='site', bind_listen_interfaces=[
+        dict(name='front0', ipaddress=front, scope='front'), dict(name='back0', ipaddress=back, scope='back')])
              for name, back, front in [('localhost', '10.0.0.2', '198.51.100.2'),
                                        ('peer', '10.0.0.3', '198.51.100.3')]}
     groups = dict(site=['localhost', 'peer'], primaries=['localhost'], secondaries=['peer'])
     return variables, hosts, groups
 
 
-def run(variables, hosts, groups):
+def run(variables, hosts, groups, recover=True):
     hosts = copy.deepcopy(hosts)
     local = hosts.setdefault('localhost', {})
     for key in ('bind_environment', 'bind_site_name', 'bind_primary_group', 'bind_secondary_group'):
         local.pop(key, None)
     local.update(variables)
     return NativeTaskRun('tasks.d/site_peers.yml', {},
-                         inventory_hosts=hosts, inventory_groups=groups).run()
+                         inventory_hosts=hosts, inventory_groups=groups,
+                         run_tags=['routes-recover'] if recover else None).run()
 
 
 def test_native_inventory_resolves_exact_site_membership_and_peers():
@@ -38,9 +40,8 @@ def test_native_inventory_resolves_exact_site_membership_and_peers():
     status, result = run(variables, hosts, groups)
     assert status == 0 and not result.failed
     assert result.facts == dict(bind_site_primary_hosts=['localhost'], bind_site_secondary_hosts=['peer'],
-                                bind_primary_host='localhost', bind_secondary_host='peer',
-                                _bind_observe_site_network=False)
-    assert len(result.ok) == 5
+                                bind_primary_host='localhost', bind_secondary_host='peer')
+    assert len(result.ok) == 4
 
 
 @pytest.mark.parametrize('key,value', [
@@ -109,11 +110,11 @@ def test_different_peer_environment_or_site_is_rejected(host, key):
     assert 'bind_primary_host' not in result.facts
 
 
-@pytest.mark.parametrize('host,key', [(host, key) for host in ('localhost', 'peer')
-                                    for key in ('bind_back_ip', 'bind_front_ip')])
+@pytest.mark.parametrize('host,key', [(host, key) for host in ('localhost', 'peer') for key in (0, 1)])
 def test_missing_peer_addresses_fail_explicitly_on_a_multi_interface_site(host, key, tmp_path, monkeypatch):
     variables, hosts, groups = scope()
-    del hosts[host][key]
+    # Removing a role must fail before any derived service facts are published.
+    del hosts[host]['bind_listen_interfaces'][key]['scope']
     hosts['localhost']['bind_admin_ip'] = '192.0.2.11'
     hosts['peer']['bind_admin_ip'] = '192.0.2.12'
     observations = [
@@ -123,5 +124,5 @@ def test_missing_peer_addresses_fail_explicitly_on_a_multi_interface_site(host, 
     ]
     write_ip_probe(tmp_path, {'': observations})
     monkeypatch.setenv('PATH', str(tmp_path) + os.pathsep + os.environ['PATH'])
-    status, result = run(variables, hosts, groups)
+    status, result = run(variables, hosts, groups, recover=False)
     assert status == 2 and result.failed == ['Resolve the local DNS and SSH addresses of each peer']

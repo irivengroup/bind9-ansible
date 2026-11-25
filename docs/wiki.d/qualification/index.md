@@ -7,6 +7,7 @@
 
 ## Sommaire
 
+- [Qualification actuelle : preuves et limites de production](QUALIFICATION_ACTUELLE.md)
 - [PREUVES_FIABILITE_IO.txt](PREUVES_FIABILITE_IO.txt)
 - [PREUVES_HIBERNATE_DEPLOYMENT.txt](PREUVES_HIBERNATE_DEPLOYMENT.txt)
 - [PREUVES_INTEGRITE_LIVE.txt](PREUVES_INTEGRITE_LIVE.txt)
@@ -26,4 +27,4 @@
 
 ---
 
-Documentation DNSZIBO · navigation actualisée le 23 novembre 2026.
+Documentation DNSZIBO · navigation actualisée le 25 novembre 2026.

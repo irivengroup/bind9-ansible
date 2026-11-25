@@ -5,6 +5,12 @@
   any_errors_fatal: true
   gather_facts: false
   tasks:
+    # Facts do not persist across the separate recipe invocations. Resolve
+    # the declared objects from both real peers before the private component.
+    - name: Resolve current peer interfaces through canonical discovery
+      ansible.builtin.include_role:
+        name: bind9
+        tasks_from: tasks.d/site_peers.yml
     - name: Invoke the unchanged routing component
       ansible.builtin.include_role:
         name: bind9

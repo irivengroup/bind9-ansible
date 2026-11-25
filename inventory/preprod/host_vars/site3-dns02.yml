@@ -1,9 +1,14 @@
 ---
-# Exemple multi-écoute : ADMIN = ansible_host ; FRONT/BACK = IP locales.
-# Adapter les adresses avant déploiement ; leur interface est retrouvée par IP.
-# Ne pas imposer de noms d'interfaces si cette sélection par IP convient.
-# Pour une interface ou une écoute unique, remplacer la paire complète :
-# examples/interfaces/README.md et docs/wiki.d/configuration/reseau/INTERFACES_RESEAU.md
+# Modèle fictif multi-interface, identique sur les deux serveurs du site.
+# DNS : ens256 = FRONT, ens224 = BACK ; ADMIN utilise ansible_host.
+# Adapter les noms aux interfaces réelles sans changer leur rôle.
+# Pour une interface ou une seule écoute, utiliser la paire adaptée
+# de examples/interfaces/ ; ne pas cumuler plusieurs scénarios.
 ansible_host: 10.12.2.12
-bind_front_ip: 192.0.2.22
-bind_back_ip: 10.22.2.12
+bind_listen_interfaces:
+  - name: ens256
+    ipaddress: 192.0.2.22
+    scope: front
+  - name: ens224
+    ipaddress: 10.22.2.12
+    scope: back

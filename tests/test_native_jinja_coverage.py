@@ -80,7 +80,7 @@ def test_native_ansible_render_keeps_service_directives_and_never_reports_data(t
         actual = Templar(loader=DataLoader(), variables=values).template(source, convert_data=False)
     assert actual == native
     assert 'User=root' in actual.splitlines()
-    assert 'ExecStart=/usr/local/sbin/named-healthcheck 192.0.2.11 example.test' in actual.splitlines()
+    assert 'ExecStart=/usr/local/sbin/bind-healthcheck 192.0.2.11 example.test' in actual.splitlines()
     assert not collector.unsupported
     encoded = json.dumps(collector.payload())
     assert '192.0.2.11' not in encoded and 'example.test' not in encoded

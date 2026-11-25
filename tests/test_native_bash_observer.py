@@ -514,14 +514,14 @@ from pathlib import Path
 sys.path.insert(0,sys.argv[1]+'/tools/quality')
 from bash_coverage import NativeBashCollector
 root,manifest,output=sys.argv[1:]
-script=root+'/roles/bind9/files/named-healthcheck.sh'
+script=root+'/roles/bind9/files/bind-healthcheck.sh'
 for mode in ('baseline','observed'):
     collector=NativeBashCollector(root,manifest,mode)
     collector.install()
     try:
         result=subprocess.run(['/bin/bash',script],capture_output=True,text=True,timeout=10)
         assert result.returncode==2 and result.stdout==''
-        assert result.stderr=='usage: named-healthcheck LOCAL_BACK_IP [ZONE...]\\n'
+        assert result.stderr=='usage: bind-healthcheck LOCAL_BACK_IP [ZONE...]\\n'
         assert result.args==['/bin/bash',script]
     finally:
         collector.close()
@@ -530,7 +530,7 @@ baseline=json.loads((Path(output)/'baseline.json').read_text())
 observed=json.loads((Path(output)/'observed.json').read_text())
 assert baseline['errors']==[], ('baseline collector errors', baseline['errors'])
 assert observed['errors']==[], ('observed collector errors', observed['errors'])
-name='roles/bind9/files/named-healthcheck.sh'
+name='roles/bind9/files/bind-healthcheck.sh'
 profile,hits=NativeBashCollector.checked_pair(root,manifest,baseline,observed)[name]
 assert len(baseline['profiles'][name]['processes'])==len(observed['profiles'][name]['processes'])==1
 assert 'rows' not in baseline['profiles'][name]['processes'][0]
@@ -546,8 +546,8 @@ print('independent baseline and partial native facts verified')
     baseline = json.loads((tmp_path / 'baseline.json').read_text())
     observed = json.loads((tmp_path / 'observed.json').read_text())
     for receipt in (baseline, observed):
-        assert len(receipt['profiles']['roles/bind9/files/named-healthcheck.sh']['processes']) == 1
-    assert len(observed['profiles']['roles/bind9/files/named-healthcheck.sh']['processes'][0]['rows']) > 0
+        assert len(receipt['profiles']['roles/bind9/files/bind-healthcheck.sh']['processes']) == 1
+    assert len(observed['profiles']['roles/bind9/files/bind-healthcheck.sh']['processes'][0]['rows']) > 0
     assert baseline['toolchain_sha256'] == observed['toolchain_sha256']
 
 
@@ -557,7 +557,7 @@ from pathlib import Path
 sys.path.insert(0,sys.argv[1]+'/tools/quality')
 from bash_coverage import NativeBashCollector
 root,manifest,output=sys.argv[1:]
-cases=[('named-healthcheck.sh',[],2),('bind-front-routes.sh',['--help'],0),('bind-configtool.sh',[],2),
+cases=[('bind-healthcheck.sh',[],2),('bind-front-routes.sh',['--help'],0),('bind-configtool.sh',[],2),
        ('bind9-sbin-path.sh',[],0)]
 for mode in ('baseline','observed'):
     collector=NativeBashCollector(root,manifest,mode)
@@ -678,7 +678,7 @@ def test_native_bash_paired_receipt_forgeries_are_refused_after_actual_process_e
     baseline = json.loads((tmp_path / 'baseline.json').read_text())
     observed = json.loads((tmp_path / 'observed.json').read_text())
     altered = copy.deepcopy(observed)
-    profile = altered['profiles']['roles/bind9/files/named-healthcheck.sh']
+    profile = altered['profiles']['roles/bind9/files/bind-healthcheck.sh']
     if fault == 'wrong-mode': altered['mode'] = 'baseline'
     elif fault == 'foreign-source': profile['source_sha256'] = '0' * 64
     elif fault == 'toolchain': altered['toolchain_sha256'] = '0' * 64
@@ -707,7 +707,7 @@ def test_native_bash_gate_commits_valid_languages_atomically_and_refuses_corrupt
     shutil.copytree(str(ROOT / 'tools/quality'), str(root / 'tools/quality'),
                     ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
     shutil.copyfile(str(ROOT / 'tests/conftest.py'), str(root / 'tests/conftest.py'))
-    shutil.copyfile(str(ROOT / 'roles/bind9/files/named-healthcheck.sh'), str(role / 'named-healthcheck.sh'))
+    shutil.copyfile(str(ROOT / 'roles/bind9/files/bind-healthcheck.sh'), str(role / 'bind-healthcheck.sh'))
     for name in ('bind-front-routes.sh', 'bind-configtool.sh'):
         shutil.copyfile(str(ROOT / 'roles/bind9/files' / name), str(role / name))
     (role / 'decision.py').write_text('def select(value):\n    if value:\n        return 1\n    return 2\n', encoding='utf-8')
@@ -717,13 +717,13 @@ from roles.bind9.files.decision import select
 def test_native_python_branches():
     assert select(True)==1 and select(False)==2
 def test_native_health_argument_refusal():
-    source=Path(__file__).resolve().parents[1]/'roles/bind9/files/named-healthcheck.sh'
+    source=Path(__file__).resolve().parents[1]/'roles/bind9/files/bind-healthcheck.sh'
     if not EXECUTE_HEALTH:
         assert source.is_file()
         return
     result=subprocess.run(['/bin/bash',str(source)],capture_output=True,text=True,timeout=10)
     assert result.returncode==2 and result.stdout==''
-    assert result.stderr=='usage: named-healthcheck LOCAL_BACK_IP [ZONE...]\\n'
+    assert result.stderr=='usage: bind-healthcheck LOCAL_BACK_IP [ZONE...]\\n'
 '''
     (root / 'tests/test_smoke.py').write_text(smoke.replace('EXECUTE_HEALTH', repr(execute_health)), encoding='utf-8')
     output = tmp_path / 'pair'
@@ -733,7 +733,7 @@ def test_native_health_argument_refusal():
     good.add(receipt)
     assert len(good.runs) == 1 and not good.errors
     report = good.report()
-    health = report['components']['roles/bind9/files/named-healthcheck.sh']['metrics']
+    health = report['components']['roles/bind9/files/bind-healthcheck.sh']['metrics']
     assert (health['statements']['hit'], health['statements']['total']) == (7 if execute_health else 0, 72)
     assert (health['functions']['hit'], health['functions']['total']) == (0, 3)
     assert report['accepted'] is False
@@ -762,7 +762,7 @@ def test_native_health_argument_refusal():
     proof = output / data['artifacts']['bash_observed']['path']
     original = json.loads(proof.read_text())
     altered = copy.deepcopy(original)
-    profile = altered['profiles']['roles/bind9/files/named-healthcheck.sh']
+    profile = altered['profiles']['roles/bind9/files/bind-healthcheck.sh']
     # Rebind the corrupted artifact's checksum to test semantic admission.
     # Even a wholly unexecuted Bash component retains its complete inventory.
     if execute_health:

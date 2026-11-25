@@ -108,7 +108,7 @@ class TestNativeLoopback:
         assert (ROLE / 'tasks/tasks.d/deploy/front_return_routes.yml').exists()
 
     def test_periodic_monitor_checks_native_loopback(self):
-        source = (ROLE / 'files/named-healthcheck.sh').read_text()
+        source = (ROLE / 'files/bind-healthcheck.sh').read_text()
         assert 'for transport in +notcp +tcp' in source
         assert 'check_loopback "$transport" localhost A' in source
         assert 'check_loopback "$transport" 1.0.0.127.in-addr.arpa PTR' in source

@@ -1,20 +1,22 @@
 ---
 - name: Validate optional DNSSEC input before any role changes
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/dnssec_settings.yml'
+  # Journal recovery is independent of current DNS inputs and interface state.
+  when: ansible_run_tags | difference(['routes-recover', 'never']) | length > 0
   tags: [always]
 
 - name: Validate client inputs and derive shared DNS authorization
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/clients.yml'
+  when: ansible_run_tags | difference(['routes-recover', 'never']) | length > 0
   tags: [always]
 
 - name: Resolve and compare both DNS server topologies before deployment
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/site_peers.yml'
-  vars:
-    _bind_probe_legacy_network: true
   tags: [always]
 
 - name: Compile the unified desired resource declaration
   ansible.builtin.import_tasks: '{{ role_path }}/tasks/tasks.d/deploy/resources.yml'
+  when: ansible_run_tags | difference(['routes-recover', 'never']) | length > 0
   tags: [always]
 
 - name: Provision shared site TSIG on the controller
@@ -24,11 +26,13 @@
 - name: Generate reverse zones and PTR records from authoritative addresses
   ansible.builtin.set_fact:
     bind_generated_reverse_zones: "{{ _bind_deploy_authoritative_zones | automatic_reverse_zones }}"
+  when: ansible_run_tags | difference(['routes-recover', 'never']) | length > 0
   tags: [always]
 
 - name: Combine direct and automatically generated reverse zones
   ansible.builtin.set_fact:
     bind_managed_zones: "{{ _bind_deploy_authoritative_zones + bind_generated_reverse_zones }}"
+  when: ansible_run_tags | difference(['routes-recover', 'never']) | length > 0
   tags: [always]
 
 - name: Validate named inputs

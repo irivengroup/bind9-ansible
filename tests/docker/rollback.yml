@@ -5,6 +5,10 @@
   any_errors_fatal: true
   gather_facts: false
   tasks:
+    - name: Resolve current peer interfaces through canonical discovery
+      ansible.builtin.include_role:
+        name: bind9
+        tasks_from: tasks.d/site_peers.yml
     - name: Simulate a failed enclosing operation after real additions
       block:
         - name: Apply new routes under the canonical deferred journal

@@ -98,7 +98,7 @@ class HibernateIntegration(LoopbackIntegration):
                 for native in ('false', 'true'):
                     environment['ANSIBLE_JINJA2_NATIVE'] = native
                     self.invoke(['ansible-playbook', '-i', 'localhost,', str(play)], environment)
-                self.invoke(['bash', str(self.role / 'files/named-healthcheck.sh'), '127.0.0.1', '.'], environment)
+                self.invoke(['bash', str(self.role / 'files/bind-healthcheck.sh'), '127.0.0.1', '.'], environment)
             finally:
                 if daemon.poll() is None:
                     daemon.terminate()

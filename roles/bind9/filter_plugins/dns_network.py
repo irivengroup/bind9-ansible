@@ -34,11 +34,6 @@ class DnsNetwork:
         return list(links.values())
 
     @staticmethod
-    def requires_discovery(front, back, selected_interfaces, explicit_admin):
-        """Keep the legacy explicit FRONT/BACK management path compatible."""
-        return selected_interfaces or explicit_admin or not front or not back or front == back
-
-    @staticmethod
     def unicast(value):
         if not isinstance(value, str):
             return False
@@ -78,42 +73,54 @@ class DnsNetwork:
             return requested
         raise ValueError('Specify one local IPv4 for listening interface ' + device)
 
-    def listeners(self, selection, front, back, admin):
-        if selection is None:
-            if len(self.devices) == 1:
-                device = self.owners[admin]
-                return {device: admin}
-            if front not in self.owners or back not in self.owners:
-                raise ValueError('Declare bind_listen_interfaces on a server with multiple IPv4 interfaces')
-            names = [self.owners[front], self.owners[back]]
-            if names[0] == names[1]:
-                raise ValueError('Specify bind_listen_interfaces when FRONT and BACK share an interface')
-            return dict(zip(names, (front, back)))
+    @classmethod
+    def declared_listeners(cls, entries):
+        """Normalize objects without trusting their names, IPv4s or DNS roles.
 
-        if isinstance(selection, list):
-            if any(not isinstance(name, str) for name in selection) or len(selection) != len(set(selection)):
-                raise ValueError('bind_listen_interfaces must name each listening interface once')
-            selection = dict.fromkeys(selection)
-        if not isinstance(selection, dict) or not selection:
-            raise ValueError('bind_listen_interfaces must be a nonempty list or mapping')
-        if any(not isinstance(name, str) or name not in self.devices for name in selection):
+        Keep the caller's inventory immutable. A scope labels a DNS role;
+        ADMIN remains the independently verified local SSH endpoint.
+        """
+        selection, scopes = {}, {}
+        for entry in entries:
+            if not isinstance(entry, dict) or set(entry) - {'name', 'ipaddress', 'scope'}:
+                raise ValueError('Listening interface entries allow only name, ipaddress and scope')
+            name = entry.get('name')
+            if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,15}', name):
+                raise ValueError('Each listening interface entry requires a valid name')
+            if name in selection:
+                raise ValueError('Declare each listening interface once')
+            if 'ipaddress' in entry and not cls.unicast(entry['ipaddress']):
+                raise ValueError('Listening ipaddress must be a canonical unicast IPv4')
+            if 'scope' in entry:
+                scope = entry['scope']
+                if not isinstance(scope, str) or scope not in ('front', 'back'):
+                    raise ValueError('Listening scope must be front or back; ADMIN is the SSH endpoint')
+                if scope in scopes:
+                    raise ValueError('Declare each front/back scope once')
+                scopes[scope] = name
+            selection[name] = entry.get('ipaddress')
+        return selection, scopes
+
+    def listeners(self, selection):
+        """Resolve the sole supported declaration against observed local IPv4s."""
+        if not isinstance(selection, list) or not selection:
+            raise ValueError('bind_listen_interfaces must be a nonempty list of interface objects')
+        selection, scopes = self.declared_listeners(selection)
+        if any(name not in self.devices for name in selection):
             raise ValueError('Each listening interface must have an active local IPv4 address')
-        return {device: self.address_on(device, address) for device, address in selection.items()}
+        return {device: self.address_on(device, address) for device, address in selection.items()}, scopes
 
-    def resolve(self, selection, front, back, admin):
+    def resolve(self, selection, admin):
+        """Derive DNS roles solely from listener objects; ADMIN comes from SSH."""
         if not self.unicast(admin) or admin not in self.owners:
             raise ValueError('The SSH endpoint must be a local IPv4 (set bind_admin_ip when using a hostname)')
-        for address in (front, back):
-            if address is not None and (not self.unicast(address) or address not in self.owners):
-                raise ValueError('Configured FRONT and BACK addresses must be local IPv4 addresses')
-        dns = self.listeners(selection, front, back, admin)
+        dns, scopes = self.listeners(selection)
         if len(dns) == 1:
-            address = next(iter(dns.values()))
-            if any(role is not None and role != address for role in (front, back)):
-                raise ValueError('FRONT and BACK must use the sole DNS listener')
-            front = back = address
-        elif front == back or front not in dns.values() or back not in dns.values():
-            raise ValueError('Choose distinct FRONT and BACK IPv4 addresses from the DNS listeners')
+            front = back = next(iter(dns.values()))
+        else:
+            if set(scopes) != {'front', 'back'}:
+                raise ValueError('Declare exactly one front scope and one back scope with multiple listeners')
+            front, back = dns[scopes['front']], dns[scopes['back']]
         front_device, back_device, admin_device = (self.owners[address] for address in (front, back, admin))
         return {
             'front': front, 'back': back, 'admin': admin, 'listeners': list(dns.values()),
@@ -138,8 +145,8 @@ class FilterModule:
 
     def filters(self):
         return {'dns_network_resolve': self.resolve, 'dns_network_peer_valid': DnsNetwork.validate_pair,
-                'dns_network_required': DnsNetwork.requires_discovery, 'dns_ipv4_links': DnsNetwork.ipv4_links}
+                'dns_ipv4_links': DnsNetwork.ipv4_links}
 
     @staticmethod
-    def resolve(links, selection, front, back, admin):
-        return DnsNetwork(links).resolve(selection, front, back, admin)
+    def resolve(links, selection, admin):
+        return DnsNetwork(links).resolve(selection, admin)

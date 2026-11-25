@@ -101,6 +101,13 @@ ansible-playbook -i inventory/prod/hosts.ini playbooks/bind9-deploy.yml \
 
 La commande reprend uniquement le journal `front-routes.pending/`. Elle ne supprime pas un journal absent ou dangereux pour repartir artificiellement. Un conflit nécessite une réconciliation opérateur des seules routes concernées. Ne pas effacer les journaux pour forcer une exécution.
 
+Avec le seul tag `routes-recover`, le rôle ne recompile pas les ressources DNS
+et ne réclame ni les paramètres clients/DNSSEC courants ni des faits FRONT/BACK
+conservés par un appel précédent. La découverte DNS des deux pairs est ignorée.
+Le moteur de reprise conserve ses propres observations noyau, la protection
+d'ADMIN, les contrôles du journal et le refus d'une restauration ambiguë ou
+incomplète. Cette séparation ne réduit aucun contrôle du déploiement DNS.
+
 Une restauration de BIND n’annule pas des routes déjà committées. Retirer un client de l’inventaire ne supprime pas sa route historique : le fonctionnement reste additif.
 
 L’initialisation concurrente du dossier d’état est acceptée seulement si le dossier apparu est ensuite reconnu root `0700`, sans lien ; aucun droit existant n’est corrigé aveuglément. Les preuves, limites et parties impactées figurent dans [VERIFICATION_RESILIENCE_PERFORMANCE.md](../../qualification/VERIFICATION_RESILIENCE_PERFORMANCE.md). La [refonte antérieure](../../historique/REFONTE_ROUTES_MANAGEMENT.md) conserve sa traçabilité. La recette sur vos serveurs RHEL reste nécessaire.

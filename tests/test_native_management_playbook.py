@@ -11,6 +11,7 @@ from native_management_runner import NativeManagementPlayRun
 from test_management import CONTEXT, M
 from test_native_directories import named_identity
 from test_native_management_workflow import BATCH, READ, ManagementWorkflow
+from test_dns_network import modeled_management_interfaces
 
 pytestmark = pytest.mark.skipif(os.name != 'posix' or os.environ.get('BIND9_NATIVE_STATE_LAB') != '1',
                                reason='Requires an explicitly enabled disconnected clean Linux root')
@@ -22,17 +23,21 @@ class ManagementPlaybook:
     def __init__(self, folder):
         self.folder = folder
         self.files = ManagementWorkflow(folder)
-        self.hosts = {name: dict(bind_environment='test', bind_site_name='site',
-            bind_front_ip='192.0.2.' + suffix, bind_back_ip='10.0.0.' + suffix)
-            for name, suffix in [('localhost', '11'), ('peer', '12')]}
+        self.network_bin = folder / 'network';self.network_bin.mkdir()
+        self.hosts = modeled_management_interfaces(self.network_bin)
+        for host in self.hosts.values():host.update(bind_environment='test',bind_site_name='site')
         self.groups = dict(site=['localhost', 'peer'], dns_primary=['localhost'], dns_secondary=['peer'],
                            dns_deployment_order=['localhost', 'peer'])
 
     def approvals(self):
         result = dict(bind_manage_checksums={}, bind_manage_plan_checksums={})
+        # The public wrapper now resolves this same protected context before
+        # preview/apply. An approval for a different listener set must fail.
+        addresses = [entry['ipaddress'] for host in self.hosts.values()
+                     for entry in host['bind_listen_interfaces']]
         for name in self.hosts:
             context = dict(CONTEXT, primary=name == 'localhost', named_gid=grp.getgrnam('named').gr_gid,
-                           backup_root='/var/backups/Bind9-Ansible/bind')
+                           backup_root='/var/backups/Bind9-Ansible/bind', service_addresses=addresses)
             manager = M.BatchManager(BATCH, context)
             with manager.operation():
                 preview = manager.run()
@@ -60,10 +65,12 @@ class ManagementPlaybook:
 
 
 @pytest.fixture
-def playbook(tmp_path):
+def playbook(tmp_path, monkeypatch):
     with NativeFilesystemScope(NativeManagementPlayRun):
         named_identity()
-        yield ManagementPlaybook(tmp_path)
+        model = ManagementPlaybook(tmp_path)
+        monkeypatch.setenv('PATH',str(model.network_bin)+os.pathsep+os.environ['PATH'])
+        yield model
 
 
 @pytest.mark.parametrize('batch', [False, True])

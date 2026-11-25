@@ -16,7 +16,7 @@ from test_native_health import answer
 
 pytestmark = pytest.mark.skipif(os.name != 'posix' or os.environ.get('BIND9_NATIVE_STATE_LAB') != '1',
                                reason='Requires an explicitly enabled disconnected clean Linux root')
-SCRIPT = Path(__file__).resolve().parents[1] / 'roles/bind9/files/named-healthcheck.sh'
+SCRIPT = Path(__file__).resolve().parents[1] / 'roles/bind9/files/bind-healthcheck.sh'
 BACK = '192.0.2.11'
 
 
@@ -64,7 +64,7 @@ def test_periodic_monitor_refuses_missing_address_before_any_external_command(tm
     replies, keys = protocol([])
     result, calls = invoke(tmp_path, replies, [])
     assert result.returncode == 2 and result.stdout == ''
-    assert result.stderr.startswith('usage: named-healthcheck ')
+    assert result.stderr.startswith('usage: bind-healthcheck ')
     assert calls == []
 
 

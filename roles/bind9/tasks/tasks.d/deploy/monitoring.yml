@@ -1,8 +1,28 @@
 ---
+# The previous role owned this exact binary. Refuse foreign replacements;
+# retire it only after the replacement and the existing timer are installed.
+- name: Inspect the obsolete healthcheck executable without following links
+  ansible.builtin.stat:
+    path: /usr/local/sbin/named-healthcheck
+    follow: false
+    checksum_algorithm: sha256
+  register: _bind_legacy_healthcheck
+
+- name: Require the unchanged role-owned predecessor before retirement
+  ansible.builtin.assert:
+    that:
+      - _bind_legacy_healthcheck.stat.isreg | default(false)
+      - _bind_legacy_healthcheck.stat.uid | default(-1) == 0
+      - _bind_legacy_healthcheck.stat.gid | default(-1) == 0
+      - _bind_legacy_healthcheck.stat.mode | default('') == '0750'
+      - _bind_legacy_healthcheck.stat.checksum | default('') == '2cb985a0144e8bd796c6a2167e6fbe4c2aa44693ad8945868a252445cb2f0474'
+    fail_msg: 'The obsolete healthcheck is not the unchanged role-owned predecessor; preserve it and resolve its ownership before migration.'
+  when: _bind_legacy_healthcheck.stat.exists
+
 - name: Install local DNS healthcheck
   ansible.builtin.copy:
-    src: named-healthcheck.sh
-    dest: /usr/local/sbin/named-healthcheck
+    src: bind-healthcheck.sh
+    dest: /usr/local/sbin/bind-healthcheck
     owner: root
     group: root
     mode: '0750'
@@ -37,3 +57,9 @@
     enabled: true
     state: started
     daemon_reload: true
+
+- name: Retire the verified obsolete healthcheck executable
+  ansible.builtin.file:
+    path: /usr/local/sbin/named-healthcheck
+    state: absent
+  when: _bind_legacy_healthcheck.stat.exists

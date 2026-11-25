@@ -129,12 +129,14 @@ def test_real_role_inventory_retains_all_yaml_and_unmeasured_surfaces():
     raw = {path.relative_to(ROOT).as_posix(): census(yaml.compose(path.read_text(encoding='utf-8')))
         for folder in ('roles/bind9', 'playbooks') for path in (ROOT / folder).rglob('*.yml')}
     # Include both tasks and every predicate that protects packaged BIND data.
-    # The two resource files add seven actions; their two canonical imports
-    # add two more. No previously inventoried YAML surface is removed.
-    assert sum(row[0] for row in raw.values()) == 281
-    # Seven new resource guards and the ordinary-RDATA guard add eight
-    # predicates to the independently counted pre-change total of 332.
-    assert sum(row[1] for row in raw.values()) == 340
+    # The obsolete topology-selector task is removed from the prior 281.
+    # All remaining tasks still belong to this independent full-tree census.
+    assert sum(row[0] for row in raw.values()) == 281 - 1 + 3
+    # Remove its obsolete outer guard, then add the five explicit DNS-context
+    # guards that keep journal recovery independent of current DNS inputs.
+    # Five predecessor ownership predicates and two applicability guards are
+    # added by the guarded retirement of the renamed monitoring executable.
+    assert sum(row[1] for row in raw.values()) == 340 - 1 + 5 + 5 + 2
     assert {name: len(component['tasks']) for name, component in inventory.components.items()} == {
         name: row[0] for name, row in raw.items()}
     assert len(inventory.predicates) == sum(row[1] for row in raw.values())

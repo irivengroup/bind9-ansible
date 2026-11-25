@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+from hashlib import sha256
 
 import pytest
 
@@ -108,12 +109,12 @@ def test_native_monitor_installation_preserves_source_and_renders_only_configure
                  'ansible_distribution_major_version': major}
     status, result = NativeProvisionRun('tasks.d/deploy/monitoring.yml', variables).run()
     assert status == 0 and result.failed == []
-    executable = Path('/usr/local/sbin/named-healthcheck')
-    assert executable.read_bytes() == (ROLE / 'files/named-healthcheck.sh').read_bytes()
+    executable = Path('/usr/local/sbin/bind-healthcheck')
+    assert executable.read_bytes() == (ROLE / 'files/bind-healthcheck.sh').read_bytes()
     assert executable.stat().st_mode & 0o777 == 0o750
     unit = Path('/etc/systemd/system/named-healthcheck.service').read_text(encoding='utf-8')
     command, = [line.split('=', 1)[1] for line in unit.splitlines() if line.startswith('ExecStart=')]
-    assert shlex.split(command) == ['/usr/local/sbin/named-healthcheck', '192.0.2.11'] + zones
+    assert shlex.split(command) == ['/usr/local/sbin/bind-healthcheck', '192.0.2.11'] + zones
     assert 'User=root' in unit.splitlines()
     assert 'ProtectHome=yes' in unit
     assert ('ProtectSystem=full' in unit.splitlines()) is (major == '7')
@@ -139,3 +140,54 @@ def test_native_handler_restarts_only_for_changed_unit_definitions(runtime, fiel
     operation = 'reloaded' if field is None else 'restarted'
     assert {'name': 'named', 'state': operation} in operations
     assert sum(item.get('name') == 'named' for item in operations) == 1
+
+
+def test_native_monitor_retires_only_the_verified_previous_executable(runtime):
+    """A real upgrade leaves one executable and reuses the existing timer."""
+    source = (ROLE / 'files/bind-healthcheck.sh').read_bytes()
+    previous = source.replace(b'usage: bind-healthcheck ', b'usage: named-healthcheck ')
+    assert sha256(previous).hexdigest() == '2cb985a0144e8bd796c6a2167e6fbe4c2aa44693ad8945868a252445cb2f0474'
+    legacy = Path('/usr/local/sbin/named-healthcheck')
+    legacy.write_bytes(previous)
+    legacy.chmod(0o750)
+    variables = {'bind_back_ip': '192.0.2.11', 'bind_managed_zones': []}
+    status, result = NativeProvisionRun('tasks.d/deploy/monitoring.yml', variables).run()
+    assert status == 0 and not result.failed
+    assert not legacy.exists()
+    assert Path('/usr/local/sbin/bind-healthcheck').read_bytes() == source
+    assert set(json.loads(runtime.read_text())['units']) == {'named', 'named-healthcheck.timer'}
+    status, result = NativeProvisionRun('tasks.d/deploy/monitoring.yml', variables).run()
+    assert status == 0 and not result.failed and not legacy.exists()
+
+
+@pytest.mark.parametrize('defect', ['directory', 'symlink', 'owner', 'group', 'mode', 'contents'])
+def test_native_monitor_preserves_foreign_predecessors_before_any_installation(runtime, tmp_path, defect):
+    """Cleanup cannot recursively remove a directory or unlink an operator file."""
+    legacy = Path('/usr/local/sbin/named-healthcheck')
+    witness = tmp_path / 'operator'
+    witness.write_bytes(b'operator evidence')
+    previous = (ROLE / 'files/bind-healthcheck.sh').read_bytes().replace(
+        b'usage: bind-healthcheck ', b'usage: named-healthcheck ')
+    if defect == 'directory':
+        legacy.mkdir()
+        (legacy / 'witness').write_bytes(b'private directory evidence')
+    elif defect == 'symlink':
+        legacy.symlink_to(witness)
+    else:
+        legacy.write_bytes(previous if defect != 'contents' else b'operator replacement')
+        legacy.chmod(0o700 if defect == 'mode' else 0o750)
+        if defect == 'owner':os.chown(legacy, 65534, 0)
+        if defect == 'group':os.chown(legacy, 0, 65534)
+    before = legacy.lstat()
+    status, result = NativeProvisionRun('tasks.d/deploy/monitoring.yml',
+        {'bind_back_ip': '192.0.2.11', 'bind_managed_zones': []}).run()
+    assert status == 2 and result.failed == ['Require the unchanged role-owned predecessor before retirement']
+    after = legacy.lstat()
+    fields = ('st_ino', 'st_dev', 'st_mode', 'st_uid', 'st_gid', 'st_size', 'st_mtime_ns')
+    assert tuple(getattr(after, field) for field in fields) == tuple(getattr(before, field) for field in fields)
+    assert witness.read_bytes() == b'operator evidence'
+    assert not Path('/usr/local/sbin/bind-healthcheck').exists()
+    assert not Path('/etc/systemd/system/named-healthcheck.service').exists()
+    assert json.loads(runtime.read_text())['operations'] == []
+    if defect == 'directory':assert (legacy / 'witness').read_bytes() == b'private directory evidence'
+    elif defect != 'symlink':assert legacy.read_bytes() == (previous if defect != 'contents' else b'operator replacement')

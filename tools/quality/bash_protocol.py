@@ -154,9 +154,9 @@ class NativeTerminalPairs:
 class NativeBashProfile:
     """Validate source-pinned native syntax and independent runtime facts."""
 
-    COMPONENT = 'roles/bind9/files/named-healthcheck.sh'
-    SOURCE_SHA256 = '2cb985a0144e8bd796c6a2167e6fbe4c2aa44693ad8945868a252445cb2f0474'
-    INVENTORY_SHA256 = '723c5d40189291ad44c91204c359e75e73cee4ab4315797e06dc34dff659824f'
+    COMPONENT = 'roles/bind9/files/bind-healthcheck.sh'
+    SOURCE_SHA256 = '564a0ffd5d5fecc07782b5a8b9917f55ab07e028c1b79f9b7a244ba59520f6aa'
+    INVENTORY_SHA256 = 'eb0d69890a4fc9a6a1e0a06e5bcff329c05f6c4c2247f1393ef4ab151c3b1323'
     PATCH_SHA256 = '7fe6500029a0a34f04673079acccb5c51618baf62a4337dc98c9ae8afd777e14'
     METRICS = ('statements', 'branches', 'functions', 'lines', 'conditions')
     EVENT_MODE = 'sets'

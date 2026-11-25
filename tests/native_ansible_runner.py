@@ -441,7 +441,8 @@ class NativeProvisionRun(NativeServiceRun):
     SAFE_ACTIONS = NativeServiceRun.SAFE_ACTIONS | {'ansible.builtin.stat', 'ansible.builtin.file',
                                                   'ansible.builtin.copy', 'ansible.builtin.template'}
     FILES = {'tasks.d/named_runtime.yml', 'tasks.d/dnssec_prepare.yml', 'tasks.d/deploy/monitoring.yml'}
-    TARGETS = NativeSnapshotRun.TARGETS + ('/etc/rndc.key', '/usr/local/sbin/named-healthcheck',
+    TARGETS = NativeSnapshotRun.TARGETS + ('/etc/rndc.key', '/usr/local/sbin/bind-healthcheck',
+        '/usr/local/sbin/named-healthcheck',
         '/etc/systemd/system/named-healthcheck.service', '/etc/systemd/system/named-healthcheck.timer')
     ROLE_ASSETS = True
     LOAD_HANDLERS = True

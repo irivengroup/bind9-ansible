@@ -49,5 +49,6 @@
         - tasks.d/deploy/service.yml
         - tasks.d/dnssec_activate.yml
         - tasks.d/deploy/health.yml
+        - tasks.d/deploy/monitoring.yml
       loop_control:
         loop_var: component

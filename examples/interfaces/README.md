@@ -14,10 +14,14 @@ Les variables communes et les secrets restent dans leurs emplacements habituels.
 | Sélection explicite avec plusieurs IPv4 | [site1-dns01.yml](plusieurs-ipv4/host_vars/site1-dns01.yml) | [site1-dns02.yml](plusieurs-ipv4/host_vars/site1-dns02.yml) |
 | SSH par nom et IPv4 ADMIN explicite | [site1-dns01.yml](ssh-par-nom/host_vars/site1-dns01.yml) | [site1-dns02.yml](ssh-par-nom/host_vars/site1-dns02.yml) |
 
-Les inventaires dev/preprod/prod existants gardent leurs adresses et leur
-sélection FRONT/BACK par IP. Aucun nom d’interface fictif ne leur est imposé.
-Pour une seule écoute, supprimer les anciennes valeurs FRONT/BACK incompatibles,
-y compris celles héritées de group_vars. Une liste d’interfaces vide est refusée.
+Tous ces fichiers et les inventaires dev/preprod/prod utilisent la même liste
+d'objets `bind_listen_interfaces`. `name` est obligatoire ; `ipaddress` choisit
+une IPv4 locale et `scope: front/back` désigne le rôle avec plusieurs écoutes.
+Une entrée unique peut contenir seulement `name` si l'interface n'a qu'une IPv4
+utilisable. Les adresses des inventaires sont conservées. Les noms des interfaces
+restent des paramètres à adapter ; aucun n'est imposé dans le rôle.
+Ne pas répéter `bind_front_ip` ou `bind_back_ip` dans les nouveaux host_vars,
+y compris via group_vars. Une liste vide et les déclarations ambiguës sont refusées.
 
 La sélection des interfaces ne configure pas leurs IP. Les routes FRONT restent
 désactivées par défaut ; elles ne s’appliquent qu’avec trois interfaces distinctes

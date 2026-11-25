@@ -6,6 +6,11 @@ composants canoniques, leurs refus, les paquets TCP/UDP et un redémarrage
 Docker. Elle ne qualifie ni RHEL, ni SELinux enforcing, ni un reboot d'hôte.
 Les deux playbooks publics conservent leurs contrôles de distribution.
 
+Le laboratoire active aussi le moniteur périodique : il vérifie le timer,
+exécute le vrai service avec `/usr/local/sbin/bind-healthcheck` avant et après
+restart, puis compare les empreintes et permissions du script et de ses unités.
+Les noms des unités systemd restent stables ; aucun second timer n'est créé.
+
 Le lanceur nécessite Python 3.11 et Docker. Il crée trois réseaux internes,
 deux nœuds et un contrôleur. Il ne publie aucun port, ne monte pas le socket
 Docker et ne modifie aucun réseau, pare-feu ou paramètre du noyau de l'hôte.

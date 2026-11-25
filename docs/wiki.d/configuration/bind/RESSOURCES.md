@@ -23,6 +23,8 @@ Un lot de déploiement emploie `action: create` ou `action: apply`. Les opérati
 
 Par défaut, la requête est `{resource: batch, action: create, operations: []}` : aucune ressource personnalisée. Une liste vide est admise uniquement pour ce déploiement explicite. Un lot non vide est limité à **64 opérations et 256 Kio**, comme la gestion. Les lectures et listings appartiennent au playbook de gestion. Les mêmes ressources ne peuvent pas être ciblées deux fois dans un lot ; les doublons de suffixes ou de RRsets, y compris leurs variantes de casse, sont refusés.
 
+Les données non compatibles JSON ou dont l'imbrication dépasse la capacité du sérialiseur reçoivent le même refus de validation contrôlé pour une ressource seule, un lot et un déploiement. Ce refus intervient avant toute opération cible ; il n'affiche pas le contenu de la requête.
+
 ## Types de ressources
 
 | Ressource | Champs et comportement |

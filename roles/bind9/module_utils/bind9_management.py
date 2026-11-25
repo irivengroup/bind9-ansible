@@ -2220,7 +2220,8 @@ class BatchManager(Manager):
             raise ManagementError('A batch requires 1 to 64 operations')
         try:
             encoded = json.dumps(operations, sort_keys=True, allow_nan=False).encode('utf-8')
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, RecursionError):
+            # Encoder depth failures use the same safe boundary as invalid JSON.
             raise ManagementError('Batch operations must contain ordinary JSON-compatible values')
         if len(encoded) > self.MAX_REQUEST_BYTES:
             raise ManagementError('Batch operations exceed the 256 KiB request bound')
