@@ -1,11 +1,11 @@
 {
   "project": "DNSZIBO / Bind9-Ansible",
-  "release": "local-20261125-documentation-harmonisee",
+  "release": "20261126-rocky-vendor-fixtures",
   "base_commit": "95d4d2d5bfe4a28372ff29b1eee7985bd142b77a",
   "git_commit_created": false,
   "cdc_source": "CDC_RESSOURCES_INTERFACES_20261123.md",
   "cdc_formal_version": null,
-  "request_date": "2026-11-25",
+  "request_date": "2026-11-26",
   "source_archive": "bind9-ansible-v4.zip",
   "source_manifest": "SOURCE-MANIFEST.sha256",
   "publication_target": "D:/PROJECTS/LABS/dnszibo",
@@ -14,7 +14,7 @@
   "production_ready": false,
   "qualification": {
     "evidence_location": "External receipts bound to the exact source ZIP SHA-256",
-    "report": "RAPPORT_HARMONISATION_DOCUMENTATION_20261125.md",
+    "report": "RAPPORT_QUALIFICATION_ROCKY_20261126.md",
     "threshold_basis_points": 9999,
     "metrics": [
       "statements",
@@ -24,7 +24,7 @@
       "conditions"
     ],
     "embedded_measurements": false,
-    "scope": "Documentation alignment; exact production, tests, instrumentation and controller configuration unchanged from the qualified predecessor. Existing measurements remain bound to their original receipts."
+    "scope": "Controller qualification on three Rocky releases. The linked operational reports retain the standard Docker and Kata verdicts."
   },
   "contract_changes": {
     "management_request": "bind_resources_manage",
@@ -229,5 +229,10 @@
     "registry_sha256": "52a1b8d3a42dae6a223772b687dc775a4c289fb9fb3004dfb54da13dfd36a568",
     "remote_push": false,
     "external_patch": "CORRECTIF_CI_45606014034.patch"
+  },
+  "ci_apt": {
+    "parent": "8158170ff26d4c5c91fe648d3804080b98a29e2a",
+    "previous_source_archive_sha256": "5976de29f008cf20714344b813a5ea6d87d7e868bf1657fcfa815b4c2483656b",
+    "build_recipe": "tools/quality/Dockerfile.qa"
   }
 }

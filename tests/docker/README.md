@@ -11,7 +11,7 @@ exécute le vrai service avec `/usr/local/sbin/bind-healthcheck` avant et après
 restart, puis compare les empreintes et permissions du script et de ses unités.
 Les noms des unités systemd restent stables ; aucun second timer n'est créé.
 
-Le lanceur nécessite Python 3.11 et Docker. Il crée trois réseaux internes,
+Le lanceur nécessite Python 3.11, Docker Engine 28 ou ultérieur, cgroup v2, seccomp et une politique SELinux ou AppArmor active. Docker prépare la sous-arborescence privée du nœud pour systemd. Le nœud vérifie cette délégation au démarrage et conserve sa console de service. Il crée trois réseaux internes,
 deux nœuds et un contrôleur. Il ne publie aucun port, ne monte pas le socket
 Docker et ne modifie aucun réseau, pare-feu ou paramètre du noyau de l'hôte.
 Les ressources portent un identifiant et un label propres ; leur suppression

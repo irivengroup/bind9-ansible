@@ -13,7 +13,7 @@ from ansible.playbook.play import Play
 from ansible.plugins.loader import module_loader, module_utils_loader
 import yaml
 
-from native_ansible_runner import NativeContainerRun, NativeMigrationRun, NativeProvisionRun, NativeTaskRun
+from native_ansible_runner import NativeContainerRun, NativeMigrationRun, NativePolicyParents, NativeProvisionRun, NativeTaskRun
 
 
 class NativeTransactionRun(NativeContainerRun):
@@ -35,7 +35,7 @@ class NativeTransactionRun(NativeContainerRun):
     TARGETS = tuple(dict.fromkeys(NativeProvisionRun.TARGETS + NativeMigrationRun.TARGETS + COMMANDS + (
         '/usr/local/sbin/named-transaction', '/usr/local/sbin/reverse-serial',
         '/var/log/named', '/var/lib/Bind9-Ansible', '/etc/profile.d/bind9-sbin-path.sh',
-        '/etc/named.rfc1912.zones', '/etc/crypto-policies')))
+        '/etc/named.rfc1912.zones', str(NativePolicyParents.FILE))))
     NAMES = (
         'Back up full BIND configuration before changes',
         'Prepare managed directories',

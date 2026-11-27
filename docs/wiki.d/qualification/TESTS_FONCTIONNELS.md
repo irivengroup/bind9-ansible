@@ -103,6 +103,8 @@ Attendu : sortie FRONT et passerelle prévue, sans changement des chemins ADM/BA
 
 ## Loopback et zones natives
 
+Les tests qui simulent un fichier de politique BIND absent utilisent une image de mesure jetable, sans démon BIND. Ils réservent uniquement `/etc/crypto-policies/back-ends/bind.config`. Un fichier ou un lien déjà présent à cet emplacement fait échouer la préparation. Les autres politiques cryptographiques et les répertoires fournis par Rocky sont conservés. Les images des contrôles avec le véritable analyseur BIND et celles de la recette des services utilisent le lien fourni par la distribution.
+
 ```bash
 dig -4 -b 127.0.0.1 @127.0.0.1 localhost A +norecurse
 dig -4 -b 127.0.0.1 @127.0.0.1 localhost A +tcp +norecurse

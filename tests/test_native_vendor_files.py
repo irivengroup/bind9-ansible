@@ -4,17 +4,62 @@ from pathlib import Path
 
 import pytest
 
-from native_ansible_runner import NativeFilesystemScope, NativeVendorRun
+from native_ansible_runner import NativeFilesystemScope, NativePolicyParents, NativeVendorRun
 
 pytestmark = pytest.mark.skipif(os.name != 'posix' or os.environ.get('BIND9_NATIVE_STATE_LAB') != '1',
                                reason='Requires an explicitly enabled disconnected clean Linux root')
+
+
+@pytest.mark.parametrize('installed', [True, False])
+def test_policy_scope_preserves_vendor_siblings_and_releases_only_its_own_directories(tmp_path, monkeypatch, installed):
+    leaf = tmp_path / 'crypto-policies/back-ends/bind.config'
+    monkeypatch.setattr(NativePolicyParents, 'FILE', leaf)
+    class ScopedVendorRun(NativeVendorRun):
+        TARGETS = (str(leaf),)
+    other = leaf.parent / 'openssl.config'
+    if installed:
+        other.parent.mkdir(parents=True)
+        other.write_bytes(b'untouched vendor setting')
+        identity = (other.stat().st_dev, other.stat().st_ino, other.stat().st_mtime_ns)
+    with NativeFilesystemScope(ScopedVendorRun):
+        leaf.write_bytes(b'synthetic BIND input')
+    assert not os.path.lexists(leaf)
+    if installed:
+        assert other.read_bytes() == b'untouched vendor setting'
+        assert (other.stat().st_dev, other.stat().st_ino, other.stat().st_mtime_ns) == identity
+    else:
+        assert not leaf.parent.parent.exists()
+
+
+def test_policy_scope_refuses_an_existing_backend_and_an_indirect_parent(tmp_path, monkeypatch):
+    leaf = tmp_path / 'crypto-policies/back-ends/bind.config'
+    monkeypatch.setattr(NativePolicyParents, 'FILE', leaf)
+    class ScopedVendorRun(NativeVendorRun):
+        TARGETS = (str(leaf),)
+    target = tmp_path / 'distribution-bind.txt'
+    target.write_bytes(b'untouched vendor setting')
+    leaf.parent.mkdir(parents=True)
+    leaf.symlink_to(target)
+    with pytest.raises(ValueError, match='empty test-owned roots'):
+        with NativeFilesystemScope(ScopedVendorRun):
+            pytest.fail('A pre-existing distribution symlink was accepted')
+    assert leaf.readlink() == target and target.read_bytes() == b'untouched vendor setting'
+    leaf.unlink()
+    leaf.parent.rmdir()
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    leaf.parent.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match='Unsafe parent'):
+        with NativeFilesystemScope(ScopedVendorRun):
+            pytest.fail('An indirect policy parent was accepted')
+    assert leaf.parent.is_symlink() and not list(outside.iterdir())
 
 
 @pytest.fixture
 def vendor_tree(tmp_path):
     files = [Path('/etc/named.rfc1912.zones')] + [Path('/var/named') / name for name in
              ('named.localhost', 'named.loopback', 'named.empty')] + [
-             Path('/etc/crypto-policies/back-ends/bind.config'), Path('/etc/named.root.key')]
+             NativePolicyParents.FILE, Path('/etc/named.root.key')]
     with NativeFilesystemScope(NativeVendorRun):
         for path in files:
             path.parent.mkdir(parents=True, exist_ok=True)

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from native_ansible_runner import NativeFilesystemScope, NativeMigrationRun, NativeRecordedBoundary, NativeUnitBoundary
+from native_ansible_runner import NativeFilesystemScope, NativeMigrationRun, NativePolicyParents, NativeRecordedBoundary, NativeUnitBoundary
 from native_transaction_runner import NativeTransactionRun
 from test_native_directories import named_identity
 from test_native_health import replies as health_replies
@@ -123,8 +123,7 @@ def test_native_resource_customization_refusal_restores_the_entire_predeployment
     # readable includes let the real private module reach its protected-option
     # refusal, rather than failing earlier on an unrelated missing include.
     Path('/etc/named.rfc1912.zones').write_text('// owned transaction fixture include\n')
-    policy = Path('/etc/crypto-policies/back-ends/bind.config')
-    policy.parent.mkdir(parents=True)
+    policy = NativePolicyParents.FILE
     policy.write_text('// owned transaction fixture crypto include\n')
     with NativeRecordedBoundary(commands, NativeTransactionRun, replies()):
         status, result = NativeTransactionRun('tasks.d/deploy/main.yml', values,

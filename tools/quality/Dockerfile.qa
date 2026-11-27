@@ -1,10 +1,10 @@
 # Build-only tools never enter a managed server or the source distribution.
 # The named gnu-bash context must contain the independently hashed GNU archive.
 FROM python:3.11-slim@sha256:b27df5841f3355e9473f9a516d38a6783b6c8dfeacaf2d14a240f443b368ddb6 AS build
-RUN apt-get update \
+RUN apt-get -o APT::Update::Error-Mode=any update \
     && apt-get install -y --no-install-recommends \
-       gcc=4:14.2.0-1 make=4.4.1-2 patch=2.8-2 \
-       libc6-dev=2.41-12+deb13u4 libssl-dev=3.5.7-1~deb13u3 \
+       gcc=4:14.2.0-1 make=4.4.1-2 patch=2.8-2+deb13u1 \
+       libc6-dev=2.41-12+deb13u5 libssl-dev=3.5.9-1~deb13u1 \
     && rm -rf /var/lib/apt/lists/*
 COPY tools/quality/requirements-qa.lock /opt/qa/requirements-qa.lock
 RUN python -m pip --isolated install --index-url https://pypi.org/simple \
@@ -16,10 +16,10 @@ RUN python /opt/qa/native_bash/build.py --archive /opt/qa/bash-5.2.37.tar.gz --o
     || { find /opt/bind9-native-bash -maxdepth 1 -type f -name '*.log' -exec cat {} \; ; exit 1; }
 
 FROM python:3.11-slim@sha256:b27df5841f3355e9473f9a516d38a6783b6c8dfeacaf2d14a240f443b368ddb6 AS controller
-RUN apt-get update \
+RUN apt-get -o APT::Update::Error-Mode=any update \
     && apt-get install -y --no-install-recommends \
        openssh-client=1:10.0p1-7+deb13u4 openssh-server=1:10.0p1-7+deb13u4 \
-       util-linux=2.41-5 mount=2.41-5 libssl3t64=3.5.7-1~deb13u3 \
+       util-linux=2.41.5-0+deb13u1 mount=2.41.5-0+deb13u1 libssl3t64=3.5.9-1~deb13u1 \
     && rm -rf /var/lib/apt/lists/* \
     && find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*' -delete \
     && rmdir /run/sshd \
@@ -46,7 +46,7 @@ CMD ["python", "tools/quality/run_coverage_suite.py", "--root", "/src", "--outpu
 # Native semantic tests need genuine BIND parsing. Keep these tools out of the
 # controller: its filesystem fixtures must own otherwise absent system paths.
 FROM controller AS native-checker
-RUN apt-get update \
+RUN apt-get -o APT::Update::Error-Mode=any update \
     && apt-get install -y --no-install-recommends \
        bind9-utils=1:9.20.30-1~deb13u1 bind9-libs=1:9.20.30-1~deb13u1 \
     && rm -rf /var/lib/apt/lists/*

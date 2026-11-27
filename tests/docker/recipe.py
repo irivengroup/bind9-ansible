@@ -161,6 +161,16 @@ exit 1'''
                       '/etc/systemd/system/' + unit)
 
     def setup(self):
+        # Fail before provisioning networks when the engine cannot isolate init.
+        engine = self.command('node-cgroup-security', [
+            'info', '--format', '{{.CgroupVersion}} {{json .SecurityOptions}}']).strip()
+        version, security = engine.split(' ', 1)
+        policies = json.loads(security)
+        if version != '2' or not any(s.startswith('name=seccomp,') for s in policies):
+            raise ValueError('The systemd lab requires cgroup v2 and active Docker seccomp')
+        if not {'name=selinux', 'name=apparmor'}.intersection(policies):
+            raise ValueError('The systemd lab requires a Docker SELinux or AppArmor policy')
+        init_label = ['--security-opt', 'label=type:container_init_t'] if 'name=selinux' in policies else []
         for role, subnet in self.SUBNETS.items():
             self.create('network', self.networks[role], ['network', 'create', '--internal',
                 '--subnet', subnet, '--label', 'bind9.recipe=' + self.namespace, self.networks[role]])
@@ -175,7 +185,8 @@ exit 1'''
                 '--env', 'container=docker', '--env', 'SYSTEMD_LOG_LEVEL=warning',
                 '--env', 'BIND9_RECIPE_NODE_SUFFIX=' + suffix,
                 '--cgroupns', 'private', '--cap-add', 'SYS_ADMIN', '--cap-add', 'NET_ADMIN',
-                '--security-opt', 'seccomp=unconfined', '--tmpfs', '/run', '--tmpfs', '/run/lock',
+                '--security-opt', 'no-new-privileges=true', '--security-opt', 'writable-cgroups=true',
+                *init_label, '--tty', '--tmpfs', '/run', '--tmpfs', '/run/lock',
                 '--tmpfs', '/tmp', '--cpus', '2', '--memory', '1g',
                 '--stop-signal', 'SIGRTMIN+3', '--entrypoint', '/bin/bash', self.node_image,
                 '/opt/bind9-recipe-boot.sh']

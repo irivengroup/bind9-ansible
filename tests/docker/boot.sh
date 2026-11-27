@@ -28,6 +28,8 @@ for device in eth0 eth1 eth2; do ip link set dev "$device" up; done
 # Windows-to-container copies do not carry POSIX file modes. No profile is
 # rewritten: its exact bytes, UUID, routes and autoconnect setting survive boot.
 chmod 0600 /etc/NetworkManager/system-connections/bind9-lab-*.nmconnection
-mount -o remount,rw /sys/fs/cgroup
+# The engine delegates this node's cgroup subtree before PID 1 starts.
+[[ $(stat -fc %T /sys/fs/cgroup) == cgroup2fs && $(cat /proc/self/cgroup) == '0::/' ]]
+[[ -w /sys/fs/cgroup/cgroup.subtree_control ]]
 ssh-keygen -A
 exec /sbin/init

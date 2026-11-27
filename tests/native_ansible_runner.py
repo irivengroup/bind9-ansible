@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import stat
 import sys
 import tempfile
 
@@ -295,6 +296,54 @@ class NativeContainerRun(NativeTaskRun):
                          inventory_groups=inventory_groups)
 
 
+class NativePolicyParents:
+    """Preserve distribution-owned crypto directories and remove only empty ones created by this scope."""
+
+    FILE = Path('/etc/crypto-policies/back-ends/bind.config')
+
+    def __init__(self, leaf):
+        self.leaf = leaf
+        self.paths = (leaf.parent.parent, leaf.parent)
+        self.owned = []
+        self.identities = {}
+
+    @staticmethod
+    def identity(path):
+        info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise ValueError('Unsafe parent of the BIND policy fixture: ' + str(path))
+        return info.st_dev, info.st_ino
+
+    def reserve(self):
+        try:
+            base = self.paths[0].parent
+            self.identities[base] = self.identity(base)
+            for path in self.paths:
+                try:
+                    path.mkdir(mode=0o755)
+                except FileExistsError:
+                    pass
+                else:
+                    self.owned.append(path)
+                self.identities[path] = self.identity(path)
+            if os.path.lexists(self.leaf):
+                raise ValueError('Existing BIND policy is never a test-owned file')
+        except BaseException:
+            self.release()
+            raise
+
+    def verify(self):
+        for path, identity in self.identities.items():
+            if self.identity(path) != identity:
+                raise ValueError('BIND fixture parent changed during the test: ' + str(path))
+
+    def release(self):
+        self.verify()
+        for path in reversed(self.owned):
+            # A foreign entry must remain available for inspection.
+            path.rmdir()
+
+
 class NativeFilesystemScope:
     """Own exact fixture trees in a clean, disconnected disposable image.
 
@@ -309,15 +358,23 @@ class NativeFilesystemScope:
             raise ValueError('Native fixture roots must not overlap')
         if any(root.exists() or root.is_symlink() for root in self.roots):
             raise ValueError('Native fixture requires an image with empty test-owned roots')
+        self.policy = NativePolicyParents(NativePolicyParents.FILE) if NativePolicyParents.FILE in self.roots else None
 
     def __enter__(self):
+        if self.policy:
+            self.policy.reserve()
         return self.roots
 
     def __exit__(self, exc_type, exc_value, traceback):
+        if self.policy:
+            self.policy.verify()
         for root in self.roots:
             if root.is_symlink(): root.unlink()
+            elif root == NativePolicyParents.FILE and root.is_dir(): root.rmdir()
             elif root.is_dir(): shutil.rmtree(str(root))
             elif root.exists(): root.unlink()
+        if self.policy:
+            self.policy.release()
 
 
 class NativeLeaseRun(NativeContainerRun):
@@ -361,7 +418,7 @@ class NativeVendorRun(NativeContainerRun):
 
     SAFE_ACTIONS = NativeTaskRun.SAFE_ACTIONS | {'ansible.builtin.stat'}
     FILES = {'tasks.d/native_loopback.yml'}
-    TARGETS = ('/etc/named.rfc1912.zones', '/etc/named.root.key', '/var/named', '/etc/crypto-policies',
+    TARGETS = ('/etc/named.rfc1912.zones', '/etc/named.root.key', '/var/named', str(NativePolicyParents.FILE),
                '/usr/share/named')
 
 

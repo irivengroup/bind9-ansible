@@ -170,3 +170,49 @@ def test_optimized_recipe_entrypoints_refuse_before_privileged_work(script, opti
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
     assert result.returncode != 0
     assert b'Optimized Python is forbidden for the Docker validation recipe' in result.stderr
+
+
+class TestSystemdNodeDelegation:
+    """Check the actual create arguments before any Docker resource is provisioned."""
+
+    @staticmethod
+    def recipe(engine):
+        path = Path(__file__).resolve().parent / 'docker/recipe.py'
+        spec = importlib.util.spec_from_file_location('operational_recipe', path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        obj = module.DockerRecipe.__new__(module.DockerRecipe)
+        obj.SUBNETS = {}
+        obj.namespace = 'qa'
+        obj.nodes = {}
+        obj.networks = {k: k for k in ('adm', 'front', 'back')}
+        obj.node_image = 'qa-node'
+        obj.command = lambda *args: engine
+        return obj
+
+    @pytest.mark.parametrize('policy', ['selinux', 'apparmor'])
+    def test_init_uses_private_delegation_and_native_policy(self, policy):
+        obj = self.recipe('2 ' + json.dumps(['name=seccomp,profile=builtin', 'name=' + policy]))
+        commands = []
+
+        def first_node(kind, name, args):
+            commands.append(args)
+            raise StopIteration
+
+        obj.create = first_node
+        with pytest.raises(StopIteration):
+            obj.setup()
+        args, = commands
+        assert args[args.index('--cgroupns') + 1] == 'private'
+        options = {args[i + 1] for i, a in enumerate(args) if a == '--security-opt'}
+        required = {'writable-cgroups=true', 'no-new-privileges=true'}
+        if policy == 'selinux':
+            required.add('label=type:container_init_t')
+        assert options == required
+        assert '--tty' in args and '--privileged' not in args and '--volume' not in args
+
+    @pytest.mark.parametrize('engine', ['1 ["name=selinux","name=seccomp,profile=builtin"]',
+                                       '2 ["name=selinux"]', '2 ["name=seccomp,profile=builtin"]'])
+    def test_missing_runtime_is_rejected_before_provisioning(self, engine):
+        with pytest.raises(ValueError, match='systemd lab requires'):
+            self.recipe(engine).setup()
